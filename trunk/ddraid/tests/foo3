@@ -1,0 +1,2 @@
+sudo mount /dev/mapper/test /x
+ls -l /x
