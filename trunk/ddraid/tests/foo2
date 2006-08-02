@@ -1,2 +1,0 @@
-/sbin/mke2fs /dev/mapper/test -b 4096
-sh foo3
