@@ -1,8 +1,8 @@
 ddraid_binaries =  mkddraid ddraid-server ddraid-agent
-ddsnap_binaries =  mkddsnap ddsnap-server ddsnap-agent ddsnap
+ddsnap_binaries =  mkddsnap ddsnapd ddsnap-agent ddsnap
 binaries =  $(ddraid_binaries) $(ddsnap_binaries) devspam
 deps = Makefile trace.h buffer.h list.h sock.h
-ddsnap_deps = $(deps) ddsnap.server.h ../dm-ddsnap.h 
+ddsnap_deps = $(deps) ddsnapd.h ../dm-ddsnap.h 
 ddraid_deps = $(deps) ddraid.h ../dm-ddraid.h
 
 all: $(binaries)
@@ -25,17 +25,17 @@ ddraid-server: ddraid.c buffer.o $(ddraid_deps)
 ddraid-agent: ddraid.agent.c $(ddraid_deps)
 	cc -Wall ddraid.agent.c -lpthread -o ddraid-agent
 
-mkddsnap: ddsnap.server.c buffer.o $(ddsnap_deps)
-	cc -g -Wall ddsnap.server.c buffer.o -DCREATE -o mkddsnap -lpopt
+mkddsnap: ddsnapd.c buffer.o $(ddsnap_deps)
+	cc -g -Wall ddsnapd.c buffer.o -DCREATE -o mkddsnap -lpopt
 
-ddsnap-server: ddsnap.server.c buffer.o $(ddsnap_deps)
-	cc -g -Wall -D_FILE_OFFSET_BITS=64 ddsnap.server.c buffer.o -DSERVER -o ddsnap-server -lpopt
+ddsnapd: ddsnapd.c buffer.o $(ddsnap_deps)
+	cc -g -Wall -D_FILE_OFFSET_BITS=64 ddsnapd.c buffer.o -DSERVER -o ddsnapd -lpopt
 
 ddsnap-agent: ddsnap.agent.c $(ddsnap_deps)
 	cc -g -Wall ddsnap.agent.c -o ddsnap-agent
 
-ddsnap: ddsnap.control.c xdelta3.o delta.o $(ddsnap_deps)
-	cc -g -Wall xdelta3.o delta.o ddsnap.control.c -o ddsnap -lpopt
+ddsnap: ddsnap.c xdelta3.o delta.o $(ddsnap_deps)
+	cc -g -Wall xdelta3.o delta.o ddsnap.c -o ddsnap -lpopt
 
 devspam: devspam.c trace.h
 	cc -g -Wall devspam.c -o devspam
@@ -120,7 +120,7 @@ dd-init:
 	ln -s /dev/hdb2 /dev/test-snapstore || true
 	ln -s /dev/hdb1 /dev/test-origin || true
 #	insmod /src/2.6.17-rc6-dd/drivers/md/dm-ddsnap.ko || true
-	killall ddsnap-server || true
+	killall ddsnapd || true
 	killall ddsnap-agent || true
 	./mkddsnap /dev/test-snapstore /dev/test-origin 
 	/sbin/dmsetup remove_all || true
@@ -129,7 +129,7 @@ dd-agent:
 	./ddsnap-agent /tmp/control
 
 dd-server:
-	./ddsnap-server /dev/test-snapstore /dev/test-origin /tmp/control /tmp/server
+	./ddsnapd /dev/test-snapstore /dev/test-origin /tmp/control /tmp/server
 
 dd-create:
 	./ddsnap create-snapshot /tmp/server 0

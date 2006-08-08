@@ -30,7 +30,7 @@
 #include "sock.h"
 #include "list.h"
 #include "buffer.h"
-#include "ddsnap.server.h"
+#include "ddsnapd.h"
 #include "../dm-ddsnap.h"
 #include "trace.h"
 
