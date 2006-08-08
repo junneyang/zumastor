@@ -2,14 +2,11 @@
 #include <unistd.h>
 #include <assert.h>
 
+#include "trace.h"
 #include "xdelta3.h"
 #include "delta.h"
 
-void frick(void) {
-	return;
-}
-
-int delta_chunk_helper(int (*func) (xd3_stream *, const uint8_t *, usize_t, uint8_t *, usize_t *, usize_t), 
+int delta_chunk_helper(int (*func) (xd3_stream *), 
 		       const uint8_t *input1, 
 		       const uint8_t *input2, 
 		       uint8_t *output, 
@@ -44,13 +41,43 @@ int delta_chunk_helper(int (*func) (xd3_stream *, const uint8_t *, usize_t, uint
 	if(xd3_set_source(&stream, &source) != 0) 
 		goto error;
 	
-	stream.flags |= XD3_FLUSH;
+	xd3_avail_input(&stream, input2, input2_size);
 
-	err_msg = "encoding/decoding failed\n";
-	if(func(&stream, input2, input2_size, output, output_size, max_size))
-		goto error;
-
-	ret = SUCCESS_DELTA;
+	while(ret != 0) {
+		ret = func(&stream);
+		switch (ret) {
+		case XD3_INPUT:
+			err_msg = "input needed? impossible\n";
+			ret = UNKNOWN_ERROR;
+			goto error;  
+		case XD3_OUTPUT:
+			/* write data */
+			if(*output_size + stream.avail_out > max_size) {
+				err_msg = "buffer too small to fit output data\n";
+				xd3_consume_output(&stream);
+				ret = BUFFER_SIZE_ERROR;
+				goto error;
+			}
+			memcpy((void *)(output + *output_size), stream.next_out, stream.avail_out);
+			*output_size = *output_size + stream.avail_out;
+			xd3_consume_output(&stream);
+    			continue;
+  		case XD3_GETSRCBLK:
+			ret = UNKNOWN_ERROR;
+			break;
+  		case XD3_GOTHEADER:
+		case XD3_WINSTART:
+			continue;
+  		case XD3_WINFINISH:
+    		/* no action necessary */
+			ret = SUCCESS_DELTA;
+			continue;
+  		default:
+			err_msg = "error in switch\n";
+			ret = UNKNOWN_ERROR;
+			goto error;
+		}
+	}
 
 	xd3_close_stream(&stream);
 	xd3_free_stream(&stream);		
@@ -59,19 +86,17 @@ int delta_chunk_helper(int (*func) (xd3_stream *, const uint8_t *, usize_t, uint
 error:
 	xd3_close_stream(&stream);
 	xd3_free_stream(&stream);
-	printf("%s", err_msg);
 	return ret;
 }
 
 int create_delta_chunk(void *buff1, void *buff2, void *delta, int buff_size, int *delta_size) {
-	return delta_chunk_helper(xd3_encode_completely, buff1, buff2, delta, buff_size, buff_size, delta_size);
+	return delta_chunk_helper(xd3_encode_input, buff1, buff2, delta, buff_size, buff_size, delta_size);
 }
 
 int apply_delta_chunk(void *buff1, void *buff2, void *delta, int buff_size, int delta_size) {
 	int output_size, ret;
 
-	ret = delta_chunk_helper(xd3_decode_completely, buff1, delta, buff2, buff_size, delta_size, &output_size);
-
+	ret = delta_chunk_helper(xd3_decode_input, buff1, delta, buff2, buff_size, delta_size, &output_size);
 	
 	return (ret == SUCCESS_DELTA) ? output_size : ret;
 }
@@ -91,7 +116,6 @@ int test_func(void) {
 
 	i=0;
 	while(i < 100) {
-
 	ret = create_delta_chunk(buff1, buff2, delta, 512, &size);
 	printf("size of delta is %d\n", size);
 	
@@ -117,7 +141,6 @@ int test_func(void) {
 	memset(newbuff2, 512, sizeof(char));
 	i++;
 	}
-
 	return 0;
 }
 
