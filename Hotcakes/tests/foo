@@ -1,0 +1,2 @@
+#./devspam /dev/mapper/test writespam 12 10 77
+./devspam /dev/mapper/test readspam 12 10 77
