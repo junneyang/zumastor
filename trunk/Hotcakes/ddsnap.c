@@ -13,7 +13,7 @@
 #include <sys/stat.h>
 #include <sys/socket.h>
 #include <sys/un.h>
-#include "ddsnap.server.h"
+#include "ddsnapd.h"
 #include "../dm-ddsnap.h"
 #include "trace.h"
 #include "sock.h"
