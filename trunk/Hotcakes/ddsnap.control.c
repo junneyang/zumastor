@@ -125,6 +125,7 @@ int generate_delta(int clfile, int deltafile, char const *dev1name, char const *
 	printf("chunksize: %u\n", chunk_size);
 	chunk_data1 = (char *)malloc (chunk_size);
 	chunk_data2 = (char *)malloc (chunk_size);
+	delta_data  = (char *)malloc (chunk_size);
 
 	/* Delta header set-up */
 	write(deltafile, &dh, sizeof(struct delta_header));
@@ -140,13 +141,18 @@ int generate_delta(int clfile, int deltafile, char const *dev1name, char const *
 		pread(snapdev2, chunk_data2, chunk_size, chunkaddr);
 		ret = create_delta_chunk(chunk_data1, chunk_data2, delta_data, chunk_size, &delta_size);
 		
-		if (ret < 0) {
+		if (ret == BUFFER_SIZE_ERROR) { /* delta is larger than chunk_size */
+			memcpy(delta_data, chunk_data2, chunk_size);
+			delta_size = chunk_size;
+		}
+		else if (ret < 0) {
 			printf("Delta for chunk address %Lu was not generated properly.\n", chunkaddr);
 			close(snapdev1);
 			close(snapdev2);
 			return -1;
 		}
-		dch.check_sum = checksum((const unsigned char *)chunk_data2, chunk_size);
+
+		dch.check_sum = checksum((const unsigned char *)chunk_data1, chunk_size);
 		dch.chunk_addr = chunkaddr;
 		dch.data_length = delta_size;
 
@@ -232,6 +238,7 @@ int apply_delta(int deltafile, char const *devname) {
 	chunk_size = dh.chunk_size;
 	chunk_data = (char *)malloc (chunk_size);
 	delta_data = (char *)malloc (chunk_size);
+	updated    = (char *)malloc (chunk_size);
 
 	while (read(deltafile, &dch, sizeof(struct delta_chunk_header)) > 0) {
 		if (dch.magic_num != MAGIC_NUM) {
@@ -249,10 +256,21 @@ int apply_delta(int deltafile, char const *devname) {
 		chunkaddr = dch.chunk_addr;
 		pread(snapdev, chunk_data, chunk_size, chunkaddr);
 		printf("Updating chunkaddr: %Lu\n", chunkaddr);
-		ret = apply_delta_chunk(chunk_data, updated, delta_data, chunk_size, dch.data_length);
 
-		if (ret < 0 || 
-		    (dch.check_sum != checksum((const unsigned char *)updated, chunk_size))) {
+		if (dch.check_sum != checksum((const unsigned char *)chunk_data, chunk_size)) {
+			printf("Common chunks are not the same\n");
+			close(snapdev);
+			return -1;
+		}
+		
+		if (dch.data_length == chunk_size)
+			memcpy(updated, delta_data, chunk_size);	
+		else 
+			ret = apply_delta_chunk(chunk_data, updated, delta_data, chunk_size, dch.data_length);
+
+		printf("ret %d data_length %d\n", ret, dch.data_length);
+		
+		if (ret < 0) { 
 			printf("Delta for chunk address %Lu was not applied properly.\n", chunkaddr);
 			close(snapdev);
 			return -1;
