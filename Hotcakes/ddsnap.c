@@ -14,7 +14,7 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include "ddsnapd.h"
-#include "../dm-ddsnap.h"
+#include "dm-ddsnap.h"
 #include "trace.h"
 #include "sock.h"
 #include "delta.h"

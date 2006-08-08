@@ -7,7 +7,7 @@
 #include <sys/un.h>
 #include <netinet/in.h>
 //#include <libdlm.h>
-#include "../dm-ddsnap.h" // message codes
+#include "dm-ddsnap.h" // message codes
 #include "ddsnapd.h" // outbead
 #include "trace.h"
 #include "sock.h" // send_fd, read/writepipe, connect_socket

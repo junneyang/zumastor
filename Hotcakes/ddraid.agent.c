@@ -7,7 +7,7 @@
 #include <sys/un.h>
 #include <netinet/in.h>
 //#include <libdlm.h>
-#include "../dm-ddraid.h" // message codes
+#include "dm-ddraid.h" // message codes
 #include "ddraid.h" // outbead
 #include "trace.h"
 #include "sock.h" // send_fd, read/writepipe, connect_socket
