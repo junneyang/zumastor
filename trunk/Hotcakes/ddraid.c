@@ -29,7 +29,7 @@
 #include "list.h"
 #include "buffer.h"
 #include "ddraid.h"
-#include "../dm-ddraid.h"
+#include "dm-ddraid.h"
 #include "trace.h"
 #include <asm/atomic.h>
 

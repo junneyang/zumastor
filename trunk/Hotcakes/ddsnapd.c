@@ -31,7 +31,7 @@
 #include "list.h"
 #include "buffer.h"
 #include "ddsnapd.h"
-#include "../dm-ddsnap.h"
+#include "dm-ddsnap.h"
 #include "trace.h"
 
 #define trace trace_off

@@ -1,9 +1,13 @@
+kernel_tree=/src/2.6.17-rc6-dd/drivers/md
+
 ddraid_binaries =  mkddraid ddraid-server ddraid-agent
 ddsnap_binaries =  mkddsnap ddsnapd ddsnap-agent ddsnap
 binaries =  $(ddraid_binaries) $(ddsnap_binaries) devspam
 deps = Makefile trace.h buffer.h list.h sock.h
-ddsnap_deps = $(deps) ddsnapd.h ../dm-ddsnap.h 
-ddraid_deps = $(deps) ddraid.h ../dm-ddraid.h
+ddsnap_deps = $(deps) ddsnapd.h $(kernel_tree)/dm-ddsnap.h 
+ddraid_deps = $(deps) ddraid.h $(kernel_tree)/dm-ddraid.h
+
+INC = $(kernel_tree)
 
 all: $(binaries)
 
@@ -17,28 +21,28 @@ delta.o: delta.c xdelta3.c
 	cc -g -Wall delta.c -c
 
 mkddraid: ddraid.c buffer.o $(ddraid_deps)
-	cc -g -Wall ddraid.c buffer.o -DCREATE -o mkddraid
+	cc -g -Wall -I$(INC) ddraid.c buffer.o -DCREATE -o mkddraid
 
 ddraid-server: ddraid.c buffer.o $(ddraid_deps)
-	cc -g -Wall ddraid.c buffer.o -DSERVER -o ddraid-server
+	cc -g -Wall -I$(INC) ddraid.c buffer.o -DSERVER -o ddraid-server
 
 ddraid-agent: ddraid.agent.c $(ddraid_deps)
-	cc -Wall ddraid.agent.c -lpthread -o ddraid-agent
+	cc -Wall -I$(INC) ddraid.agent.c -lpthread -o ddraid-agent
 
 mkddsnap: ddsnapd.c buffer.o $(ddsnap_deps)
-	cc -g -Wall ddsnapd.c buffer.o -DCREATE -o mkddsnap -lpopt
+	cc -g -Wall -I$(INC) ddsnapd.c buffer.o -DCREATE -o mkddsnap -lpopt
 
 ddsnapd: ddsnapd.c buffer.o $(ddsnap_deps)
-	cc -g -Wall -D_FILE_OFFSET_BITS=64 ddsnapd.c buffer.o -DSERVER -o ddsnapd -lpopt
+	cc -g -Wall -D_FILE_OFFSET_BITS=64 -I$(INC) ddsnapd.c buffer.o -DSERVER -o ddsnapd -lpopt
 
 ddsnap-agent: ddsnap.agent.c $(ddsnap_deps)
-	cc -g -Wall ddsnap.agent.c -o ddsnap-agent
+	cc -g -Wall -I$(INC) ddsnap.agent.c -o ddsnap-agent
 
 ddsnap: ddsnap.c xdelta3.o delta.o $(ddsnap_deps)
-	cc -g -Wall xdelta3.o delta.o ddsnap.c -o ddsnap -lpopt
+	cc -g -Wall -I$(INC) xdelta3.o delta.o ddsnap.c -o ddsnap -lpopt
 
 devspam: devspam.c trace.h
-	cc -g -Wall devspam.c -o devspam
+	cc -g -Wall -I$(INC) devspam.c -o devspam
 
 clean:
 	rm -f $(binaries) *.o a.out
