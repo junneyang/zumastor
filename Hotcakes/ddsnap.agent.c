@@ -45,7 +45,7 @@ int connect_clients(struct context *context)
 
 		if ((sock = socket(AF_UNIX, SOCK_STREAM, 0)) < 0)
 			error("Can't get socket");
-		trace_on(printf("server address: %s\n", server->address));
+		trace_on(printf("server address: %s\n", server->address););
 		strncpy(addr.sun_path, server->address, sizeof(addr.sun_path));
 		if (connect(sock, (struct sockaddr *)&addr, addr_len) == -1) {
 			// this really sucks: if the address is wrong, we silently wait for
@@ -107,9 +107,9 @@ int incoming(struct context *context, struct client *client)
 		 * If there's no local server, don't do anything: instantiation
 		 * will be attempted when/if the local server shows up.
 		 */
-		trace_on(printf("NEED SERVER is being called\n"));
+		trace_on(printf("NEED SERVER is being called\n"););
 		if (have_address(&context->active)) {
-			trace_on(printf("Calling connect_clients\n"));
+			trace_on(printf("Calling connect_clients\n"););
 			connect_clients(context);
 			break;
 		}
@@ -195,7 +195,7 @@ int monitor(char *sockname, struct context *context)
 
 			if (!(sock = accept(listener, (struct sockaddr *)&addr, &addr_len)))
 				error("Cannot accept connection");
-			trace_on(warn("Received connection %i", clients);)
+			trace_on(warn("Received connection %i", clients););
 			assert(clients < maxclients); // !!! make the array bigger
 
 			struct client *client = malloc(sizeof(struct client));

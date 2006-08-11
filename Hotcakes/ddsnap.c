@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <signal.h>
 #include <string.h>
 #include <fcntl.h>
 #include <errno.h>
@@ -18,6 +19,7 @@
 #include "trace.h"
 #include "sock.h"
 #include "delta.h"
+#include "diskio.h"
 
 /* changelist and delta file header info */
 #define MAGIC_SIZE 8
@@ -27,31 +29,6 @@
 
 #define DEFAULT_REPLICATION_PORT 4321
 
-
-/* wrappers for pread and pwrite */
-ssize_t preadn(int fd, void *buf, size_t count, off_t offset) {
-	int ret;	
-	do {
-		printf("preading crap\n");
-		ret = pread(fd, buf, count, offset); 
-		if(ret < 0) {
-			printf("wtf? errno: %s\n", strerror(errno));
-			return -errno;
-		}
-		printf("read %d bytes\n", count);
-	} while(ret != count);
-	return ret;
-}
-
-ssize_t pwriten(int fd, const void *buf, size_t count, off_t offset) {
-	int ret;
-	do {
-		ret = pwrite(fd, buf, count, offset);
-		if(ret < 0)
-			return -errno;
-	} while(ret != count);
-	return ret;
-}
 
 struct cl_header {
 	char magic[MAGIC_SIZE];
@@ -165,11 +142,11 @@ int generate_delta(char *mode, int clfile, int deltafile, char const *dev1name, 
 		chunkaddr = chunkaddr << chunk_size_bits;
 
 		/* read in and generate the necessary chunk information */
-		if (preadn(snapdev1, chunk_data1, chunk_size, chunkaddr) != chunk_size) {
+		if (diskio(snapdev1, chunk_data1, chunk_size, chunkaddr, 0) < 0) {
 			printf("barf5\n");
 			return -1;
 		}
-		if (preadn(snapdev2, chunk_data2, chunk_size, chunkaddr) != chunk_size) {
+		if (diskio(snapdev2, chunk_data2, chunk_size, chunkaddr, 0) < 0) {
 			printf("barf6\n");
 			return -1;
 		}
@@ -286,9 +263,9 @@ int generate_delta(char *mode, int clfile, int deltafile, char const *dev1name, 
 	/* Updating header */
 	dh.chunk_num = chunk_num;
 	dh.chunk_size = chunk_size;
-	if (pwriten(deltafile, &dh, sizeof(struct delta_header), 0) != sizeof(struct delta_header)) {
+	if (diskio(deltafile, &dh, sizeof(struct delta_header), 0, 1) < 0) {
 		printf("barf9\n");
-		return -1;
+		return -1; /* FIXME: use named error */
 	}
 
 	close(snapdev1);
@@ -335,7 +312,7 @@ int apply_delta(int deltafile, char const *devname) {
         int c1_chk_sum = 0;
         char *up_chunk1, *up_chunk2;
 
-	snapdev = open(devname, O_RDWR);
+	snapdev = open(devname, O_RDWR); /* FIXME: why not O_WRONLY? */
 	if (snapdev < 0) {
 		err = -errno;
 		printf("Could not open snapdev file \"%s\" for writing.\n", devname);
@@ -379,7 +356,7 @@ int apply_delta(int deltafile, char const *devname) {
 		}
 
 		chunkaddr = dch.chunk_addr;
-		if (preadn(snapdev, chunk_data, chunk_size, chunkaddr) != chunk_size) {
+		if (diskio(snapdev, chunk_data, chunk_size, chunkaddr, 0) < 0) {
 			printf("Snapdev reading of chunk1 has failed. \n");
 			close(snapdev);
 			return -1;
@@ -459,7 +436,7 @@ int apply_delta(int deltafile, char const *devname) {
                   }
                 }
 
-		if (pwriten(snapdev, updated, chunk_size, chunkaddr) != chunk_size) {
+		if (diskio(snapdev, updated, chunk_size, chunkaddr, 1) < 0) {
 			printf("barf3\n");
 			return -1;
 		}
@@ -525,7 +502,7 @@ int list_snapshots(int sock) {
 		printf("snap.ctime= %s \n", ctime(&snap_time));
 	}
 
-	trace_on(printf("reply = %x\n", head.code);)
+	trace_on(printf("reply = %x\n", head.code););
 	err = head.code != SNAPSHOT_LIST;
 
 	if (head.code == REPLY_ERROR)
@@ -564,7 +541,7 @@ int generate_changelist(int sock, char const *changelist_filename, int snap1, in
         if ((err = readpipe(sock, buf, head.length)))
                 return eek();
 
-        trace_on(printf("reply = %x\n", head.code);)
+        trace_on(printf("reply = %x\n", head.code););
         err  = head.code != REPLY_GENERATE_CHANGE_LIST;
 
         if (head.code == REPLY_ERROR)
@@ -588,7 +565,7 @@ int delete_snapshot(int sock, int snap) {
 	assert(head.length < maxbuf); // !!! don't die
 	if ((err = readpipe(sock, buf, head.length)))
 		return eek();
-	trace_on(printf("reply = %x\n", head.code);)
+	trace_on(printf("reply = %x\n", head.code););
 	err = head.code != REPLY_DELETE_SNAPSHOT;
 
 	if (head.code == REPLY_ERROR)
@@ -611,7 +588,7 @@ int create_snapshot(int sock, int snap) {
 	assert(head.length < maxbuf); // !!! don't die
 	if ((err = readpipe(sock, buf, head.length)))
 		return eek();
-	trace_on(printf("reply = %x\n", head.code);)
+	trace_on(printf("reply = %x\n", head.code););
 	err = head.code != REPLY_CREATE_SNAPSHOT;
 
 	if (head.code == REPLY_ERROR)
@@ -634,22 +611,48 @@ int set_priority(int sock, uint32_t tag_val, int8_t pri_val) {
 
 int daemonize(int lsock, char const *devname)
 {
+	struct sigaction sa;
+	pid_t pid;
 	int csock;
 
-	/* FIXME: fork, close fds, and disassociate from login session */
-	for (;;)
-	{
-		if ((csock = accept_socket(lsock)) < 0)
-			goto cleanup_connection; /* FIXME: log errors */
+	sa.sa_handler = SIG_IGN;
+	sigemptyset(&sa.sa_mask);
+	sa.sa_flags = 0;
+	if (sigaction(SIGCHLD, &sa, NULL) == -1)
+		error("could not disable SIGCHLD: %s", strerror(errno));
 
-		if (apply_delta(csock, devname) < 0)
-			goto cleanup_connection; /* FIXME: log errors */
+	pid = fork();
 
-	cleanup_connection:
-		close(csock);
+	if (pid == 0) {
+		setpgid(0, 0);
+
+		close(2);
+		close(1);
+		close(0);
+
+		/* FIXME: we should chdir to the root, but some pathnames may be relative */
+
+		for (;;) {
+			if ((csock = accept_socket(lsock)) < 0)
+				goto cleanup_connection; /* FIXME: log errors */
+
+			/* FIXME: fork */
+			if (apply_delta(csock, devname) < 0)
+				goto cleanup_connection; /* FIXME: log errors */
+
+		cleanup_connection:
+			close(csock);
+		}
 	}
 
-	return 0; /* not reached */
+	if (pid == -1) {
+		error("could not fork: %s", strerror(errno));
+		return 1;
+	}
+
+	trace_on(printf("pid = %lu\n", (unsigned long)pid););
+
+	return 0;
 }
 
 void usage(void)
