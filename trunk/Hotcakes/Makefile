@@ -39,7 +39,7 @@ ddsnap-agent: ddsnap.agent.c $(ddsnap_deps)
 	cc -g -Wall -I$(INC) ddsnap.agent.c -o ddsnap-agent
 
 ddsnap: ddsnap.c xdelta3.o delta.o $(ddsnap_deps)
-	cc -g -Wall -I$(INC) xdelta3.o delta.o ddsnap.c -o ddsnap -lpopt
+	cc -g -Wall -I$(INC) -D_FILE_OFFSET_BITS=64 xdelta3.o delta.o ddsnap.c -o ddsnap -lpopt
 
 devspam: devspam.c trace.h
 	cc -g -Wall -I$(INC) devspam.c -o devspam
@@ -145,7 +145,7 @@ origin:
 	echo 0 16064936 ddsnap /dev/test-snapstore /dev/test-origin /tmp/control -1 | sudo /sbin/dmsetup create vol
 
 snap:
-	echo 0 16064936 ddsnap /dev/test-snapstore /dev/test-origin /tmp/@control 0 | sudo /sbin/dmsetup create tsnap
+	echo 0 16064936 ddsnap /dev/test-snapstore /dev/test-origin /tmp/control 0 | sudo /sbin/dmsetup create snap0
 
 ddsnap-test3: 
 #	sudo ./devpoke /dev/mapper/torigin write 2
