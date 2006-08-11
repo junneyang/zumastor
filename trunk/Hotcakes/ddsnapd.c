@@ -33,6 +33,7 @@
 #include "ddsnapd.h"
 #include "dm-ddsnap.h"
 #include "trace.h"
+#include "diskio.h"
 
 #define trace trace_off
 #define jtrace trace_off
@@ -344,7 +345,7 @@ static void commit_transaction(struct superblock *sb)
 	list_for_each(list, &dirty_buffers) {
 		struct buffer *buffer = list_entry(list, struct buffer, list);
 		unsigned pos = next_journal_block(sb);
-		jtrace(warn("journal data sector = %Lx [%u]", buffer->sector, pos);)
+		jtrace(warn("journal data sector = %Lx [%u]", buffer->sector, pos););
 		assert(buffer_dirty(buffer));
 		write_buffer_to(buffer, journal_sector(sb, pos));
 	}
@@ -357,7 +358,7 @@ static void commit_transaction(struct superblock *sb)
 	while (!list_empty(&dirty_buffers)) {
 		struct list_head *entry = dirty_buffers.next;
 		struct buffer *buffer = list_entry(entry, struct buffer, list);
-		jtrace(warn("write data sector = %Lx", buffer->sector);)
+		jtrace(warn("write data sector = %Lx", buffer->sector););
 		assert(buffer_dirty(buffer));
 		assert(commit->entries < sb->max_commit_blocks);
 		commit->sector[commit->entries++] = buffer->sector;
@@ -365,7 +366,7 @@ static void commit_transaction(struct superblock *sb)
 		// we hope the order we just listed these is the same as committed above
 	}
 
-	jtrace(warn("commit journal block [%u]", pos);)
+	jtrace(warn("commit journal block [%u]", pos););
 	commit->checksum = 0;
 	commit->checksum = -checksum_block(sb, (void *)commit);
 	write_buffer_to(commit_buffer, journal_sector(sb, pos));
@@ -389,7 +390,7 @@ int recover_journal(struct superblock *sb)
 		struct commit_block *block = buf2block(buffer);
 
 		if (!is_commit_block(block)) {
-			jtrace(warn("[%i] <data>", i);)
+			jtrace(warn("[%i] <data>", i););
 			if (sequence == -1)
 				data_from_start++;
 			else
@@ -417,7 +418,7 @@ int recover_journal(struct superblock *sb)
 			continue;
 		}
 
-		jtrace(warn("[%i] seq=%i", i, block->sequence);)
+		jtrace(warn("[%i] seq=%i", i, block->sequence););
 
 		if (last_block != -1 && block->sequence != sequence + 1) {
 			int delta = sequence - block->sequence;
@@ -453,7 +454,7 @@ int recover_journal(struct superblock *sb)
 		newest_block = last_block;
 	}
 
-	jtrace(warn("found newest commit [%u]", newest_block);)
+	jtrace(warn("found newest commit [%u]", newest_block););
 	buffer = jread(sb, newest_block);
 	struct commit_block *commit = buf2block(buffer);
 	unsigned entries = commit->entries;
@@ -468,7 +469,7 @@ int recover_journal(struct superblock *sb)
 			continue;
 		}
 
-		jtrace(warn("write journal [%u] data to %Lx", pos, commit->sector[i]);)
+		jtrace(warn("write journal [%u] data to %Lx", pos, commit->sector[i]););
 		write_buffer_to(databuf, commit->sector[i]);
 		brelse(databuf);
 	}
@@ -700,7 +701,7 @@ int add_exception_to_leaf(struct eleaf *leaf, u64 chunk, u64 exception, int snap
  - 10
 #endif
 ;
-	trace(warn("chunk %Lx exception %Lx, snapshot = %i", chunk, exception, snapshot);)
+	trace(warn("chunk %Lx exception %Lx, snapshot = %i", chunk, exception, snapshot););
 
 	for (i = 0; i < leaf->count; i++) // !!! binsearch goes here
 		if (leaf->map[i].rchunk >= target)
@@ -878,7 +879,7 @@ static void init_allocation(struct superblock *sb)
 		/* Suppress overrun allocation in partial last byte */
 		if (i == bitmaps - 1 && (chunks & 7))
 			buffer->data[(chunks >> 3) & (sb->blocksize - 1)] |= 0xff << (chunks & 7);
-		trace_off(dump_buffer(buffer, 0, 16);)
+		trace_off(dump_buffer(buffer, 0, 16););
 		brelse_dirty(buffer);
 	}
 	printf("\n");
@@ -892,7 +893,7 @@ static void free_chunk(struct superblock *sb, chunk_t chunk)
 	unsigned bitmap_shift = sb->image.blocksize_bits + 3, bitmap_mask = (1 << bitmap_shift ) - 1;
 	u64 bitmap_block = chunk >> bitmap_shift;
 
-	trace(printf("free chunk %Lx\n", chunk);)
+	trace(printf("free chunk %Lx\n", chunk););
 	struct buffer *buffer = snapread(sb, sb->image.bitmap_base + (bitmap_block << sb->sectors_per_block_bits));
 	if (!get_bitmap_bit(buffer->data, chunk & bitmap_mask)) {
 		warn("chunk %Lx already free!", (long long)chunk);
@@ -933,13 +934,13 @@ chunk_t alloc_chunk_range(struct superblock *sb, chunk_t chunk, chunk_t range)
 		unsigned char c, *p = buffer->data + offset;
 		unsigned tail = sb->blocksize  - offset, n = tail > length? length: tail;
 	
-		trace_off(printf("search %u bytes of bitmap %Lx from offset %u\n", n, blocknum, offset);)
+		trace_off(printf("search %u bytes of bitmap %Lx from offset %u\n", n, blocknum, offset););
 		// dump_buffer(buffer, 4086, 10);
 	
 		for (length -= n; n--; p++)
 			if ((c = *p) != 0xff) {
 				int i, bit;
-				trace_off(printf("found byte at offset %u of bitmap %Lx = %hhx\n", p - buffer->data, blocknum, c);)
+				trace_off(printf("found byte at offset %u of bitmap %Lx = %hhx\n", p - buffer->data, blocknum, c););
 				for (i = 0, bit = 1;; i++, bit <<= 1)
 					if (!(c & bit)) {
 						chunk = i + ((p - buffer->data) << 3) + (blocknum << bitmap_shift);
@@ -958,7 +959,7 @@ chunk_t alloc_chunk_range(struct superblock *sb, chunk_t chunk, chunk_t range)
 		if (++blocknum == sb->image.bitmap_blocks)
 			 blocknum = 0;
 		offset = 0;
-		trace_off(printf("go to bitmap %Lx\n", blocknum);)
+		trace_off(printf("go to bitmap %Lx\n", blocknum););
 	}
 }
 
@@ -1007,7 +1008,7 @@ static struct buffer *new_block(struct superblock *sb)
 
 static struct buffer *new_leaf(struct superblock *sb)
 {
-	trace(printf("New leaf\n");)
+	trace(printf("New leaf\n"););
 	struct buffer *buffer = new_block(sb);
 	init_leaf(buffer2leaf(buffer), sb->blocksize);
 	set_buffer_dirty(buffer);
@@ -1016,7 +1017,7 @@ static struct buffer *new_leaf(struct superblock *sb)
 
 static struct buffer *new_node(struct superblock *sb)
 {
-	trace(printf("New node\n");)
+	trace(printf("New node\n"););
 	struct buffer *buffer = new_block(sb);
 	struct enode *node = buffer2node(buffer);
 	node->count = 0;
@@ -1130,10 +1131,10 @@ static void show_tree_range(struct superblock *sb, chunk_t start, unsigned leave
 			node = buffer2node(nodebuf);
 			path[level].buffer = nodebuf;
 			path[level].pnext = node->entries;
-			trace(printf("push to level %i, %i nodes\n", level, node->count);)
+			trace(printf("push to level %i, %i nodes\n", level, node->count););
 		} while (level < levels - 1);
 
-		trace(printf("do %i leaf nodes level = %i\n", node->count, level);)
+		trace(printf("do %i leaf nodes level = %i\n", node->count, level););
 		while (path[level].pnext  < node->entries + node->count) {
 			leafbuf = snapread(sb, path[level].pnext++->sector);
 start:		show_leaf(buffer2leaf(leafbuf));
@@ -1150,7 +1151,7 @@ start:		show_leaf(buffer2leaf(leafbuf));
 				return;
 			nodebuf = path[--level].buffer;
 			node = buffer2node(nodebuf);
-			trace(printf("pop to level %i, %i of %i nodes\n", level, path[level].pnext - node->entries, node->count);)
+			trace(printf("pop to level %i, %i of %i nodes\n", level, path[level].pnext - node->entries, node->count););
 		} while (path[level].pnext == node->entries + node->count);
 	};
 }
@@ -1170,7 +1171,7 @@ static void add_exception_to_tree(struct superblock *sb, struct buffer *leafbuf,
 		return;
 	}
 
-	trace(warn("add leaf");)
+	trace(warn("add leaf"););
 	struct buffer *childbuf = new_leaf(sb);
 	u64 childkey = split_leaf(buffer2leaf(leafbuf), buffer2leaf(childbuf));
 	sector_t childsector = childbuf->sector;
@@ -1214,7 +1215,7 @@ static void add_exception_to_tree(struct superblock *sb, struct buffer *leafbuf,
 		brelse(newbuf);
 	}
 
-	trace(printf("add tree level\n");)
+	trace(printf("add tree level\n"););
 	struct buffer *newrootbuf = new_node(sb); // !!! handle error
 	struct enode *newroot = buffer2node(newrootbuf);
 
@@ -1236,14 +1237,14 @@ static int finish_copyout(struct superblock *sb)
 		chunk_t source = sb->source_chunk & ~(1ULL << chunk_highbit);
 		unsigned size = sb->copy_chunks << sb->image.chunksize_bits;
 		trace(printf("copy %u %schunks from %Lx to %Lx\n", sb->copy_chunks, 
-					is_snap? "snapshot ": "origin ", source, sb->dest_exception);)
+					is_snap? "snapshot ": "origin ", source, sb->dest_exception););
 		assert(size <= sb->copybuf_size);
-		if (pread(is_snap? sb->snapdev: sb->orgdev, sb->copybuf, size, 
-					source << sb->image.chunksize_bits) != size) 
-			trace(printf("death by pread. errno msg: %s!\n", ret, strerror(errno)));
-		if (pwrite(sb->snapdev, sb->copybuf, size, 
-					sb->dest_exception << sb->image.chunksize_bits) != size) 
-			trace_on(printf("death by pwrite. errno msg: %s!\n", strerror(errno)));
+		if (diskio(is_snap? sb->snapdev: sb->orgdev, sb->copybuf, size, 
+					source << sb->image.chunksize_bits, 0) < 0)
+			trace(printf("copyout death on read\n"));
+		if (diskio(sb->snapdev, sb->copybuf, size, 
+					sb->dest_exception << sb->image.chunksize_bits, 1) < 0)
+			trace_on(printf("copyout death on write\n"););
 		sb->copy_chunks = 0;
 	}
 	return 0;
@@ -1266,8 +1267,8 @@ static int copyout(struct superblock *sb, chunk_t chunk, chunk_t exception)
 #else
 	int is_snap = sb->source_chunk >> chunk_highbit;
 	chunk_t source = chunk & ~((1ULL << chunk_highbit) - 1);
-	pread(is_snap? sb->snapdev: sb->orgdev, sb->copybuf, sb->chunksize, source << sb->image.chunksize_bits);  // 64 bit!!!
-	pwrite(sb->snapdev, sb->copybuf, sb->chunksize, exception << sb->image.chunksize_bits);  // 64 bit!!!
+	diskio(is_snap? sb->snapdev: sb->orgdev, sb->copybuf, sb->chunksize, source << sb->image.chunksize_bits, 0);  // 64 bit!!!
+	diskio(sb->snapdev, sb->copybuf, sb->chunksize, exception << sb->image.chunksize_bits, 1);  // 64 bit!!!
 #endif
 	return 0;
 }
@@ -1291,7 +1292,7 @@ static chunk_t make_unique(struct superblock *sb, chunk_t chunk, int snapnum)
 		origin_chunk_unique(buffer2leaf(leafbuf), chunk, sb->snapmask):
 		snapshot_chunk_unique(buffer2leaf(leafbuf), chunk, snapnum, &exception))
 	{
-		trace_off(warn("chunk %Lx already unique in snapnum %i", chunk, snapnum);)
+		trace_off(warn("chunk %Lx already unique in snapnum %i", chunk, snapnum););
 		brelse(leafbuf);
 		goto out;
 	}
@@ -1375,7 +1376,7 @@ static int create_snapshot(struct superblock *sb, unsigned snaptag)
 	return -EFULL;
 
 create:
-	trace_on(printf("Create snapshot %i (internal %i)\n", snaptag, i);)
+	trace_on(printf("Create snapshot %i (internal %i)\n", snaptag, i););
 	snapshot = sb->image.snaplist + sb->image.snapshots++;
 	*snapshot = (struct snapshot){ .tag = snaptag, .bit = i, .ctime = time(NULL) };
 	sb->snapmask |= (1ULL << i);
@@ -1430,7 +1431,7 @@ static void delete_snapshots_from_tree(struct superblock *sb, u64 snapmask)
 	struct buffer *nodebuf;
 	struct enode *node;
 
-	trace_on(printf("delete snapshot mask %Lx\n", snapmask);)
+	trace_on(printf("delete snapshot mask %Lx\n", snapmask););
 	while (1) {
  		do {
 			level++;
@@ -1438,13 +1439,13 @@ static void delete_snapshots_from_tree(struct superblock *sb, u64 snapmask)
 			node = buffer2node(nodebuf);
 			path[level].buffer = nodebuf;
 			path[level].pnext = node->entries;
-			trace(printf("push to level %i, %i nodes\n", level, node->count);)
+			trace(printf("push to level %i, %i nodes\n", level, node->count););
 		} while (level < levels - 1);
 
-		trace(printf("do %i leaf nodes\n", node->count);)
+		trace(printf("do %i leaf nodes\n", node->count););
 		while (path[level].pnext  < node->entries + node->count) {
 			struct buffer *leafbuf = snapread(sb, path[level].pnext++->sector);
-			trace_off(printf("process leaf %Lx\n", leafbuf->sector);)
+			trace_off(printf("process leaf %Lx\n", leafbuf->sector););
 			delete_snapshots_from_leaf(sb, buffer2leaf(leafbuf), snapmask, -1);
 			brelse(leafbuf);
 		}
@@ -1455,7 +1456,7 @@ static void delete_snapshots_from_tree(struct superblock *sb, u64 snapmask)
 				return;
 			nodebuf = path[--level].buffer;
 			node = buffer2node(nodebuf);
-			trace(printf("pop to level %i, %i of %i nodes\n", level, path[level].pnext - node->entries, node->count);)
+			trace(printf("pop to level %i, %i of %i nodes\n", level, path[level].pnext - node->entries, node->count););
 		} while (path[level].pnext == node->entries + node->count);
 	};
 }
@@ -1540,7 +1541,7 @@ static chunk_t delete_tree_range(struct superblock *sb, u64 snapmask, chunk_t re
 	leafbuf = probe(sb, resume, path);
 
 	while (1) { /* in-order leaf walk */
-		trace_off(show_leaf(buffer2leaf(leafbuf));)
+		trace_off(show_leaf(buffer2leaf(leafbuf)););
 		// should pass in and act on max_dirty...
 		if (delete_snapshots_from_leaf(sb, buffer2leaf(leafbuf), snapmask, max_dirty))
 			set_buffer_dirty(leafbuf);
@@ -1548,10 +1549,10 @@ static chunk_t delete_tree_range(struct superblock *sb, u64 snapmask, chunk_t re
 		if (prevleaf) { /* try to merge this leaf with prev */
 			struct eleaf *this = buffer2leaf(leafbuf);
 			struct eleaf *prev = buffer2leaf(prevleaf);
-			trace_off(warn("check leaf %p against %p", leafbuf, prevleaf);)
-			trace_off(warn("need = %i, free = %i", leaf_payload(this), leaf_freespace(prev));)
+			trace_off(warn("check leaf %p against %p", leafbuf, prevleaf););
+			trace_off(warn("need = %i, free = %i", leaf_payload(this), leaf_freespace(prev)););
 			if (leaf_payload(this) <= leaf_freespace(prev)) {
-				trace_off(warn(">>> can merge leaf %p into leaf %p", leafbuf, prevleaf);)
+				trace_off(warn(">>> can merge leaf %p into leaf %p", leafbuf, prevleaf););
 				merge_leaves(prev, this);
 				remove_index(path, level);
 				set_buffer_dirty(prevleaf);
@@ -1568,10 +1569,10 @@ keep_prev_leaf:
 					assert(level); /* root node can't have any prev */
 					struct enode *this = path_node(path, level);
 					struct enode *prev = path_node(hold, level);
-					trace_off(warn("check node %p against %p", this, prev);)
-					trace_off(warn("this count = %i prev count = %i", this->count, prev->count);)
+					trace_off(warn("check node %p against %p", this, prev););
+					trace_off(warn("this count = %i prev count = %i", this->count, prev->count););
 					if (this->count <= sb->blocks_per_node - prev->count) {
-						trace_off(warn(">>> can merge node %p into node %p", this, prev);)
+						trace_off(warn(">>> can merge node %p into node %p", this, prev););
 						merge_nodes(prev, this);
 						remove_index(path, level - 1);
 						set_buffer_dirty(hold[level].buffer);
@@ -1584,7 +1585,7 @@ keep_prev_leaf:
 keep_prev_node:
 				if (!level) { /* remove levels if possible */
 					while (levels > 1 && path_node(hold, 0)->count == 1) {
-						trace_off(warn("drop btree level");)
+						trace_off(warn("drop btree level"););
 						sb->image.etree_root = hold[1].buffer->sector;
 						brelse_free(sb, hold[0].buffer);
 						levels = --sb->image.etree_levels;
@@ -1597,14 +1598,14 @@ keep_prev_node:
 				}
 
 				level--;
-				trace_off(printf("pop to level %i, %i of %i nodes\n", level, path[level].pnext - path_node(path, level)->entries, path_node(path, level)->count);)
+				trace_off(printf("pop to level %i, %i of %i nodes\n", level, path[level].pnext - path_node(path, level)->entries, path_node(path, level)->count););
 			} while (finished_level(path, level));
 
 			do { /* push back down to leaf level */
 				struct buffer *nodebuf = snapread(sb, path[level++].pnext++->sector);
 				path[level].buffer = nodebuf;
 				path[level].pnext = buffer2node(nodebuf)->entries;
-				trace_off(printf("push to level %i, %i nodes\n", level, path_node(path, level)->count);)
+				trace_off(printf("push to level %i, %i nodes\n", level, path_node(path, level)->count););
 			} while (level < levels - 1);
 		}
 
@@ -1637,7 +1638,7 @@ static int delete_snapshot(struct superblock *sb, unsigned tag)
 delete:
 	snapshot = sb->image.snaplist + i;
 	bit = snapshot->bit;
-	trace_on(printf("Delete snapshot %i (internal %i)\n", tag, bit);)
+	trace_on(printf("Delete snapshot %i (internal %i)\n", tag, bit););
 	memmove(snapshot, snapshot + 1, (char *)(sb->image.snaplist + --sb->image.snapshots) - (char *)snapshot);
 	sb->snapmask &= ~(1ULL << bit);
 	delete_snapshots_from_tree(sb, 1ULL << bit);
@@ -1665,7 +1666,7 @@ static void show_snapshots(struct superblock *sb)
 
 static void reply(fd_t sock, struct messagebuf *message)
 {
-	trace(warn("%x/%u", message->head.code, message->head.length);)
+	trace(warn("%x/%u", message->head.code, message->head.length););
 	writepipe(sock, &message->head, message->head.length + sizeof(message->head));
 }
 
@@ -1826,7 +1827,7 @@ struct snaplock *release_lock(struct superblock *sb, struct snaplock *lock, stru
 		holdp = &(*holdp)->next;
 
 	if (!*holdp) {
-		trace_on(printf("chunk %Lx holder %Lu not found\n", lock->chunk, client->id);)
+		trace_on(printf("chunk %Lx holder %Lu not found\n", lock->chunk, client->id););
 		return NULL;
 	}
 
@@ -1861,7 +1862,7 @@ struct snaplock *release_lock(struct superblock *sb, struct snaplock *lock, stru
 int release_chunk(struct superblock *sb, chunk_t chunk, struct client *client)
 {
 	trace(printf("enter release_chunk\n"));
-	trace(printf("release %Lx\n", chunk);)
+	trace(printf("release %Lx\n", chunk););
 	struct snaplock **lockp = &sb->snaplocks[snaplock_hash(sb, chunk)];
 	
 	/* Find pointer to lock record */
@@ -1872,7 +1873,7 @@ int release_chunk(struct superblock *sb, chunk_t chunk, struct client *client)
 	struct snaplock *next, *lock = *lockp;
 
 	if (!lock) {
-		trace_on(printf("chunk %Lx not locked\n", chunk);)
+		trace_on(printf("chunk %Lx not locked\n", chunk););
 		return -1;
 	}
 
@@ -1910,16 +1911,16 @@ void addto_response(struct addto *r, chunk_t chunk)
 	trace(printf("inside addto_response\n"));
 	if (chunk != r->nextchunk) {
 		if (r->top) {
-			trace(warn("finish old range\n");)
+			trace(warn("finish old range\n"););
 			*(r->countp) = (r->nextchunk -  r->firstchunk);
 		} else {
-			trace(warn("alloc new reply");)
+			trace(warn("alloc new reply"););
 			r->reply = (void *) malloc(sizeof(struct messagebuf));
 			r->top = (chunk_t *)(((char *)r->reply) + sizeof(struct head) + offsetof(struct rw_request, ranges));
 			r->lim = ((char *)r->reply) + maxbody;
 			r->count++;
 		}
-		trace(warn("start new range");)
+		trace(warn("start new range"););
 		check_response_full(r, 2*sizeof(chunk_t));
 		r->firstchunk = *(r->top)++ = chunk;
 		r->countp = (shortcount *)r->top;
@@ -1991,7 +1992,7 @@ void load_sb(struct superblock *sb)
 	brelse(buffer);
 	setup_sb(sb);
 	sb->snapmask = calc_snapmask(sb);
-	trace_on(printf("Active snapshot mask: %016llx\n", sb->snapmask);)
+	trace_on(printf("Active snapshot mask: %016llx\n", sb->snapmask););
 }
 
 void save_sb(struct superblock *sb)
@@ -2166,8 +2167,8 @@ static void expand_snapstore(struct superblock *sb, u64 newchunks)
 	for (i = 0; i < oldbitmaps; i++) {
 		// do it one block at a time for now !!! sucks
 		// maybe should do copy with bread/write?
-		pread(sb->snapdev, sb->copybuf, blocksize, oldbase + (i << blockshift));  // 64 bit!!!
-		pwrite(sb->snapdev, sb->copybuf, blocksize, newbase + (i << blockshift));  // 64 bit!!!
+		diskio(sb->snapdev, sb->copybuf, blocksize, oldbase + (i << blockshift), 0);  // 64 bit!!!
+		diskio(sb->snapdev, sb->copybuf, blocksize, newbase + (i << blockshift), 1);  // 64 bit!!!
 	}
 
 	if ((oldchunks & 7)) {
@@ -2286,7 +2287,7 @@ int incoming(struct superblock *sb, struct client *client)
 			chunk_t chunk;
 			if (message.head.length < sizeof(*body))
 				goto message_too_short;
-			trace(printf("origin write query, %u ranges\n", body->count);)
+			trace(printf("origin write query, %u ranges\n", body->count););
 				
 				for (i = 0; i < body->count; i++, p++)
 					for (j = 0, chunk = p->chunk; j < p->chunks; j++, chunk++) {
@@ -2322,7 +2323,7 @@ int incoming(struct superblock *sb, struct client *client)
 				chunk_t exception = make_unique(sb, chunk, client->snap);
 				if (exception == -1) 
 					error("Snapshot: snapshot store full"); // !!! don't abort, send error
-				trace(printf("exception = %Lx\n", exception);)
+				trace(printf("exception = %Lx\n", exception););
 					addto_response(&snap, chunk);
 				check_response_full(&snap, sizeof(chunk_t));
 				*(snap.top)++ = exception;
@@ -2462,7 +2463,7 @@ int incoming(struct superblock *sb, struct client *client)
 		if ((change_fd = recv_fd(sock, bunk, &bunksize)) < 0) 
 			goto generate_error;
 		
-		trace_on(printf("creating changelist from snap1 %d and snap2 %d\n", snap1, snap2));
+		trace_on(printf("creating changelist from snap1 %d and snap2 %d\n", snap1, snap2););
 		err_msg = "unable to write to changelist file";
 		if (write(change_fd, &(sb->image.chunksize_bits), sizeof(sb->image.chunksize_bits)) < 0)
 			goto generate_error;
@@ -2515,7 +2516,7 @@ static int sigpipe;
 
 void sighandler(int signum)
 {
-	trace_off(printf("caught signal %i\n", signum);)
+	trace_off(printf("caught signal %i\n", signum););
 	write(sigpipe, (char[]){signum}, 1);
 }
 
@@ -2584,7 +2585,7 @@ int snap_server(struct superblock *sb, const char *agent_sockname, const char *s
 	int agent_addr_len = sizeof(agent_addr) - sizeof(agent_addr.sun_path) + strlen(agent_sockname);
 	int sock;
 
-	trace(warn("Connect to control socket %s", agent_sockname);)
+	trace(warn("Connect to control socket %s", agent_sockname););
 	if ((sock = socket(AF_UNIX, SOCK_STREAM, 0)) == -1)
 		error("Can't get socket");
 	strncpy(agent_addr.sun_path, agent_sockname, sizeof(agent_addr.sun_path));
@@ -2594,7 +2595,7 @@ int snap_server(struct superblock *sb, const char *agent_sockname, const char *s
 	if (connect(sock, (struct sockaddr *)&agent_addr, agent_addr_len) == -1)
 		error("Can't connect to control socket");
 
-	trace_on(warn("Received control connection");)
+	trace_on(warn("Received control connection"););
 	pollvec[2] = (struct pollfd){ .fd = sock, .events = POLLIN };
 
 	writepipe(sock, &(struct head){ SERVER_READY, sizeof(server) }, sizeof(struct head));
@@ -2640,7 +2641,7 @@ int snap_server(struct superblock *sb, const char *agent_sockname, const char *s
 			if (!(sock = accept(listener, (struct sockaddr *)&addr, &addr_len)))
 				error("Cannot accept connection");
 
-			trace_on(warn("Received connection");)
+			trace_on(warn("Received connection"););
 			assert(clients < maxclients); // !!! send error and disconnect
 
 			struct client *client = malloc(sizeof(struct client));
@@ -2655,7 +2656,7 @@ int snap_server(struct superblock *sb, const char *agent_sockname, const char *s
 			u8 sig = 0;
 			/* it's stupid but this read also gets interrupted, so... */
 			do { } while (read(getsig, &sig, 1) == -1 && errno == EINTR);
-			trace_on(warn("caught signal %i", sig);)
+			trace_on(warn("caught signal %i", sig););
 			cleanup(sb); // !!! don't do it on segfault
 			if (sig == SIGINT) { 
 		        	signal(SIGINT, SIG_DFL);
@@ -2675,7 +2676,7 @@ int snap_server(struct superblock *sb, const char *agent_sockname, const char *s
 				struct client *client = clientvec[i];
 				int result;
 
-				trace_off(printf("event on socket %i = %x\n", client->sock, pollvec[others+i].revents);)
+				trace_off(printf("event on socket %i = %x\n", client->sock, pollvec[others+i].revents););
 				if ((result = incoming(sb, client)) == -1) {
 					warn("Client %Li disconnected", client->id);
 					save_state(sb); // !!! just for now

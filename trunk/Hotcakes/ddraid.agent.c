@@ -177,7 +177,7 @@ int monitor(char *sockname, struct context *context)
 
 			if (!(sock = accept(listener, (struct sockaddr *)&addr, &addr_len)))
 				error("Cannot accept connection");
-			trace_on(warn("Client %i connected", clients);)
+			trace_on(warn("Client %i connected", clients););
 			assert(clients < maxclients); // !!! make the array bigger
 			pollvec[others+clients] = (struct pollfd){ .fd = sock, .events = POLLIN };
 			clientvec[clients] = (struct client){ .sock = sock };

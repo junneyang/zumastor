@@ -1,3 +1,4 @@
+#include <sys/types.h>
 #include <sys/socket.h>
 #include <netdb.h>
 
@@ -24,13 +25,15 @@ static inline int bind_socket(char const *name, unsigned port)
 	struct sockaddr_in addr = { .sin_family = AF_INET, .sin_port = htons(port) };
 	struct hostent *host;
 	int sock;
+	int optval;
 
 	if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0)
 		error("Can't get socket");
 	if (!(host = gethostbyname(name)))
 		return -h_errno;
 	memcpy(&addr.sin_addr.s_addr, host->h_addr, host->h_length);
-	/* FIXME: SO_REUSEADDR */
+	optval = 1;
+	setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval)); /* failure ok */
 	if (bind(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0)
 		return -errno;
 	if (listen(sock, 8) < 0)

@@ -3,7 +3,7 @@ kernel_tree=/src/2.6.17-rc6-dd/drivers/md
 ddraid_binaries =  mkddraid ddraid-server ddraid-agent
 ddsnap_binaries =  mkddsnap ddsnapd ddsnap-agent ddsnap
 binaries =  $(ddraid_binaries) $(ddsnap_binaries) devspam
-deps = Makefile trace.h buffer.h list.h sock.h
+deps = Makefile trace.h buffer.h list.h sock.h diskio.h
 ddsnap_deps = $(deps) ddsnapd.h $(kernel_tree)/dm-ddsnap.h 
 ddraid_deps = $(deps) ddraid.h $(kernel_tree)/dm-ddraid.h
 

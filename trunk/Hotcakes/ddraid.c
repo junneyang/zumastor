@@ -8,7 +8,6 @@
  */
 
 #define _GNU_SOURCE /* O_DIRECT  */
-#define _XOPEN_SOURCE 500 /* pread, pwrite */
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -32,6 +31,7 @@
 #include "dm-ddraid.h"
 #include "trace.h"
 #include <asm/atomic.h>
+#include "diskio.h"
 
 /*
  * To do:
@@ -80,7 +80,7 @@ unsigned available(unsigned sock)
 {
 	unsigned bytes;
 	ioctl(sock, FIONREAD, &bytes);
-	trace(if (bytes) printf("%u bytes waiting\n", bytes);)
+	trace(if (bytes) printf("%u bytes waiting\n", bytes););
 	return bytes;
 }
 
@@ -206,11 +206,11 @@ static struct region *find_region(struct superblock *info, region_t regnum)
 	struct list_head *list, *bucket = info->hash + hash_region(regnum);
 	struct region *region;
 
-	trace_off(warn("Find region %Lx", (long long)regnum);)
+	trace_off(warn("Find region %Lx", (long long)regnum););
 	list_for_each(list, bucket)
 		if ((region = list_entry(list, struct region, hash))->regnum == regnum)
 			goto found;
-	trace_off(warn("Region %Lx not found", (long long)regnum);)
+	trace_off(warn("Region %Lx not found", (long long)regnum););
 	return NULL;
 found:
 	return region;
@@ -317,13 +317,13 @@ static void retire_old_block(struct superblock *sb)
 {
 	struct journal_block *newest = buf2block(sb->newbuf);
 
-	trace(warn("retire old block, seq=%u", buf2block(sb->oldbuf)->sequence);)
+	trace(warn("retire old block, seq=%u", buf2block(sb->oldbuf)->sequence););
 	brelse(sb->oldbuf);
 	newest->oldest_entry = 0;
 	if (++newest->oldest_block == sb->image.journal_size)
 		newest->oldest_block = 0;
 	if (newest->oldest_block == sb->newest_block) {
-		trace(warn("retired all old blocks");)
+		trace(warn("retired all old blocks"););
 		(sb->oldbuf = sb->newbuf)->count++;
 	} else
 		sb->oldbuf = readlog(sb, newest->oldest_block);
@@ -349,12 +349,12 @@ static void retire_old_entries(struct superblock *sb)
 				if (atomic_read(&region->count) &&
 				    region->dirtied_block == newest->oldest_block &&
 				    region->dirtied_entry == newest->oldest_entry) {
-					trace(warn("keep old entry %Lx", (long long)entry);)
+					trace(warn("keep old entry %Lx", (long long)entry););
 					region->dirtied_block = sb->newest_block;
 					region->dirtied_entry = newest->entries;
 					newest->entry[newest->entries++] = entry;
 				} else {
-					trace(warn("drop old entry %Lx", (long long)entry);)
+					trace(warn("drop old entry %Lx", (long long)entry););
 					if (region->flags & REGION_DEFER_CLEAN_FLAG)
 						del_deferred_clean(sb, region);
 				}
@@ -381,7 +381,7 @@ static int try_to_retire_old_entries(struct superblock *sb)
 				    region->dirtied_entry == newest->oldest_entry) {
 					return 0;
 				} else {
-					trace(warn("drop old entry %Lx", (long long)entry);)
+					trace(warn("drop old entry %Lx", (long long)entry););
 					if (region->flags & REGION_DEFER_CLEAN_FLAG)
 						del_deferred_clean(sb, region);
 				}
@@ -418,7 +418,7 @@ static void advance_new_block(struct superblock *sb, int commit)
 	unsigned oldest_entry = newest->oldest_entry;
 
 	if (commit) {
-		tracelog(warn("committed block, seq=%u", sequence);)
+		tracelog(warn("committed block, seq=%u", sequence););
 		// fill top with zero (should we?)
 		// memset(&newest->entry[newest->entries], 0, sizeof(region_t) * (sb->max_entries - newest->entries));
 		newest->checksum = 0;
@@ -436,7 +436,7 @@ static void advance_new_block(struct superblock *sb, int commit)
 		retire_old_block(sb);
 	}
 
-	tracelog(warn("new block, pos=%i seq=%u oldest=%i:%i", sb->newest_block, sequence + 1, oldest_block, oldest_entry);)
+	tracelog(warn("new block, pos=%i seq=%u oldest=%i:%i", sb->newest_block, sequence + 1, oldest_block, oldest_entry););
 	sb->newbuf = getblk(sb->logdev, log2sector(sb, sb->newest_block), sb->blocksize);
 	*buf2block(sb->newbuf) = (struct journal_block){
 		.sequence = sequence + 1,
@@ -503,7 +503,7 @@ static int get_region(struct superblock *sb, region_t regnum)
 		return 0;
 	}
 
-	trace(warn("+%Lx", (long long)regnum);)
+	trace(warn("+%Lx", (long long)regnum););
 	atomic_inc(&region->count);
 
 	if (region->flags & REGION_DEFER_CLEAN_FLAG) {
@@ -541,7 +541,7 @@ static void put_region(struct superblock *sb, region_t regnum)
 
 		del_region(sb, region);
 		add_entry(sb,  regnum | sb->cleanmask);
-		trace(warn("-%Lx", (long long)regnum);)
+		trace(warn("-%Lx", (long long)regnum););
 	}
 }
 
@@ -604,7 +604,7 @@ int recover_journal(struct superblock *sb)
 			continue;
 		}
 
-		tracelog(warn("[%i] seq=%i", i, block->sequence);)
+		tracelog(warn("[%i] seq=%i", i, block->sequence););
 		if (sequence != -1 && block->sequence != sequence + 1) {
 			if  (block->sequence != sequence + 1 - sb->image.journal_size) {
 				why = "Block out of sequence";
@@ -660,7 +660,7 @@ int recover_journal(struct superblock *sb)
 
 	/* Now load entries starting from journal head */
 
-	tracelog(warn("oldest block:entry = %i:%i, newest block = %i", oldest_block, oldest_entry, newest_block);)
+	tracelog(warn("oldest block:entry = %i:%i, newest block = %i", oldest_block, oldest_entry, newest_block););
 	sb->oldbuf = oldbuf = readlog(sb, newest->oldest_block);
 	oldbuf->count++;
 	sb->unsyncs = 0;
@@ -714,11 +714,11 @@ int recover_journal(struct superblock *sb)
 	}
 	assert(n == sb->unsyncs);
 	COMBSORT(n, i, j, u[i] > u[j], { region_t x = u[i]; u[i] = u[j]; u[j] = x; });
-	tracelog(warn("Unsynced regions:");)
+	tracelog(warn("Unsynced regions:"););
 
-	tracelog(for (i = 0; i < n; i++))
-		tracelog(printf("%Lx ", (long long)u[i]);)
-	tracelog(printf("\n");)
+	tracelog(for (i = 0; i < n; i++));
+		tracelog(printf("%Lx ", (long long)u[i]););
+	tracelog(printf("\n"););
 
 	sb->newest_block = newest_block;
 	sb->highwater = buf2block(oldbuf)->highwater;
@@ -791,7 +791,7 @@ int incoming_message(struct superblock *sb, struct client *client)
 
 	if ((err = readpipe(sock, &message.head, sizeof(message.head))))
 		goto pipe_error;
-	trace(warn("%x/%u", message.head.code, message.head.length);)
+	trace(warn("%x/%u", message.head.code, message.head.length););
 	if (message.head.length > maxbody)
 		goto message_too_long;
 	if ((err = readpipe(sock, &message.body, message.head.length)))
@@ -831,7 +831,7 @@ int incoming_message(struct superblock *sb, struct client *client)
 		case REQUEST_WRITE:
 		{
 			struct region_message *body = (void *)&message.body;
-			trace(warn("received write request, region %Lx", (long long)body->regnum);)
+			trace(warn("received write request, region %Lx", (long long)body->regnum););
 
 			if ((sb->flags & STUCK_FLAG)) {
 				outbead(sock, BOUNCE_REQUEST, struct region_message, .regnum = body->regnum);
@@ -850,7 +850,7 @@ int incoming_message(struct superblock *sb, struct client *client)
 		case RELEASE_WRITE:
 		{
 			struct region_message *body = (void *)&message.body;
-			trace(warn("received write release, region %Lx", (long long)body->regnum);)
+			trace(warn("received write release, region %Lx", (long long)body->regnum););
 			put_region(sb, body->regnum);
 
 			if (!(sb->flags & STUCK_FLAG)) {
@@ -874,10 +874,10 @@ int incoming_message(struct superblock *sb, struct client *client)
 			off_t pos = body->regnum << sb->image.regionsize_bits;
 			int i;
 
-			trace(warn("sync region %Lx", (long long)body->regnum);)
-			pread(sb->member[0], sb->copybuf, sb->regionsize, pos);
+			trace(warn("sync region %Lx", (long long)body->regnum););
+			diskio(sb->member[0], sb->copybuf, sb->regionsize, pos, 0);
 			for (i = 1; i < sb->members; i++)
-				pwrite(sb->member[i], sb->copybuf, sb->regionsize, pos);
+				diskio(sb->member[i], sb->copybuf, sb->regionsize, pos, 1);
 			outbead(sock, REGION_SYNCED, struct region_message, .regnum = body->regnum);
 			break;
 		}
@@ -887,7 +887,7 @@ int incoming_message(struct superblock *sb, struct client *client)
 			struct region_message *body = (void *)&message.body;
 			int i;
 
-			trace(warn("region synced %Lx", (long long)body->regnum);)
+			trace(warn("region synced %Lx", (long long)body->regnum););
 			if (!sb->unsyncs) {
 				warn("what the???");
 				break;
@@ -927,13 +927,13 @@ int incoming(struct superblock *sb, struct client *client)
 
 	commit(sb);
 	assert(!sb->grants);
-	trace(show_regions(sb);)
+	trace(show_regions(sb););
 	return 0;
 }
 
 int syncd(struct superblock *sb, int sock)
 {
-	trace_on(warn("Sync daemon started");)
+	trace_on(warn("Sync daemon started"););
 	int err;
 
 	while (!(err = incoming_message(sb, &(struct client){ .sock = sock })))
@@ -947,7 +947,7 @@ static int sigpipe;
 
 void sighandler(int signum)
 {
-	trace_off(warn("caught signal %i", signum);)
+	trace_off(warn("caught signal %i", signum););
 	write(sigpipe, (char[]){signum}, 1);
 }
 
@@ -966,7 +966,7 @@ fd_t open_agent_connection(char *sockname)
 	int addr_len = sizeof(addr) - sizeof(addr.sun_path) + strlen(sockname);
 	int sock;
 
-	trace(warn("Connect to agent %s", sockname);)
+	trace(warn("Connect to agent %s", sockname););
 	if ((sock = socket(AF_UNIX, SOCK_STREAM, 0)) == -1)
 		error("Can't get socket");
 	strncpy(addr.sun_path, sockname, sizeof(addr.sun_path));
@@ -976,7 +976,7 @@ fd_t open_agent_connection(char *sockname)
 	if (connect(sock, (struct sockaddr *)&addr, addr_len) == -1)
 		error("Can't connect to agent");
 
-	trace_on(warn("Connected to agent");)
+	trace_on(warn("Connected to agent"););
 	return sock;
 }
 
@@ -1066,7 +1066,7 @@ int server(struct superblock *sb, char *sockname, int port)
 			if (!(sock = accept(listener, (struct sockaddr *)&addr, &addr_len)))
 				error("Cannot accept connection");
 
-			trace_on(warn("Received connection");)
+			trace_on(warn("Received connection"););
 			assert(sb->clients < MAX_CLIENTS); // !!! send error and disconnect
 			sb->client[sb->clients] = (struct client){ .sock = sock, .id = -1 };
 			pollvec[others+sb->clients] = (struct pollfd){ .fd = sock, .events = POLLIN };
@@ -1078,7 +1078,7 @@ int server(struct superblock *sb, char *sockname, int port)
 			u8 sig = 0;
 			/* it's stupid but this read also gets interrupted, so... */
 			do { } while (read(getsig, &sig, 1) == -1 && errno == EINTR);
-			trace_on(warn("caught signal %i", sig);)
+			trace_on(warn("caught signal %i", sig););
 			cleanup(sb); // !!! don't do it on segfault
 			if (sig == SIGINT) { 
 		        	signal(SIGINT, SIG_DFL);
@@ -1150,7 +1150,7 @@ int main(int argc, char *argv[])
 	for (i = 0; i < sb->image.journal_size; i++) {
 		struct buffer *logbuf = getblk(sb->logdev, log2sector(sb, i), sb->blocksize);
 		empty_block(sb, buf2block(logbuf), i, i);
-		trace_off(hexdump(buf2block(logbuf), sizeof(struct journal_block));)
+		trace_off(hexdump(buf2block(logbuf), sizeof(struct journal_block)););
 		write_buffer(logbuf);
 		brelse(logbuf);
 	}

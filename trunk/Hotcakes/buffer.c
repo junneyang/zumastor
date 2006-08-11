@@ -38,7 +38,7 @@ unsigned dirty_buffer_count;
 
 void set_buffer_dirty(struct buffer *buffer)
 {
-	buftrace(printf("set_buffer_dirty %llx state=%u\n", buffer->sector, buffer->flags & BUFFER_STATE_MASK);)
+	buftrace(printf("set_buffer_dirty %llx state=%u\n", buffer->sector, buffer->flags & BUFFER_STATE_MASK););
 	if (!buffer_dirty(buffer)) {
 		list_add_tail(&buffer->list, &dirty_buffers);
 		dirty_buffer_count++;
@@ -57,21 +57,21 @@ void set_buffer_uptodate(struct buffer *buffer)
 
 void brelse(struct buffer *buffer)
 {
-	buftrace(printf("Release buffer %llx\n", buffer->sector);)
+	buftrace(printf("Release buffer %llx\n", buffer->sector););
 	if (!--buffer->count)
 		trace_off(printf("Free buffer %llx\n", buffer->sector));
 }
 
 void brelse_dirty(struct buffer *buffer)
 {
-	buftrace(printf("Release dirty buffer %llx\n", buffer->sector);)
+	buftrace(printf("Release dirty buffer %llx\n", buffer->sector););
 	set_buffer_dirty(buffer);
 	brelse(buffer);
 }
 
 int read_buffer(struct buffer *buffer)
 {
-	buftrace(warn("read buffer %llx", buffer->sector);)
+	buftrace(warn("read buffer %llx", buffer->sector););
 	lseek(buffer->fd, buffer->sector << SECTOR_BITS , SEEK_SET);
 
 	unsigned count = 0;
@@ -99,7 +99,7 @@ int write_buffer_to(struct buffer *buffer, sector_t sector)
 
 int write_buffer(struct buffer *buffer)
 {
-	buftrace(warn("write buffer %Lx/%u", buffer->sector, buffer->size);)
+	buftrace(warn("write buffer %Lx/%u", buffer->sector, buffer->size););
 	int err;
 
 	if ((err = write_buffer_to(buffer, buffer->sector)))
@@ -115,7 +115,7 @@ unsigned buffer_hash(sector_t sector)
 
 struct buffer *new_buffer(sector_t sector, unsigned size)
 {
-	buftrace(printf("Allocate buffer for %llx\n", sector);)
+	buftrace(printf("Allocate buffer for %llx\n", sector););
 	struct buffer *buffer = (struct buffer *)malloc(sizeof(struct buffer));
 	buffer->data = malloc_aligned(size, size); // what if malloc fails?
 	buffer->count = 1;
@@ -131,7 +131,7 @@ struct buffer *getblk(unsigned fd, sector_t sector, unsigned size)
 
 	for (buffer = *bucket; buffer; buffer = buffer->hashlist)
 		if (buffer->sector == sector) {
-			buftrace(printf("Found buffer for %llx\n", sector);)
+			buftrace(printf("Found buffer for %llx\n", sector););
 			buffer->count++;
 			return buffer;
 		}
@@ -169,7 +169,7 @@ void evict_buffer(struct buffer *buffer)
 	for (; *pbuffer; pbuffer = &(*pbuffer)->hashlist)
 		if (*pbuffer == buffer) {
 			*pbuffer = buffer->hashlist;
-			buftrace(printf("Evict buffer for %llx\n", buffer->sector);)
+			buftrace(printf("Evict buffer for %llx\n", buffer->sector););
 //			free(buffer->data); // !!! malloc_aligned means pointer is wrong
 			free(buffer);
 			return;
