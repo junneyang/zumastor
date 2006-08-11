@@ -27,6 +27,32 @@
 
 #define DEFAULT_REPLICATION_PORT 4321
 
+
+/* wrappers for pread and pwrite */
+ssize_t preadn(int fd, void *buf, size_t count, off_t offset) {
+	int ret;	
+	do {
+		printf("preading crap\n");
+		ret = pread(fd, buf, count, offset); 
+		if(ret < 0) {
+			printf("wtf? errno: %s\n", strerror(errno));
+			return -errno;
+		}
+		printf("read %d bytes\n", count);
+	} while(ret != count);
+	return ret;
+}
+
+ssize_t pwriten(int fd, const void *buf, size_t count, off_t offset) {
+	int ret;
+	do {
+		ret = pwrite(fd, buf, count, offset);
+		if(ret < 0)
+			return -errno;
+	} while(ret != count);
+	return ret;
+}
+
 struct cl_header {
 	char magic[MAGIC_SIZE];
 };
@@ -35,6 +61,7 @@ struct delta_header {
 	char magic[MAGIC_SIZE];	
 	u64 chunk_num;
 	u32 chunk_size;
+  char mode[3];
 };
 
 struct delta_chunk_header {
@@ -77,7 +104,7 @@ int create_socket(char *sockname) {
         return sock;
 }
 
-int generate_delta(int clfile, int deltafile, char const *dev1name, char const *dev2name) {
+int generate_delta(char *mode, int clfile, int deltafile, char const *dev1name, char const *dev2name) {
 	int snapdev1, snapdev2, err, chunk_num = 0, ret = 0;
 	char *chunk_data1, *chunk_data2, *delta_data;
 	u64 chunkaddr;
@@ -87,6 +114,7 @@ int generate_delta(int clfile, int deltafile, char const *dev1name, char const *
 	struct delta_chunk_header dch = { .magic_num = MAGIC_NUM };
 
 	strncpy(dh.magic, DELTA_MAGIC_ID, MAGIC_SIZE);
+        strncpy(dh.mode, mode, 3);
 
 	snapdev1 = open(dev1name, O_RDONLY);
 	snapdev2 = open(dev2name, O_RDONLY);
@@ -131,34 +159,120 @@ int generate_delta(int clfile, int deltafile, char const *dev1name, char const *
 	write(deltafile, &dh, sizeof(struct delta_header));
 
 	/* Chunk address followed by CHUNK_SIZE bytes of chunk data */
-	while (read(clfile, &chunkaddr, sizeof(u64))> 0 &&  chunkaddr != -1) {
+	while (read(clfile, &chunkaddr, sizeof(u64)) == sizeof(u64) &&  chunkaddr != -1) {
 		chunk_num = chunk_num + 1;
 		printf("current chunkaddr: %Lu\n", chunkaddr);
 		chunkaddr = chunkaddr << chunk_size_bits;
 
 		/* read in and generate the necessary chunk information */
-		pread(snapdev1, chunk_data1, chunk_size, chunkaddr);
-		pread(snapdev2, chunk_data2, chunk_size, chunkaddr);
-		ret = create_delta_chunk(chunk_data1, chunk_data2, delta_data, chunk_size, &delta_size);
-		
-		if (ret == BUFFER_SIZE_ERROR) { /* delta is larger than chunk_size */
-			memcpy(delta_data, chunk_data2, chunk_size);
-			delta_size = chunk_size;
+		if (preadn(snapdev1, chunk_data1, chunk_size, chunkaddr) != chunk_size) {
+			printf("barf5\n");
+			return -1;
 		}
-		else if (ret < 0) {
-			printf("Delta for chunk address %Lu was not generated properly.\n", chunkaddr);
-			close(snapdev1);
-			close(snapdev2);
+		if (preadn(snapdev2, chunk_data2, chunk_size, chunkaddr) != chunk_size) {
+			printf("barf6\n");
 			return -1;
 		}
 
-		dch.check_sum = checksum((const unsigned char *)chunk_data1, chunk_size);
+                if (strcmp(mode, "-r") == 0) {
+                  memcpy(delta_data, chunk_data2, chunk_size);
+                  delta_size = chunk_size;
+                } else if (strcmp(mode, "-t") == 0) {
+                  ret = create_delta_chunk(chunk_data1, chunk_data2, delta_data, chunk_size, &delta_size);
+
+                  if (ret == BUFFER_SIZE_ERROR) { /* delta is larger than chunk_size */
+                    memcpy(delta_data, chunk_data2, chunk_size);
+                    delta_size = chunk_size;
+                  }
+                  else if (ret < 0) {
+                    printf("Delta for chunk address %Lu was not generated properly.\n", chunkaddr);
+                    close(snapdev1);
+                    close(snapdev2);
+                    return -1;
+                  }
+
+                  /* sanity test for delta creation */
+                  char *delta_test = (char *)malloc (chunk_size);
+                  ret = apply_delta_chunk(chunk_data1, delta_test, delta_data, chunk_size, delta_size);
+
+                  if (ret != chunk_size) {
+                    free(delta_test);
+                    printf("Unable to create delta\n");
+                    close(snapdev1);
+                    close(snapdev2);
+                    return -1;
+                  }
+
+                  if (checksum(delta_test, chunk_size) != checksum(chunk_data2, chunk_size))
+                    printf("checksum of delta_test does not match check_sum of chunk_data2");
+
+                  if (memcmp(delta_test, chunk_data2, chunk_size) != 0) {
+                    free(delta_test);
+                    printf("Generated delta does not match chunk on disk\n");
+                    close(snapdev1);
+                    close(snapdev2);
+                    return -1;
+                  }
+                  printf("Able to generate delta\n");
+                  free(delta_test);
+                } else {
+                    ret = create_delta_chunk(chunk_data1, chunk_data2, delta_data, chunk_size, &delta_size);
+
+                    if (ret == BUFFER_SIZE_ERROR) { /* delta is larger than chunk_size */
+                      memcpy(delta_data, chunk_data2, chunk_size);
+                      delta_size = chunk_size;
+                    }
+                    else if (ret < 0) {
+                      printf("Delta for chunk address %Lu was not generated properly.\n", chunkaddr);
+                      close(snapdev1);
+                      close(snapdev2);
+                      return -1;
+                    }
+
+                    /* sanity test for delta creation */
+                    char *delta_test = (char *)malloc (chunk_size);
+                    ret = apply_delta_chunk(chunk_data1, delta_test, delta_data, chunk_size, delta_size);
+
+                    if (ret != chunk_size) {
+                      free(delta_test);
+                      printf("Unable to create delta\n");
+                      close(snapdev1);
+                      close(snapdev2);
+                      return -1;
+		    }
+
+                    if (checksum(delta_test, chunk_size) != checksum(chunk_data2, chunk_size))
+                      printf("checksum of delta_test does not match check_sum of chunk_data2");
+
+		    if (memcmp(delta_test, chunk_data2, chunk_size) != 0) {
+                      free(delta_test);
+                      printf("Generated delta does not match chunk on disk\n");
+                      close(snapdev1);
+                      close(snapdev2);
+                      return -1;
+		    }
+		    printf("Able to generate delta\n");
+                    free(delta_test);
+                }
+
+		dch.check_sum = checksum((const unsigned char *)chunk_data2, chunk_size);
 		dch.chunk_addr = chunkaddr;
 		dch.data_length = delta_size;
 
 		/* write the chunk header and chunk delta data to the delta file*/
-		write(deltafile, &dch, sizeof(struct delta_chunk_header));
-		write(deltafile, delta_data, delta_size);
+		if (write(deltafile, &dch, sizeof(struct delta_chunk_header)) != sizeof(struct delta_chunk_header)) {
+			printf("barf7\n");
+			return -1;
+		}
+		if (write(deltafile, delta_data, delta_size) != delta_size) {
+			printf("barf8\n");
+			return -1;
+		}
+
+                if (strcmp(mode, "-t") == 0) {
+                  write(deltafile, chunk_data1, chunk_size);
+                  write(deltafile, chunk_data2, chunk_size);
+                }
 	}
 
 	/* Make sure everything in changelist was properly transmitted */
@@ -172,7 +286,10 @@ int generate_delta(int clfile, int deltafile, char const *dev1name, char const *
 	/* Updating header */
 	dh.chunk_num = chunk_num;
 	dh.chunk_size = chunk_size;
-	pwrite(deltafile, &dh, sizeof(struct delta_header), 0);
+	if (pwriten(deltafile, &dh, sizeof(struct delta_header), 0) != sizeof(struct delta_header)) {
+		printf("barf9\n");
+		return -1;
+	}
 
 	close(snapdev1);
 	close(snapdev2);
@@ -180,7 +297,7 @@ int generate_delta(int clfile, int deltafile, char const *dev1name, char const *
 	return 0;
 }
 
-int ddsnap_generate_delta(char const *changelistname, char const *deltaname, char const *dev1name, char const *dev2name) {
+int ddsnap_generate_delta(char *mode, char const *changelistname, char const *deltaname, char const *dev1name, char const *dev2name) {
 	int clfile, deltafile;
 
 	clfile = open(changelistname, O_RDONLY);
@@ -195,7 +312,7 @@ int ddsnap_generate_delta(char const *changelistname, char const *deltaname, cha
 		return 1;
 	}
 
-	if (generate_delta(clfile, deltafile, dev1name, dev2name) < 0) {
+	if (generate_delta(mode, clfile, deltafile, dev1name, dev2name) < 0) {
 		close(deltafile);
 		close(clfile);
 		return 1;
@@ -215,7 +332,10 @@ int apply_delta(int deltafile, char const *devname) {
 	struct delta_header dh = { };
 	struct delta_chunk_header dch = { };
 
-	snapdev = open(devname, O_WRONLY);
+        int c1_chk_sum = 0;
+        char *up_chunk1, *up_chunk2;
+
+	snapdev = open(devname, O_RDWR);
 	if (snapdev < 0) {
 		err = -errno;
 		printf("Could not open snapdev file \"%s\" for writing.\n", devname);
@@ -240,7 +360,12 @@ int apply_delta(int deltafile, char const *devname) {
 	delta_data = (char *)malloc (chunk_size);
 	updated    = (char *)malloc (chunk_size);
 
-	while (read(deltafile, &dch, sizeof(struct delta_chunk_header)) > 0) {
+        up_chunk1  = (char *)malloc (chunk_size);
+        up_chunk2  = (char *)malloc (chunk_size);
+
+        printf("Mode is %s\n", dh.mode);
+
+	while (read(deltafile, &dch, sizeof(struct delta_chunk_header)) == sizeof(struct delta_chunk_header)) {
 		if (dch.magic_num != MAGIC_NUM) {
 			printf("Not a proper delta file (magic_num doesn't match). \n");
 			close(snapdev);
@@ -254,29 +379,90 @@ int apply_delta(int deltafile, char const *devname) {
 		}
 
 		chunkaddr = dch.chunk_addr;
-		pread(snapdev, chunk_data, chunk_size, chunkaddr);
+		if (preadn(snapdev, chunk_data, chunk_size, chunkaddr) != chunk_size) {
+			printf("Snapdev reading of chunk1 has failed. \n");
+			close(snapdev);
+			return -1;
+		}
 		printf("Updating chunkaddr: %Lu\n", chunkaddr);
 
-		if (dch.check_sum != checksum((const unsigned char *)chunk_data, chunk_size)) {
-			printf("Common chunks are not the same\n");
-			close(snapdev);
+                if (strcmp(dh.mode, "-r") == 0) {
+                  memcpy(updated, delta_data, chunk_size);
+                } else if (strcmp(dh.mode, "-t") == 0) {
+                  if (dch.data_length == chunk_size)
+                    memcpy(updated, delta_data, chunk_size);
+                  else
+                    ret = apply_delta_chunk(chunk_data, updated, delta_data, chunk_size, dch.data_length);
+
+                  printf("ret %d data_length %d\n", ret, dch.data_length);
+
+                  if (ret < 0) {
+                    printf("Delta for chunk address %Lu was not applied properly.\n", chunkaddr);
+                    close(snapdev);
+                    return -1;
+                  }
+
+                  if (read(deltafile, up_chunk1, chunk_size) != chunk_size) {
+			  printf("barf1\n");
+			  return -1;
+		  }
+                  if (read(deltafile, up_chunk2, chunk_size) != chunk_size) {
+			  printf("barf2\n");
+			  return -1;
+		  }
+                  c1_chk_sum = checksum((const unsigned char *)chunk_data, chunk_size);
+
+                  if (dch.check_sum != checksum((const unsigned char *)updated, chunk_size)) {
+                    printf("Check_sum failed for chunk address %Lu \n", chunkaddr);
+
+		    /* sanity check with upstream chunk1 is the same */
+		    if (c1_chk_sum != checksum((const unsigned char *)up_chunk1, chunk_size)) {
+			    printf("check_sum of chunk1 doesn't match for address %Lu \n", chunkaddr);
+			    if (dch.data_length == chunk_size)
+				    memcpy(updated, delta_data, chunk_size);
+			    else
+				    ret = apply_delta_chunk(up_chunk1, updated, delta_data, chunk_size, dch.data_length);
+			    
+			    if (ret < 0)
+				    printf("Delta for chunk address %Lu with upstream chunk1 was not applied properly.\n", chunkaddr);
+			    
+			    if (dch.check_sum != checksum((const unsigned char *)updated, chunk_size)) {
+				    printf("Check_sum with port over chunk1 failed for chunk address %Lu \n", chunkaddr);
+				    memcpy(updated, up_chunk2, chunk_size);
+			    }
+		    } else {
+			    printf("apply doesn't work; check_sum of chunk1 matches for address %Lu \n", chunkaddr);
+			    if (memcmp(chunk_data, up_chunk1, chunk_size) != 0)
+				    printf("chunk_data does not match up_chunk1\n");
+			    else
+				    printf("chunk_data matches up_chunk1\n");
+			    memcpy(updated, up_chunk2, chunk_size);   
+		    }
+		  }
+		} else {
+                  if (dch.data_length == chunk_size)
+                    memcpy(updated, delta_data, chunk_size);
+                  else
+                    ret = apply_delta_chunk(chunk_data, updated, delta_data, chunk_size, dch.data_length);
+
+                  printf("ret %d data_length %d\n", ret, dch.data_length);
+
+                  if (ret < 0) {
+                    printf("Delta for chunk address %Lu was not applied properly.\n", chunkaddr);
+                    close(snapdev);
+                    return -1;
+                  }
+                  if (dch.check_sum != checksum((const unsigned char *)updated, chunk_size)) {
+                    printf("Check_sum failed for chunk address %Lu \n", chunkaddr);
+                    close(snapdev);
+                    return -1;
+                  }
+                }
+
+		if (pwriten(snapdev, updated, chunk_size, chunkaddr) != chunk_size) {
+			printf("barf3\n");
 			return -1;
 		}
-		
-		if (dch.data_length == chunk_size)
-			memcpy(updated, delta_data, chunk_size);	
-		else 
-			ret = apply_delta_chunk(chunk_data, updated, delta_data, chunk_size, dch.data_length);
-
-		printf("ret %d data_length %d\n", ret, dch.data_length);
-		
-		if (ret < 0) { 
-			printf("Delta for chunk address %Lu was not applied properly.\n", chunkaddr);
-			close(snapdev);
-			return -1;
-		}
-
-		pwrite(snapdev, updated, chunk_size, chunkaddr);
 		chunk_num++;
 	}
 
@@ -491,11 +677,11 @@ int main(int argc, char *argv[]) {
 	command = argv[1];
 
 	if (strcmp(command, "create-delta")==0) {
-		if (argc != 6) {
-			printf("usage: ddsnap create-delta <changelist> <deltafile> <snapdev1> <snapdev2>\n");
+		if (argc != 7) {
+			printf("usage: ddsnap create-delta -mode <changelist> <deltafile> <snapdev1> <snapdev2>\n");
 			return 1;
 		}
-		return ddsnap_generate_delta(argv[2], argv[3], argv[4], argv[5]);
+		return ddsnap_generate_delta(argv[2], argv[3], argv[4], argv[5], argv[6]);
 	} else if (strcmp(command, "apply-delta")==0) {
 		if (argc != 4) {
 			printf("usage: ddsnap apply-delta <deltafile> <dev>\n");
@@ -610,4 +796,3 @@ int main(int argc, char *argv[]) {
 	printf("Unrecognized command %s.\n", command);
 	return 1;
 }
-
