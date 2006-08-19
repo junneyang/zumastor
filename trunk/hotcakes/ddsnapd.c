@@ -2456,11 +2456,10 @@ int incoming(struct superblock *sb, struct client *client)
 		if (!valid_snaptag(sb, snap1) || !valid_snaptag(sb, snap2)) 
 			goto generate_error;
 		
-		int change_fd, bunksize = 4;		
-		char bunk[4]; /* why? barf... hate this passing fd crap */
+		int change_fd;		
 		
 		err_msg = "unable to get file descriptor for changelist";
-		if ((change_fd = recv_fd(sock, bunk, &bunksize)) < 0) 
+		if ((change_fd = recv_fd(sock)) < 0) 
 			goto generate_error;
 		
 		trace_on(printf("creating changelist from snap1 %d and snap2 %d\n", snap1, snap2););
