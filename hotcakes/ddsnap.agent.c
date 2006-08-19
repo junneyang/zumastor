@@ -55,7 +55,7 @@ int connect_clients(struct context *context)
 		}
 		if (outbead(control, CONNECT_SERVER, struct { }) < 0)
 			error("Could not send connect message");
-		if (send_fd(control, sock, "fark", 4) < 0)
+		if (send_fd(control, sock) < 0)
 			error("Could not pass server connection to target");
 		context->waiting[0] = context->waiting[--context->waiters];
 	}

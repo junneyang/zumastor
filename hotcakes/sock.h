@@ -79,47 +79,50 @@ static inline int open_socket(char const *name, unsigned port)
  * Pass a fd over a local socket connection.  You have to send some stream
  * data as well, just to make an ugly interface even more irritating.
  */
-int send_fd(int sock, int fd, char *bogus, unsigned len)
+static inline int send_fd(int sock, int fd)
 {
+	char bogus[]="fark";
 	char payload[CMSG_SPACE(sizeof(int))];
 	struct msghdr msg = {
 		.msg_control = payload,
 		.msg_controllen = sizeof(payload),
-		.msg_iov = &(struct iovec){ .iov_base = bogus, .iov_len = len },
+		.msg_iov = &(struct iovec){ .iov_base = bogus, .iov_len = sizeof(bogus) },
 		.msg_iovlen = 1,
 	};
 	struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
 
 	*cmsg = (struct cmsghdr){ CMSG_LEN(sizeof(int)), SOL_SOCKET, SCM_RIGHTS };
-	*((int *)CMSG_DATA(cmsg)) = fd; // this is really an array, .cmsg_len gives count (??)
+	memcpy(CMSG_DATA(cmsg), &fd, sizeof(fd)); // this is really an array, .cmsg_len gives count (??)
 
-	return sendmsg(sock, &msg, 0) != len? -EIO: len;
+	return sendmsg(sock, &msg, 0) != sizeof(bogus) ? -EIO : 0;
 }
 
-int recv_fd(int sock, char *bogus, unsigned *len)
+static inline int recv_fd(int sock)
 {
-        char payload[CMSG_SPACE(sizeof(int))];
-        struct msghdr msg = {
-                .msg_control = payload,
-                .msg_controllen = sizeof(payload),
-                .msg_iov = &(struct iovec){ .iov_base = bogus, .iov_len = *len },
-                .msg_iovlen = 1,
-        };
-        struct cmsghdr *cmsg;
-        int result;
+	char bogus[4];
+	char payload[CMSG_SPACE(sizeof(int))];
+	struct msghdr msg = {
+		.msg_control = payload,
+		.msg_controllen = sizeof(payload),
+		.msg_iov = &(struct iovec){ .iov_base = bogus, .iov_len = sizeof(bogus) },
+		.msg_iovlen = 1,
+	};
+	struct cmsghdr *cmsg;
+	int result;
+	int fd;
 
-        result = recvmsg(sock, &msg, 0);
+	result = recvmsg(sock, &msg, 0);
 
-        if (result <= 0)
-                return result;
-        if (!(cmsg = CMSG_FIRSTHDR(&msg)))
-                return -ENODATA;
-        if (cmsg->cmsg_len != CMSG_LEN(sizeof(int)) ||
+	if (result <= 0)
+		return result;
+	if (!(cmsg = CMSG_FIRSTHDR(&msg)))
+		return -ENODATA;
+	if (cmsg->cmsg_len != CMSG_LEN(sizeof(int)) ||
                 cmsg->cmsg_level != SOL_SOCKET ||
                 cmsg->cmsg_type != SCM_RIGHTS)
-                return -EBADMSG;
+		return -EBADMSG;
 
-        *len = result;
-        return *((int *)CMSG_DATA(cmsg));
+	memcpy(&fd, CMSG_DATA(cmsg), sizeof(fd));
+	return fd;
 }
 

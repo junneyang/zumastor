@@ -467,7 +467,7 @@ int generate_changelist(int sock, char const *changelist_filename, int snap1, in
 	
 	int change_fd = open(changelist_filename, O_CREAT | O_TRUNC | O_WRONLY);
 	
-	if(change_fd < 0) 
+	if (change_fd < 0) 
 		error("unable to open file: %s", changelist_filename);
 	
 	struct cl_header cl = { };
@@ -480,7 +480,7 @@ int generate_changelist(int sock, char const *changelist_filename, int snap1, in
 		return eek();
 	
 	/* send fd to server */
-	if( send_fd(sock, change_fd, "fark", 4) < 0)
+	if (send_fd(sock, change_fd) < 0)
 		error("unable to send fd to server");
 	
         struct head head;
