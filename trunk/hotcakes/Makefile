@@ -1,48 +1,53 @@
-kernel_tree=/src/2.6.17-rc6-dd/drivers/md
+kernel=/src/2.6.17-rc6-dd/drivers/md
+
+deps = Makefile trace.h buffer.h list.h sock.h
+ddsnap_deps = $(deps) ddsnap.h $(kernel)/dm-ddsnap.h 
+ddraid_deps = $(deps) ddraid.h $(kernel)/dm-ddraid.h
 
 ddraid_binaries =  mkddraid ddraid-server ddraid-agent
 ddsnap_binaries =  mkddsnap ddsnapd ddsnap-agent ddsnap
 binaries =  $(ddraid_binaries) $(ddsnap_binaries) devspam
-deps = Makefile trace.h buffer.h list.h sock.h diskio.h
-ddsnap_deps = $(deps) ddsnapd.h $(kernel_tree)/dm-ddsnap.h 
-ddraid_deps = $(deps) ddraid.h $(kernel_tree)/dm-ddraid.h
 
-INC = $(kernel_tree)
+includes = $(kernel)
+flags = -g -Wall
 
 all: $(binaries)
 
-buffer.o: buffer.c $(deps)
-	cc -g -Wall buffer.c -c
+diskio.o: diskio.c $(deps)
+	cc diskio.c $(flags) -c
+
+buffer.o: buffer.c diskio.o $(deps)
+	cc buffer.c $(flags) -c
 
 xdelta3.o: xdelta3.c
-	cc -g -Wall xdelta3.c -c
+	cc xdelta3.c $(flags) -c
 
 delta.o: delta.c xdelta3.c
-	cc -g -Wall delta.c -c
+	cc delta.c $(flags) -c
 
 mkddraid: ddraid.c buffer.o $(ddraid_deps)
-	cc -g -Wall -I$(INC) ddraid.c buffer.o -DCREATE -o mkddraid
+	cc ddraid.c $(flags) -I$(includes) diskio.o buffer.o -DCREATE -o mkddraid
 
 ddraid-server: ddraid.c buffer.o $(ddraid_deps)
-	cc -g -Wall -I$(INC) ddraid.c buffer.o -DSERVER -o ddraid-server
+	cc ddraid.c $(flags) -I$(includes) diskio.o buffer.o -DSERVER -o ddraid-server
 
 ddraid-agent: ddraid.agent.c $(ddraid_deps)
-	cc -Wall -I$(INC) ddraid.agent.c -lpthread -o ddraid-agent
+	cc ddraid.agent.c $(flags) -I$(includes) -lpthread -o ddraid-agent
 
 mkddsnap: ddsnapd.c buffer.o $(ddsnap_deps)
-	cc -g -Wall -I$(INC) ddsnapd.c buffer.o -DCREATE -o mkddsnap -lpopt
+	cc ddsnapd.c $(flags) -I$(includes) diskio.o buffer.o -DCREATE -o mkddsnap -lpopt
 
 ddsnapd: ddsnapd.c buffer.o $(ddsnap_deps)
-	cc -g -Wall -D_FILE_OFFSET_BITS=64 -I$(INC) ddsnapd.c buffer.o -DSERVER -o ddsnapd -lpopt
+	cc ddsnapd.c $(flags) -D_FILE_OFFSET_BITS=64 -I$(includes) diskio.o buffer.o -DSERVER -o ddsnapd -lpopt
 
 ddsnap-agent: ddsnap.agent.c $(ddsnap_deps)
-	cc -g -Wall -I$(INC) ddsnap.agent.c -o ddsnap-agent
+	cc ddsnap.agent.c $(flags) -I$(includes) -o ddsnap-agent
 
-ddsnap: ddsnap.c xdelta3.o delta.o $(ddsnap_deps)
-	cc -g -Wall -I$(INC) -D_FILE_OFFSET_BITS=64 xdelta3.o delta.o ddsnap.c -o ddsnap -lpopt
+ddsnap: ddsnap.c diskio.o xdelta3.o delta.o $(ddsnap_deps)
+	cc ddsnap.c $(flags) -I$(includes) -D_FILE_OFFSET_BITS=64 xdelta3.o delta.o diskio.o -o ddsnap -lpopt
 
 devspam: devspam.c trace.h
-	cc -g -Wall -I$(INC) devspam.c -o devspam
+	cc devspam.c $(flags) -I$(includes) -o devspam
 
 clean:
 	rm -f $(binaries) *.o a.out

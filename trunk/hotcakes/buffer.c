@@ -6,13 +6,14 @@
 #include <unistd.h>
 #include <errno.h> 
 #include "list.h"
+#include "diskio.h"
 #include "buffer.h"
 #include "trace.h"
 
 #define buftrace trace_off
 
 /*
- * Kernel-like buffer layer
+ * Kernel-like buffer api
  */
 
 /*
@@ -69,43 +70,29 @@ void brelse_dirty(struct buffer *buffer)
 	brelse(buffer);
 }
 
-int read_buffer(struct buffer *buffer)
-{
-	buftrace(warn("read buffer %llx", buffer->sector););
-	lseek(buffer->fd, buffer->sector << SECTOR_BITS , SEEK_SET);
-
-	unsigned count = 0;
-	while (count < buffer->size)
-	{
-		int n = read(buffer->fd, buffer->data, buffer->size - count);
-		if (n == -1)
-{
-	printf("read error %i %s %i\n", errno, strerror(errno), buffer->size - count);
-			return errno;
-}
-		count += n;
-	}
-	set_buffer_uptodate(buffer);
-	return 0;
-}
-
 int write_buffer_to(struct buffer *buffer, sector_t sector)
 {
-	while (pwrite(buffer->fd, buffer->data, buffer->size, sector  << SECTOR_BITS) == -1)
-		if (errno != EAGAIN)
-			return errno;
-	return 0;
+	return diskio(buffer->fd, buffer->data, buffer->size, sector << SECTOR_BITS, 1);
 }
 
 int write_buffer(struct buffer *buffer)
 {
 	buftrace(warn("write buffer %Lx/%u", buffer->sector, buffer->size););
-	int err;
+	int err = write_buffer_to(buffer, buffer->sector);
 
-	if ((err = write_buffer_to(buffer, buffer->sector)))
-		return err;
-	set_buffer_uptodate(buffer);
-	return 0;
+	if (!err)
+		set_buffer_uptodate(buffer);
+	return err;
+}
+
+int read_buffer(struct buffer *buffer)
+{
+	buftrace(warn("read buffer %llx", buffer->sector););
+	int err = diskio(buffer->fd, buffer->data, buffer->size, buffer->sector << SECTOR_BITS, 0);
+
+	if (!err)
+		set_buffer_uptodate(buffer);
+	return err;
 }
 
 unsigned buffer_hash(sector_t sector)

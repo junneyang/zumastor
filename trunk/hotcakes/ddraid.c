@@ -31,7 +31,6 @@
 #include "dm-ddraid.h"
 #include "trace.h"
 #include <asm/atomic.h>
-#include "diskio.h"
 
 /*
  * To do:

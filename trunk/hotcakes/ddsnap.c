@@ -14,12 +14,11 @@
 #include <sys/stat.h>
 #include <sys/socket.h>
 #include <sys/un.h>
-#include "ddsnapd.h"
+#include "ddsnap.h"
 #include "dm-ddsnap.h"
 #include "trace.h"
 #include "sock.h"
 #include "delta.h"
-#include "diskio.h"
 
 /* changelist and delta file header info */
 #define MAGIC_SIZE 8
@@ -28,7 +27,6 @@
 #define MAGIC_NUM 0xbead0023
 
 #define DEFAULT_REPLICATION_PORT 4321
-
 
 struct cl_header {
 	char magic[MAGIC_SIZE];

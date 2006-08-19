@@ -1,6 +1,5 @@
 #include <stdio.h>
 #include <unistd.h>
-#include <assert.h>
 
 #include "trace.h"
 #include "xdelta3.h"

@@ -11,7 +11,7 @@
 #include <sys/socket.h>
 #include <sys/ioctl.h>
 #include <netdb.h> 
-#include "ddsnapd.h"
+#include "ddsnap.h"
 #include "dm-ddsnap.h"
 #include "trace.h"
 

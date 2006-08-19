@@ -30,10 +30,9 @@
 #include "sock.h"
 #include "list.h"
 #include "buffer.h"
-#include "ddsnapd.h"
+#include "ddsnap.h"
 #include "dm-ddsnap.h"
 #include "trace.h"
-#include "diskio.h"
 
 #define trace trace_off
 #define jtrace trace_off
