@@ -1,3 +1,6 @@
+#include <string.h>
+#include <stdio.h>
+
 #define BREAK asm("int3")
 #define warn(string, args...) do { fprintf(stderr, "[%u] %s: " string "\n", getpid(), __func__, ##args); } while (0)
 #define error(string, args...) do { warn(string, ##args); BREAK; } while (0) 
