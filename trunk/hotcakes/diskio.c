@@ -8,22 +8,22 @@
 int diskio(int fd, void *data, size_t count, off_t offset, int write)
 {
 	while (count) {
-		ssize_t retval;
+		ssize_t ret;
 
 		if (write)
-			retval = pwrite(fd, data, count, offset);
+			ret = pwrite(fd, data, count, offset);
 		else
-			retval = pread(fd, data, count, offset);
+			ret = pread(fd, data, count, offset);
 
-		if (retval == -1)
+		if (ret == -1)
 			return -errno;
 
-		if (retval == 0)
+		if (ret == 0)
 			return -ERANGE;
 
-		data += retval;
-		offset += retval;
-		count -= retval;
+		data += ret;
+		offset += ret;
+		count -= ret;
 	}
 
 	return 0;
@@ -32,23 +32,23 @@ int diskio(int fd, void *data, size_t count, off_t offset, int write)
 #if 0 // these should be wrappers -- daniel
 int fdread(int fd, void *data, size_t count)
 {
-	ssize_t retval;
+	ssize_t ret;
 
 	while (count) {
-		retval = read(fd, data, count);
+		ret = read(fd, data, count);
 
-		if (retval == -1) {
+		if (ret == -1) {
 			warn("%s failed %s", "read", strerror(errno));
 			return -errno;
 		}
 
-		if (retval == 0) {
+		if (ret == 0) {
 			warn("short %s", "read");
 			return -ERANGE;
 		}
 
-		data += retval;
-		count -= retval;
+		data += ret;
+		count -= ret;
 	}
 
 	return 0;
@@ -56,23 +56,23 @@ int fdread(int fd, void *data, size_t count)
 
 int fdwrite(int fd, void const *data, size_t count)
 {
-	ssize_t retval;
+	ssize_t ret;
 
 	while (count) {
-		retval = write(fd, data, count);
+		ret = write(fd, data, count);
 
-		if (retval == -1) {
+		if (ret == -1) {
 			warn("%s failed %s", "write", strerror(errno));
 			return -errno;
 		}
 
-		if (retval == 0) {
+		if (ret == 0) {
 			warn("short %s", "write");
 			return -ERANGE;
 		}
 
-		data += retval;
-		count -= retval;
+		data += ret;
+		count -= ret;
 	}
 
 	return 0;
