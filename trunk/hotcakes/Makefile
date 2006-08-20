@@ -1,11 +1,11 @@
 kernel=/src/2.6.17-rc6-dd/drivers/md
 
-deps = Makefile trace.h buffer.h list.h sock.h
+deps = Makefile trace.h diskio.h buffer.h list.h sock.h
 ddsnap_deps = $(deps) ddsnap.h $(kernel)/dm-ddsnap.h
 ddraid_deps = $(deps) ddraid.h $(kernel)/dm-ddraid.h
 
-ddraid_binaries =  mkddraid ddraid-server ddraid-agent
-ddsnap_binaries =  mkddsnap ddsnapd ddsnap-agent ddsnap
+ddraid_binaries = mkddraid ddraidd ddraid-agent
+ddsnap_binaries = mkddsnap ddsnapd ddsnap-agent ddsnap
 binaries =  $(ddraid_binaries) $(ddsnap_binaries) devspam
 
 includes = $(kernel)
@@ -22,14 +22,14 @@ delta.o: delta.c
 diskio.o: diskio.c $(deps)
 	cc diskio.c -c $(flags)
 
-buffer.o: buffer.c $(deps)
+buffer.o: buffer.c diskio.c $(deps)
 	cc buffer.c -c $(flags)
 
 mkddraid: ddraid.c buffer.o $(ddraid_deps)
 	cc -DCREATE ddraid.c $(flags) -I$(includes) diskio.o buffer.o -o mkddraid
 
-ddraid-server: ddraid.c buffer.o $(ddraid_deps)
-	cc -DSERVER ddraid.c $(flags) -I$(includes) diskio.o buffer.o -o ddraid-server
+ddraidd: ddraid.c buffer.o $(ddraid_deps)
+	cc -DSERVER ddraid.c $(flags) -I$(includes) diskio.o buffer.o -o ddraidd
 
 ddraid-agent: ddraid.agent.c $(ddraid_deps)
 	cc ddraid.agent.c $(flags) -I$(includes) -lpthread -o ddraid-agent
@@ -46,8 +46,8 @@ ddsnap-agent: ddsnap.agent.c $(ddsnap_deps)
 ddsnap: ddsnap.c diskio.o xdelta3.o delta.o $(ddsnap_deps)
 	cc ddsnap.c $(flags) -I$(includes) -D_FILE_OFFSET_BITS=64 xdelta/xdelta3.o delta.o diskio.o -o ddsnap -lpopt
 
-devspam: devspam.c trace.h
-	cc devspam.c $(flags) -I$(includes) -o devspam
+devspam: tests/devspam.c trace.h
+	cd tests && cc devspam.c $(flags) -I$(includes) -o ../devspam
 
 clean:
 	rm -f $(binaries) *.o xdelta/*.o a.out
@@ -90,12 +90,12 @@ data=/dev/$(data0) /dev/$(data1) /dev/$(data2) /dev/$(data3) /dev/$(data4)
 ddraid-test: ddraid-test1 ddraid-test2
 
 ddraid-test1:
-	killall ddraid-server || true
+	killall ddraidd || true
 	sudo killall ddraid-agent || true
 	./mkddraid /dev/$(meta)
 	sudo /sbin/dmsetup remove $(device) || true
 	sudo ./ddraid-agent @test
-	./ddraid-server /dev/$(meta) $(data) $(sock) $(port)
+	./ddraidd /dev/$(meta) $(data) $(sock) $(port)
 
 ddraid-test2: ddraid-order2
 
@@ -118,7 +118,7 @@ ddraid-test4:
 	./devspam /dev/mapper/$(device) read 100 20 77
 
 ddraid-test8:
-	killall ddraid-server
+	killall ddraidd
 
 ddraid-test9:
 	sudo /sbin/dmsetup remove $(device)
