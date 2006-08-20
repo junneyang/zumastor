@@ -1,3 +1,33 @@
+>>> README says: I am pathetically out of date, please fix me! <<<
+
+>>> Emergency update starts here <<<
+
+A few main points:
+
+  * We historically built the user space code right in the kernel tree,
+    though now svn idiosyncracies pretty much force us to build externally,
+    which may be a good thing.  It does mean we need to watch closely for
+    protocol skew.  Time to start thinking about protocol stability I
+    suppose.
+
+  * Regression tests are in the main makefile.  This is kind of nice for
+    running tests but we should really put them in their own makefile in
+    the tests subdirectory.
+
+  * For now, the tests in the main makefile are what passes for usage
+    documentation.  Getting all the daemons started in the right order
+    is kind of tricky, the Makefile shows you how to do it.  What we really
+    need to do is make this less tricky, we are working on it.
+
+  * Check the project wiki for up to date usage information.  Oh wait, there
+    is no project wiki yet, sorry about that.  Maybe join the hotcakes irc
+    channel instead.  Oh wait, we don't have one yet.  Sigh.  Real soon now.
+
+  * Email us and volunteer to help with things!  Our gmail names are on the
+    main project page -- daniel
+
+>>> Inaccurate old cruft begins here <<<
+
 To install:
 
 For 2.4:
