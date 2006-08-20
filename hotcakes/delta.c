@@ -1,9 +1,9 @@
 #include <stdio.h>
 #include <unistd.h>
 
-#include "trace.h"
 #include "xdelta/xdelta3.h"
 #include "delta.h"
+#include "trace.h"
 
 int delta_chunk_helper(int (*func) (xd3_stream *), 
 		       const uint8_t *input1, 
