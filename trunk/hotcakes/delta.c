@@ -2,7 +2,7 @@
 #include <unistd.h>
 
 #include "trace.h"
-#include "xdelta3.h"
+#include "xdelta/xdelta3.h"
 #include "delta.h"
 
 int delta_chunk_helper(int (*func) (xd3_stream *), 
