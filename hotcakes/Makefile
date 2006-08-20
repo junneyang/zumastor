@@ -1,7 +1,7 @@
 kernel=/src/2.6.17-rc6-dd/drivers/md
 
 deps = Makefile trace.h buffer.h list.h sock.h
-ddsnap_deps = $(deps) ddsnap.h $(kernel)/dm-ddsnap.h 
+ddsnap_deps = $(deps) ddsnap.h $(kernel)/dm-ddsnap.h
 ddraid_deps = $(deps) ddraid.h $(kernel)/dm-ddraid.h
 
 ddraid_binaries =  mkddraid ddraid-server ddraid-agent
@@ -11,46 +11,46 @@ binaries =  $(ddraid_binaries) $(ddsnap_binaries) devspam
 includes = $(kernel)
 flags = -g -Wall
 
-all: $(binaries)
+all: diskio.o buffer.o xdelta3.o $(binaries)
+
+xdelta3.o:
+	cd xdelta && cc xdelta3.c -c $(flags)
+
+delta.o: delta.c
+	cc delta.c -c $(flags)
 
 diskio.o: diskio.c $(deps)
-	cc diskio.c $(flags) -c
+	cc diskio.c -c $(flags)
 
-buffer.o: buffer.c diskio.o $(deps)
-	cc buffer.c $(flags) -c
-
-xdelta3.o: xdelta3.c
-	cc xdelta3.c $(flags) -c
-
-delta.o: delta.c xdelta3.c
-	cc delta.c $(flags) -c
+buffer.o: buffer.c $(deps)
+	cc buffer.c -c $(flags)
 
 mkddraid: ddraid.c buffer.o $(ddraid_deps)
-	cc ddraid.c $(flags) -I$(includes) diskio.o buffer.o -DCREATE -o mkddraid
+	cc -DCREATE ddraid.c $(flags) -I$(includes) diskio.o buffer.o -o mkddraid
 
 ddraid-server: ddraid.c buffer.o $(ddraid_deps)
-	cc ddraid.c $(flags) -I$(includes) diskio.o buffer.o -DSERVER -o ddraid-server
+	cc -DSERVER ddraid.c $(flags) -I$(includes) diskio.o buffer.o -o ddraid-server
 
 ddraid-agent: ddraid.agent.c $(ddraid_deps)
 	cc ddraid.agent.c $(flags) -I$(includes) -lpthread -o ddraid-agent
 
 mkddsnap: ddsnapd.c buffer.o $(ddsnap_deps)
-	cc ddsnapd.c $(flags) -I$(includes) diskio.o buffer.o -DCREATE -o mkddsnap -lpopt
+	cc -DCREATE ddsnapd.c $(flags) -I$(includes) diskio.o buffer.o -o mkddsnap -lpopt
 
 ddsnapd: ddsnapd.c buffer.o $(ddsnap_deps)
-	cc ddsnapd.c $(flags) -D_FILE_OFFSET_BITS=64 -I$(includes) diskio.o buffer.o -DSERVER -o ddsnapd -lpopt
+	cc -DSERVER ddsnapd.c $(flags) -D_FILE_OFFSET_BITS=64 -I$(includes) diskio.o buffer.o -o ddsnapd -lpopt
 
 ddsnap-agent: ddsnap.agent.c $(ddsnap_deps)
 	cc ddsnap.agent.c $(flags) -I$(includes) -o ddsnap-agent
 
 ddsnap: ddsnap.c diskio.o xdelta3.o delta.o $(ddsnap_deps)
-	cc ddsnap.c $(flags) -I$(includes) -D_FILE_OFFSET_BITS=64 xdelta3.o delta.o diskio.o -o ddsnap -lpopt
+	cc ddsnap.c $(flags) -I$(includes) -D_FILE_OFFSET_BITS=64 xdelta/xdelta3.o delta.o diskio.o -o ddsnap -lpopt
 
 devspam: devspam.c trace.h
 	cc devspam.c $(flags) -I$(includes) -o devspam
 
 clean:
-	rm -f $(binaries) *.o a.out
+	rm -f $(binaries) *.o xdelta/*.o a.out
 
 install:
 	cp $(binaries) /usr/bin
