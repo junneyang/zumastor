@@ -2576,7 +2576,7 @@ int snap_server(struct superblock *sb, const char *agent_sockname, const char *s
 	if (bind(listener, (struct sockaddr *)&server_addr, server_addr_len) || listen(listener, 5))
 		error("Can't bind to socket");
 	
-	warn("snap server bound to socket %s", server_sockname);
+	warn("ddsnapd server bound to socket %s", server_sockname);
 	
 	/* Get agent connection */
 	struct sockaddr_un agent_addr = { .sun_family = AF_UNIX };
@@ -2589,16 +2589,14 @@ int snap_server(struct superblock *sb, const char *agent_sockname, const char *s
 	strncpy(agent_addr.sun_path, agent_sockname, sizeof(agent_addr.sun_path));
 	if (agent_sockname[0] == '@')
 		agent_addr.sun_path[0] = 0;
-
 	if (connect(sock, (struct sockaddr *)&agent_addr, agent_addr_len) == -1)
 		error("Can't connect to control socket");
-
-	trace_on(warn("Received control connection"););
-	pollvec[2] = (struct pollfd){ .fd = sock, .events = POLLIN };
-
-	writepipe(sock, &(struct head){ SERVER_READY, sizeof(server) }, sizeof(struct head));
-	writepipe(sock, &server, sizeof(server));
-
+	trace(warn("Received control connection"););
+	
+	if (writepipe(sock, &(struct head){ SERVER_READY, sizeof(server) }, sizeof(struct head)) < 0 ||
+	    writepipe(sock, &server, sizeof(server)) < 0) 
+		error("Unable to send SEVER_READY msg to agent");
+	
 #if 0
 	switch (fork()) {
 	case -1:
@@ -2610,8 +2608,9 @@ int snap_server(struct superblock *sb, const char *agent_sockname, const char *s
 	}
 #endif
 
-	pollvec[0] = (struct pollfd){ .fd = listener, .events = POLLIN };
-	pollvec[1] = (struct pollfd){ .fd = getsig, .events = POLLIN };
+	pollvec[0] = (struct pollfd){ .fd = listener, .events = (POLLIN | POLLHUP | POLLERR) };
+	pollvec[1] = (struct pollfd){ .fd = getsig, .events = (POLLIN | POLLHUP | POLLERR) };
+	pollvec[2] = (struct pollfd){ .fd = sock, .events = (POLLIN | POLLHUP | POLLERR) };
 
 	signal(SIGINT, sighandler);
 	signal(SIGTERM, sighandler);
@@ -2645,7 +2644,8 @@ int snap_server(struct superblock *sb, const char *agent_sockname, const char *s
 			struct client *client = malloc(sizeof(struct client));
 			*client = (struct client){ .sock = sock };
 			clientvec[clients] = client;
-			pollvec[others+clients] = (struct pollfd){ .fd = sock, .events = POLLIN };
+			pollvec[others+clients] = 
+				(struct pollfd){ .fd = sock, .events = (POLLIN | POLLHUP | POLLERR) };
 			clients++;
 		}
 

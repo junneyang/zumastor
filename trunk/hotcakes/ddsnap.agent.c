@@ -134,18 +134,15 @@ pipe_error:
 
 int monitor(char *sockname, struct context *context)
 {
-	unsigned maxclients = 100, clients = 0, others = 2;
+	unsigned maxclients = 100, clients = 0, others = 1;
 	struct pollfd pollvec[others+maxclients];
 	struct client *clientvec[maxclients];
 	struct sockaddr_un addr = { .sun_family = AF_UNIX };
 	int addr_len = sizeof(addr) - sizeof(addr.sun_path) + strlen(sockname);
-	int listener = socket(AF_UNIX, SOCK_STREAM, 0); //, locksock;
+	int listener = socket(AF_UNIX, SOCK_STREAM, 0); 
 
 	assert(listener > 0);
 	strncpy(addr.sun_path, sockname, sizeof(addr.sun_path));
-/*	if (sockname[0] == '@')
-		addr.sun_path[0] = 0;
-		else */
 	unlink(sockname);
 
 	if (bind(listener, (struct sockaddr *)&addr, addr_len) || listen(listener, 5))
@@ -163,8 +160,7 @@ int monitor(char *sockname, struct context *context)
 	}
 #endif
 
-	pollvec[0] = (struct pollfd){ .fd = listener, .events = POLLIN };
-	//pollvec[1] = (struct pollfd){ .fd = locksock, .events = POLLIN };
+	pollvec[0] = (struct pollfd){ .fd = listener, .events = (POLLIN | POLLHUP | POLLERR) };
 	assert(pollvec[0].fd > 0);
 
 	while (1) {
@@ -201,7 +197,8 @@ int monitor(char *sockname, struct context *context)
 			struct client *client = malloc(sizeof(struct client));
 			*client = (struct client){ .sock = sock };
 			clientvec[clients] = client;
-			pollvec[others+clients] = (struct pollfd){ .fd = sock, .events = POLLIN };
+			pollvec[others+clients] = 
+				(struct pollfd){ .fd = sock, .events = (POLLIN | POLLHUP | POLLERR) };
 			clients++;
 		}
 		/* Activity on connection? */
