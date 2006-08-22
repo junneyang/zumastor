@@ -559,46 +559,6 @@ void show_leaf(struct eleaf *leaf)
 	printf("\n");
 }
 
-/* snapshot1 is the older (temporal) snapshot compared to snapshot2 */
-static void gen_changelist_leaf(struct eleaf *leaf, int snapshot1, int snapshot2, int change_fd) {
-        struct exception *p;
-	int i;
-	u64 newchunk, tag1 = 1LL << snapshot1, tag2 = 1LL << snapshot2;
-	
-	for (i = 0; i < leaf->count; i++) 
-		for (p = emap(leaf, i); p < emap(leaf, i+1); p++) { 
-			if ((((p->share & tag2) == tag2) && ((p->share & tag1) == 0)) ||
-			    (((p->share & tag1) == tag1) && ((p->share & tag2) == 0)) ) {
-				newchunk = leaf->base_chunk + leaf->map[i].rchunk;
-				if (write(change_fd, &newchunk, sizeof(newchunk)) < 0)
-					warn("unable to write chunk %Lu to changelist\n", newchunk);
-				break;
-			}	
-		}	       
-}
-
-static void gen_changelist_subtree(struct superblock *sb, struct enode *node, int levels, int snapshot1, int snapshot2, int change_fd)
-{
-	int i;
-
-	for (i = 0; i < node->count; i++) {
-		struct buffer *buffer = snapread(sb, node->entries[i].sector);
-		if (levels)
-			gen_changelist_subtree(sb, buffer2node(buffer), levels - 1, snapshot1, snapshot2, change_fd);
-		else {
-			gen_changelist_leaf(buffer2leaf(buffer), snapshot1, snapshot2, change_fd);
-		}
-		brelse(buffer);
-	}
-}
-
-static void gen_changelist_tree(struct superblock *sb, int snapshot1, int snapshot2, int change_fd)
-{
-	struct buffer *buffer = snapread(sb, sb->image.etree_root);
-	gen_changelist_subtree(sb, buffer2node(buffer), sb->image.etree_levels - 1, snapshot1, snapshot2, change_fd);
-	brelse(buffer);
-}
-
 /*
  * origin_chunk_unique: an origin logical chunk is shared unless all snapshots
  * have exceptions.
@@ -1064,6 +1024,66 @@ static void show_tree(struct superblock *sb)
 	brelse(buffer);
 }
 
+#define MAX_ETREE_DEPTH 6
+
+struct etree_path { struct buffer *buffer; struct index_entry *pnext; };
+
+/* need to refactor to use a generic Traversal pattern
+   gen_changelist, delete_snapshot and show_tree can be
+   refactor to use a wrapper. - rob
+*/
+static void gen_changelist_leaf(struct eleaf *leaf, int snapshot1, int snapshot2, int change_fd) {
+	struct exception *p;
+	int i;
+	u64 newchunk, tag1 = 1LL << snapshot1, tag2 = 1LL << snapshot2;
+	
+	for (i = 0; i < leaf->count; i++) 
+		for (p = emap(leaf, i); p < emap(leaf, i+1); p++) { 
+			if ( ((p->share & tag2) == tag2) != ((p->share & tag1) == tag1) ) {
+				newchunk = leaf->base_chunk + leaf->map[i].rchunk;
+				if (write(change_fd, &newchunk, sizeof(newchunk)) < 0)
+					warn("unable to write chunk %Lu to changelist\n", newchunk);
+				break;
+			}	
+		}	       
+}
+
+static void gen_changelist_tree(struct superblock *sb, int snapshot1, int snapshot2, int change_fd)
+{
+	int levels = sb->image.etree_levels, level = -1;
+	struct etree_path path[levels];
+	struct buffer *nodebuf;
+	struct enode *node;
+	
+	while (1) {
+		do {
+			level++;
+			nodebuf = snapread(sb, level? path[level - 1].pnext++->sector: sb->image.etree_root);
+			node = buffer2node(nodebuf);
+			path[level].buffer = nodebuf;
+			path[level].pnext = node->entries;
+			trace(printf("push to level %i, %i nodes\n", level, node->count));
+		} while (level < levels - 1);
+		
+		trace(printf("do %i leaf nodes\n", node->count));
+		while (path[level].pnext  < node->entries + node->count) {
+			struct buffer *leafbuf = snapread(sb, path[level].pnext++->sector);
+			trace(printf("process leaf %Lx\n", leafbuf->sector));
+			gen_changelist_leaf(buffer2leaf(leafbuf), snapshot1, snapshot2, change_fd);
+			brelse(leafbuf);
+		}
+		
+		do {
+			brelse(nodebuf);
+			if (!level)
+				return;
+			nodebuf = path[--level].buffer;
+			node = buffer2node(nodebuf);
+			trace(printf("pop to level %i, %i of %i nodes\n", level, path[level].pnext - node->entries, node->count));
+		} while (path[level].pnext == node->entries + node->count);
+	}
+}
+
 /* High Level BTree Editing */
 
 /*
@@ -1085,10 +1105,6 @@ static void show_tree(struct superblock *sb)
  * a node to contain an esthetically pleasing binary number of pointers.
  * (Not done yet.)
  */
-
-#define MAX_ETREE_DEPTH 6
-
-struct etree_path { struct buffer *buffer; struct index_entry *pnext; };
 
 static struct buffer *probe(struct superblock *sb, u64 chunk, struct etree_path *path)
 {
