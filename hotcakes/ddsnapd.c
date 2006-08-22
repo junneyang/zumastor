@@ -125,26 +125,16 @@ typedef int fd_t;
 /*
  * Ripped from libiddev.  It's not quite ugly enough to convince me to
  * add a new dependency on a library that nobody has yet, but it's close.
+ *
+ * Heavily modified so it would work with ramdisk devices. 
  */
 static int fd_size(int fd, u64 *bytes)
 {
-	struct stat stat;
 	int error;
-
-	if ((error = fstat(fd, &stat)))
+	unsigned sectors;
+	if ((error = ioctl(fd, BLKGETSIZE, &sectors)))
 		return error;
-
-	if (S_ISREG(stat.st_mode)) {
-		*bytes = stat.st_size;
-		return 0;
-	}
-	if ((error = ioctl(fd, BLKGETSIZE64, bytes))) {
-		unsigned sectors;
-
-		if ((error = ioctl(fd, BLKGETSIZE, &sectors)))
-			return error;
-		*bytes = ((u64)sectors) << 9;
-	}
+	*bytes = ((u64)sectors) << 9;
 	return 0;
 }
 
@@ -223,10 +213,7 @@ struct superblock
 		char magic[8];
 		u64 create_time;
 		sector_t etree_root;
-		sector_t bitmap_base;
-		sector_t chunks, freechunks;
 		sector_t orgchunks;
-		chunk_t last_alloc;
 		u64 flags;
 		u32 blocksize_bits, chunksize_bits;
 		u64 deleting;
@@ -240,9 +227,15 @@ struct superblock
 		} snaplist[MAX_SNAPSHOTS];
 		u32 snapshots;
 		u32 etree_levels;
-		u32 bitmap_blocks;
 		s32 journal_base, journal_next, journal_size;
 		u32 sequence;
+		struct allocation_info {
+			sector_t bitmap_base;
+			sector_t chunks;
+			sector_t freechunks;
+			chunk_t  last_alloc;
+			u64      bitmap_blocks;
+		} alloc[2]; /* shouldn't be hardcoded? */
 	} image;
 
 	/* Derived, not saved to disk */
@@ -251,7 +244,7 @@ struct superblock
 	u32 sectors_per_block_bits, sectors_per_block;
 	u32 sectors_per_chunk_bits, sectors_per_chunk;
 	unsigned flags;
-	unsigned snapdev, orgdev;
+	unsigned snapdev, metadev, orgdev;
 	unsigned snaplock_hash_bits;
 	struct snaplock **snaplocks;
 	unsigned copybuf_size;
@@ -260,6 +253,7 @@ struct superblock
 	chunk_t dest_exception;
 	unsigned copy_chunks;
 	unsigned max_commit_blocks;
+	struct allocation_info  *metadata, *snapdata, *current_alloc;
 };
 
 #define SB_BUSY 1
@@ -313,12 +307,12 @@ static u32 checksum_block(struct superblock *sb, u32 *data)
 
 static struct buffer *jgetblk(struct superblock *sb, unsigned i)
 {
-	return getblk(sb->snapdev, journal_sector(sb, i), sb->blocksize);
+	return getblk(sb->metadev, journal_sector(sb, i), sb->blocksize);
 }
 
 static struct buffer *jread(struct superblock *sb, unsigned i)
 {
-	return bread(sb->snapdev, journal_sector(sb, i), sb->blocksize);
+	return bread(sb->metadev, journal_sector(sb, i), sb->blocksize);
 }
 
 /*
@@ -546,7 +540,7 @@ static void _show_journal(struct superblock *sb)
 
 struct buffer *snapread(struct superblock *sb, sector_t sector)
 {
-	return bread(sb->snapdev, sector, sb->blocksize);
+	return bread(sb->metadev, sector, sb->blocksize);
 }
 
 void show_leaf(struct eleaf *leaf)
@@ -846,7 +840,7 @@ static inline void clear_bitmap_bit(unsigned char *bitmap, unsigned bit)
 	bitmap[bit >> 3] &= ~(1 << (bit & 7));
 }
 
-static unsigned calc_bitmap_blocks(struct superblock *sb, u64 chunks)
+static u64 calc_bitmap_blocks(struct superblock *sb, u64 chunks)
 {
 	unsigned chunkshift = sb->image.chunksize_bits;
 	return (chunks + (1 << (chunkshift + 3)) - 1) >> (chunkshift + 3);
@@ -854,19 +848,37 @@ static unsigned calc_bitmap_blocks(struct superblock *sb, u64 chunks)
 
 static void init_allocation(struct superblock *sb)
 {
-	u64 chunks = sb->image.chunks;
-	unsigned bitmaps = calc_bitmap_blocks(sb, chunks);
-	unsigned bitmap_base_chunk = (SB_SECTOR + sb->sectors_per_block + sb->sectors_per_chunk  - 1) >> sb->sectors_per_chunk_bits;
-	unsigned bitmap_chunks = sb->image.bitmap_blocks = bitmaps; // !!! chunksize same as blocksize
-	unsigned reserved = bitmap_base_chunk + bitmap_chunks + sb->image.journal_size; // !!! chunksize same as blocksize
-	unsigned sector = sb->image.bitmap_base = bitmap_base_chunk << sb->sectors_per_chunk_bits;
+	int meta_flag = (sb->metadata != sb->snapdata);
 
+	/* gnarly stuff... must be a better way */
+	u64 meta_chunks = sb->metadata->chunks, snap_chunks = sb->snapdata->chunks;	
+	u64 meta_bitmaps = calc_bitmap_blocks(sb, meta_chunks), snap_bitmaps = calc_bitmap_blocks(sb, snap_chunks);
+	unsigned meta_bitmap_base_chunk = (SB_SECTOR + sb->sectors_per_block + sb->sectors_per_chunk  - 1) >> sb->sectors_per_chunk_bits;
+	u64 meta_bitmap_chunks = sb->metadata->bitmap_blocks = meta_bitmaps; // !!! chunksize same as blocksize
+	u64 snap_bitmap_base_chunk = meta_bitmap_base_chunk + meta_bitmap_chunks;
+	u64 snap_bitmap_chunks = sb->snapdata->bitmap_blocks = snap_bitmaps;
+		
+	/* generic variable for initialization */
+	unsigned reserved = meta_bitmap_base_chunk + meta_bitmap_chunks + sb->image.journal_size 
+		            + (meta_flag ? snap_bitmap_chunks : 0); // !!! chunksize same as blocksize
+	unsigned sector = sb->metadata->bitmap_base = (meta_bitmap_base_chunk << sb->sectors_per_chunk_bits);
+	unsigned bitmaps = meta_bitmaps + (meta_flag ? snap_bitmaps : 0);
+	u64 chunks  = meta_chunks  + (meta_flag ? snap_chunks  : 0);
+
+	sb->snapdata->bitmap_base = (meta_flag ? (snap_bitmap_base_chunk << sb->sectors_per_chunk_bits) : sb->metadata->bitmap_base);
+	sb->metadata->freechunks = meta_chunks - reserved;
+	sb->snapdata->freechunks = (meta_flag ? snap_chunks : (meta_chunks - reserved));
+	sb->metadata->last_alloc = sb->snapdata->last_alloc = 0;
+	sb->image.journal_base = (meta_bitmap_base_chunk + meta_bitmap_chunks + (meta_flag ? snap_bitmap_chunks : 0)) << sb->sectors_per_chunk_bits;
+
+	if(meta_flag) 
+		warn("metadata store size: %Lu chunks (%Lu sectors)", meta_chunks, meta_chunks << sb->sectors_per_chunk_bits);
 	warn("snapshot store size: %Lu chunks (%Lu sectors)", chunks, chunks << sb->sectors_per_chunk_bits);
 	printf("Initializing %u bitmap blocks... ", bitmaps);
 
 	unsigned i;
 	for (i = 0; i < bitmaps; i++, sector += sb->sectors_per_block) {
-		struct buffer *buffer = getblk(sb->snapdev, sector, sb->blocksize);
+		struct buffer *buffer = getblk(sb->metadev, sector, sb->blocksize);
 		printf("%Lx ", buffer->sector);
 		memset(buffer->data, 0, sb->blocksize);
 		/* Reserve bitmaps and superblock */
@@ -882,9 +894,6 @@ static void init_allocation(struct superblock *sb)
 		brelse_dirty(buffer);
 	}
 	printf("\n");
-	sb->image.freechunks = chunks - reserved;
-	sb->image.last_alloc = 0;
-	sb->image.journal_base = (bitmap_base_chunk + bitmap_chunks) << sb->sectors_per_chunk_bits;
 }
 
 static void free_chunk(struct superblock *sb, chunk_t chunk)
@@ -893,7 +902,7 @@ static void free_chunk(struct superblock *sb, chunk_t chunk)
 	u64 bitmap_block = chunk >> bitmap_shift;
 
 	trace(printf("free chunk %Lx\n", chunk););
-	struct buffer *buffer = snapread(sb, sb->image.bitmap_base + (bitmap_block << sb->sectors_per_block_bits));
+	struct buffer *buffer = snapread(sb, sb->current_alloc->bitmap_base + (bitmap_block << sb->sectors_per_block_bits));
 	if (!get_bitmap_bit(buffer->data, chunk & bitmap_mask)) {
 		warn("chunk %Lx already free!", (long long)chunk);
 		brelse(buffer);
@@ -901,12 +910,13 @@ static void free_chunk(struct superblock *sb, chunk_t chunk)
 	}
 	clear_bitmap_bit(buffer->data, chunk & bitmap_mask);
 	brelse_dirty(buffer);
-	sb->image.freechunks++;
+	sb->current_alloc->freechunks++;
 	set_sb_dirty(sb); // !!! optimize this away
 }
 
 static inline void free_block(struct superblock *sb, sector_t address)
 {
+	sb->current_alloc = sb->metadata;
 	free_chunk(sb, address >> sb->sectors_per_chunk_bits); // !!! assumes blocksize = chunksize
 }
 
@@ -915,7 +925,7 @@ void grab_chunk(struct superblock *sb, chunk_t chunk) // just for testing
 	unsigned bitmap_shift = sb->image.blocksize_bits + 3, bitmap_mask = (1 << bitmap_shift ) - 1;
 	u64 bitmap_block = chunk >> bitmap_shift;
 
-	struct buffer *buffer = snapread(sb, sb->image.bitmap_base + (bitmap_block << sb->sectors_per_block_bits));
+	struct buffer *buffer = snapread(sb, sb->current_alloc->bitmap_base + (bitmap_block << sb->sectors_per_block_bits));
 	assert(!get_bitmap_bit(buffer->data, chunk & bitmap_mask));
 	set_bitmap_bit(buffer->data, chunk & bitmap_mask);
 	brelse_dirty(buffer);
@@ -929,7 +939,7 @@ chunk_t alloc_chunk_range(struct superblock *sb, chunk_t chunk, chunk_t range)
 	u64 length = (range + bit + 7) >> 3;
 
 	while (1) {
-		struct buffer *buffer = snapread(sb, sb->image.bitmap_base + (blocknum << sb->sectors_per_block_bits));
+		struct buffer *buffer = snapread(sb, sb->current_alloc->bitmap_base + (blocknum << sb->sectors_per_block_bits));
 		unsigned char c, *p = buffer->data + offset;
 		unsigned tail = sb->blocksize  - offset, n = tail > length? length: tail;
 	
@@ -946,7 +956,7 @@ chunk_t alloc_chunk_range(struct superblock *sb, chunk_t chunk, chunk_t range)
 						assert(!get_bitmap_bit(buffer->data, chunk & bitmap_mask));
 						set_bitmap_bit(buffer->data, chunk & bitmap_mask);
 						brelse_dirty(buffer);
-						sb->image.freechunks--;
+						sb->current_alloc->freechunks--;
 						set_sb_dirty(sb); // !!! optimize this away
 						return chunk;
 					}
@@ -954,8 +964,8 @@ chunk_t alloc_chunk_range(struct superblock *sb, chunk_t chunk, chunk_t range)
 	
 		brelse(buffer);
 		if (!length)
-			return 0;
-		if (++blocknum == sb->image.bitmap_blocks)
+			return -1;
+		if (++blocknum == sb->current_alloc->bitmap_blocks)
 			 blocknum = 0;
 		offset = 0;
 		trace_off(printf("go to bitmap %Lx\n", blocknum););
@@ -967,12 +977,12 @@ static int delete_snapshot(struct superblock *sb, unsigned tag);
 
 static chunk_t alloc_chunk(struct superblock *sb)
 {
-	chunk_t last = sb->image.last_alloc, total = sb->image.chunks, found;
+	chunk_t last = sb->current_alloc->last_alloc, total = sb->current_alloc->chunks, found;
 
 	do {
-		if ((found = alloc_chunk_range(sb, last, total - last)) ||
-		    (found = alloc_chunk_range(sb, 0, last))) {
-			sb->image.last_alloc = found;
+		if ((found = alloc_chunk_range(sb, last, total - last)) != -1 ||
+		    (found = alloc_chunk_range(sb, 0, last)) != -1) {
+			sb->current_alloc->last_alloc = found;
 			set_sb_dirty(sb); // !!! optimize this away
 			return (found);
 		}
@@ -991,18 +1001,20 @@ static chunk_t alloc_chunk(struct superblock *sb)
 
 static sector_t alloc_block(struct superblock *sb)
 {
+	sb->current_alloc = sb->metadata;
 	return alloc_chunk(sb) << sb->sectors_per_chunk_bits; // !!! assume blocksize = chunksize
 }
 
 static u64 alloc_exception(struct superblock *sb)
 {
+	sb->current_alloc = sb->snapdata;
 	return alloc_chunk(sb);
 }
 
 static struct buffer *new_block(struct superblock *sb)
 {
 	// !!! handle alloc_block failure
-	return getblk(sb->snapdev, alloc_block(sb), sb->blocksize);
+	return getblk(sb->metadev, alloc_block(sb), sb->blocksize);
 }
 
 static struct buffer *new_leaf(struct superblock *sb)
@@ -1396,6 +1408,8 @@ static int delete_snapshots_from_leaf(struct superblock *sb, struct eleaf *leaf,
 	struct etree_map *pmap, *dmap;
 	unsigned i, any = 0;
 
+	sb->current_alloc = sb->snapdata;
+
 	/* Scan top to bottom clearing snapshot bit and moving
 	 * non-zero entries to top of block */
 	for (i = leaf->count; i--;) {
@@ -1407,7 +1421,7 @@ static int delete_snapshots_from_leaf(struct superblock *sb, struct eleaf *leaf,
 			any |= share & snapmask;
 			if ((share &= ~snapmask))
 				*--dest = *p;
-			else
+			else 
 				free_chunk(sb, p->chunk);
 		}
 		leaf->map[i].offset = (char *)dest - (char *)leaf;
@@ -1954,6 +1968,12 @@ void finish_reply(int sock, struct addto *r, unsigned code, unsigned id)
 
 /* Initialization, State load/save */
 
+void setup_alloc_sb(struct superblock *sb) {
+	sb->metadata = &(sb->image.alloc[0]);
+	sb->snapdata = &(sb->image.alloc[((sb->metadev == sb->snapdev) ? 0 : 1)]);
+	sb->current_alloc = sb->metadata; /* why? because I can */
+}
+
 void setup_sb(struct superblock *sb)
 {
 	unsigned blocksize_bits = sb->image.blocksize_bits;
@@ -1977,12 +1997,13 @@ void setup_sb(struct superblock *sb)
 	unsigned snaplock_hash_bits = 8;
 	sb->snaplock_hash_bits = snaplock_hash_bits;
 	sb->snaplocks = (struct snaplock **)calloc(1 << snaplock_hash_bits, sizeof(struct snaplock *));
+
+	setup_alloc_sb(sb);
 }
 
 void load_sb(struct superblock *sb)
 {
-  
-	struct buffer *buffer = bread(sb->snapdev, SB_SECTOR, SB_SIZE);
+	struct buffer *buffer = bread(sb->metadev, SB_SECTOR, SB_SIZE);
 	memcpy(&sb->image, buffer->data, sizeof(sb->image));
 	
 	trace(printf("sb image.magic number is: %s and SB_MAGIC is: %s\n",sb->image.magic, SB_MAGIC));
@@ -1997,7 +2018,7 @@ void load_sb(struct superblock *sb)
 void save_sb(struct superblock *sb)
 {
 	if (sb->flags & SB_DIRTY) {
-		struct buffer *buffer = getblk(sb->snapdev, SB_SECTOR, SB_SIZE);
+		struct buffer *buffer = getblk(sb->metadev, SB_SECTOR, SB_SIZE);
 		memcpy(buffer->data, &sb->image, sizeof(sb->image));
 		write_buffer(buffer);
 		brelse(buffer);
@@ -2034,11 +2055,14 @@ int init_snapstore(struct superblock *sb)
 	u64 size;
 	if ((error = fd_size(sb->snapdev, &size)))
 		error("Error %i: %s determining snapshot store size", error, strerror(error));
-	sb->image.chunks = size >> sb->image.chunksize_bits;
+	sb->snapdata->chunks = size >> sb->image.chunksize_bits;
+	if ((error = fd_size(sb->metadev, &size)))
+		error("Error %i: %s determining metadata store size", error, strerror(error));
+	sb->metadata->chunks = size >> sb->image.chunksize_bits;
 	if ((error = fd_size(sb->orgdev, &size)))
 		error("Error %i: %s determining origin volume size", errno, strerror(errno));
 	sb->image.orgchunks = size >> sb->image.chunksize_bits;
-
+	
 	sb->image.journal_size = 100;
 #ifdef TEST_JOURNAL
 	sb->image.journal_size = 5;
@@ -2152,48 +2176,52 @@ return 0;
 //   Set remainder bits in new last bitmap byte
 //   Set new bitmap base and chunks count
 
-static void expand_snapstore(struct superblock *sb, u64 newchunks)
-{
-	u64 oldchunks = sb->image.chunks;
-	unsigned oldbitmaps = sb->image.bitmap_blocks;
-	unsigned newbitmaps = calc_bitmap_blocks(sb, newchunks);
-	unsigned blocksize = sb->blocksize;
-	unsigned blockshift = sb->image.blocksize_bits;
-	u64 oldbase = sb->image.bitmap_base << SECTOR_BITS;
-	u64 newbase = sb->image.bitmap_base << SECTOR_BITS;
+
+/* need to fix and test expand_snapstore */
+
+/* static void expand_snapstore(struct superblock *sb, u64 newchunks) */
+/* { */
+/* 	u64 oldchunks = sb->image.chunks; */
+/* 	unsigned oldbitmaps = sb->image.bitmap_blocks; */
+/* 	unsigned newbitmaps = calc_bitmap_blocks(sb, newchunks); */
+/* 	unsigned blocksize = sb->blocksize; */
+/* 	unsigned blockshift = sb->image.blocksize_bits; */
+/* 	u64 oldbase = sb->image.bitmap_base << SECTOR_BITS; */
+/* 	u64 newbase = sb->image.bitmap_base << SECTOR_BITS; */
 	
-	int i;
-	for (i = 0; i < oldbitmaps; i++) {
-		// do it one block at a time for now !!! sucks
-		// maybe should do copy with bread/write?
-		diskio(sb->snapdev, sb->copybuf, blocksize, oldbase + (i << blockshift), 0);  // 64 bit!!!
-		diskio(sb->snapdev, sb->copybuf, blocksize, newbase + (i << blockshift), 1);  // 64 bit!!!
-	}
+/* 	int i; */
+/* 	for (i = 0; i < oldbitmaps; i++) { */
+/* 		// do it one block at a time for now !!! sucks */
+/* 		// maybe should do copy with bread/write? */
+/* 		diskio(sb->snapdev, sb->copybuf, blocksize, oldbase + (i << blockshift), 0);  // 64 bit!!! */
+/* 		diskio(sb->snapdev, sb->copybuf, blocksize, newbase + (i << blockshift), 1);  // 64 bit!!! */
+/* 	} */
 
-	if ((oldchunks & 7)) {
-		sector_t sector = (oldbase >> SECTOR_BITS) + ((oldbitmaps - 1) << sb->sectors_per_block_bits);
-		struct buffer *buffer = getblk(sb->snapdev, sector, blocksize);
-		buffer->data[(oldchunks >> 3) & (blocksize - 1)] &= ~(0xff << (oldchunks & 7));
-		brelse_dirty(buffer);
-	}
+/* 	if ((oldchunks & 7)) { */
+/* 		sector_t sector = (oldbase >> SECTOR_BITS) + ((oldbitmaps - 1) << sb->sectors_per_block_bits); */
+/* 		struct buffer *buffer = getblk(sb->snapdev, sector, blocksize); */
+/* 		buffer->data[(oldchunks >> 3) & (blocksize - 1)] &= ~(0xff << (oldchunks & 7)); */
+/* 		brelse_dirty(buffer); */
+/* 	} */
 
-	for (i = oldbitmaps; i < newbitmaps; i++) {
-		struct buffer *buffer = getblk(sb->snapdev, newbase >> SECTOR_BITS, blocksize);
-		memset(buffer->data, 0, sb->blocksize);
-		/* Suppress overrun allocation in partial last byte */
-		if (i == newbitmaps - 1 && (newchunks & 7))
-			buffer->data[(newchunks >> 3) & (blocksize - 1)] |= 0xff << (newchunks & 7);
-		brelse_dirty(buffer);
-	}
+/* 	for (i = oldbitmaps; i < newbitmaps; i++) { */
+/* 		struct buffer *buffer = getblk(sb->snapdev, newbase >> SECTOR_BITS, blocksize); */
+/* 		memset(buffer->data, 0, sb->blocksize); */
+/* 		/\* Suppress overrun allocation in partial last byte *\/ */
+/* 		if (i == newbitmaps - 1 && (newchunks & 7)) */
+/* 			buffer->data[(newchunks >> 3) & (blocksize - 1)] |= 0xff << (newchunks & 7); */
+/* 		brelse_dirty(buffer); */
+/* 	} */
 
-	for (i = 0; i < newbitmaps; i++) {
-		grab_chunk(sb, (newbase >> blockshift) + i); // !!! assume blocksize = chunksize
-	}
+/* 	for (i = 0; i < newbitmaps; i++) { */
+/* 		grab_chunk(sb, (newbase >> blockshift) + i); // !!! assume blocksize = chunksize */
+/* 	} */
 
-	sb->image.bitmap_base = newbase >> SECTOR_BITS;
-	sb->image.chunks = newchunks;
-	save_state(sb);
-}
+/* 	sb->image.bitmap_base = newbase >> SECTOR_BITS; */
+/* 	sb->image.chunks = newchunks; */
+/* 	save_state(sb); */
+/* } */
+
 
 int client_locks(struct superblock *sb, struct client *client, int check)
 {
@@ -2709,7 +2737,7 @@ void usage(poptContext optCon, int exitcode, char *error, char *addl) {
 #endif
 
 static void *useme[] = {
-	_show_journal, delete_tree_range, expand_snapstore,
+	_show_journal, delete_tree_range, /* expand_snapstore, */
 	show_tree_range, snapnum_tag, show_snapshots,
 };
 
@@ -2727,11 +2755,11 @@ int main(int argc, const char *argv[])
 	optCon = poptGetContext(NULL, argc, argv, optionsTable, 0);
 
 #ifdef SERVER
-	poptSetOtherOptionHelp(optCon, "dev/snapshot dev/origin agent_socket server_socket");
+	poptSetOtherOptionHelp(optCon, "dev/snapshot dev/origin [dev/meta] agent_socket server_socket");
 	if (argc < 5) {
 #else
-	poptSetOtherOptionHelp(optCon, "dev/snapshot dev/origin");
-	if (argc < 3) {
+	poptSetOtherOptionHelp(optCon, "dev/snapshot dev/origin [dev/meta]");
+	if (!(argc == 3 || argc == 4)) {
 #endif
 		poptPrintUsage(optCon, stderr, 0);
 		exit(1);
@@ -2757,25 +2785,27 @@ int main(int argc, const char *argv[])
 	struct superblock *sb = &(struct superblock){};
 
 	init_buffers();
-#ifdef SERVER
-	if (argc < 5)
-		error("usage: %s dev/snapshot dev/origin socket port", argv[0]);
-#else
-	if (argc < 3)
-		error("usage: %s dev/snapshot dev/origin", argv[0]);
-#endif
+
 	if (!(sb->snapdev = open(poptGetArg(optCon), O_RDWR | O_DIRECT)))
 		error("Could not open snapshot store %s", argv[1]);
 
 	if (!(sb->orgdev = open(poptGetArg(optCon), O_RDONLY | O_DIRECT)))
 		error("Could not open origin volume %s", argv[2]);
+
+	sb->metadev = sb->snapdev; 
 #ifdef SERVER
+	if(argc == 6 && !(sb->metadev = open(poptGetArg(optCon), O_RDWR))) /* can I do an O_DIRECT on the ramdevice? */ 
+		error("Could not open meta volume %s", argv[3]);
+
 	const char *agent_sockname = poptGetArg(optCon);
 	const char *server_sockname = poptGetArg(optCon);
 	poptFreeContext(optCon);
 	return snap_server(sb, agent_sockname, server_sockname);
 #else
+	if(argc == 4 && !(sb->metadev = open(poptGetArg(optCon), O_RDWR))) 
+		error("Could not open meta volume %s", argv[3]);
 	poptFreeContext(optCon);
+	
 #if 0
 	init_snapstore(sb); 
 	create_snapshot(sb, 0);
@@ -2793,7 +2823,8 @@ int main(int argc, const char *argv[])
 	warn("dirty buffers = %i", dirty_buffer_count);
 	show_tree(sb);
 	return 0;
-#endif
+#endif /* end of test code */
+
 	return init_snapstore(sb); 
 #endif
 	if (useme) ;
