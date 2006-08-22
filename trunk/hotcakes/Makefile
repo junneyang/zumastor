@@ -9,7 +9,7 @@ ddsnap_binaries = mkddsnap ddsnapd ddsnap-agent ddsnap
 binaries =  $(ddraid_binaries) $(ddsnap_binaries) devspam
 
 includes = $(kernel)
-flags = -g -Wall
+flags = -g -Wall -D_FILE_OFFSET_BITS=64
 
 all: diskio.o buffer.o xdelta3.o $(binaries)
 
@@ -38,13 +38,13 @@ mkddsnap: ddsnapd.c buffer.o $(ddsnap_deps)
 	cc -DCREATE ddsnapd.c $(flags) -I$(includes) diskio.o buffer.o -o mkddsnap -lpopt
 
 ddsnapd: ddsnapd.c buffer.o $(ddsnap_deps)
-	cc -DSERVER ddsnapd.c $(flags) -D_FILE_OFFSET_BITS=64 -I$(includes) diskio.o buffer.o -o ddsnapd -lpopt
+	cc -DSERVER ddsnapd.c $(flags) -I$(includes) diskio.o buffer.o -o ddsnapd -lpopt
 
 ddsnap-agent: ddsnap.agent.c $(ddsnap_deps)
 	cc ddsnap.agent.c $(flags) -I$(includes) -o ddsnap-agent
 
 ddsnap: ddsnap.c diskio.o xdelta3.o delta.o $(ddsnap_deps)
-	cc ddsnap.c $(flags) -I$(includes) -D_FILE_OFFSET_BITS=64 xdelta/xdelta3.o delta.o diskio.o -o ddsnap -lpopt
+	cc ddsnap.c $(flags) -I$(includes) xdelta/xdelta3.o delta.o diskio.o -o ddsnap -lpopt
 
 devspam: tests/devspam.c trace.h
 	cd tests && cc devspam.c $(flags) -I$(includes) -o ../devspam
