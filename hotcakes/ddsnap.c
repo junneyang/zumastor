@@ -14,6 +14,7 @@
 #include <sys/stat.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <zlib.h>
 #include "ddsnap.h"
 #include "dm-ddsnap.h"
 #include "trace.h"
@@ -27,6 +28,8 @@
 #define MAGIC_NUM 0xbead0023
 
 #define DEFAULT_REPLICATION_PORT 4321
+#define YES 1
+#define NO 0
 
 struct cl_header {
 	char magic[MAGIC_SIZE];
@@ -44,6 +47,7 @@ struct delta_chunk_header {
 	u32 data_length;
 	u64 chunk_addr;
 	u64 check_sum;
+	int compress;
 };
 
 int eek(void) {
@@ -79,11 +83,11 @@ int create_socket(char *sockname) {
         return sock;
 }
 
-int generate_delta(char *mode, int clfile, int deltafile, char const *dev1name, char const *dev2name) {
+int generate_delta(char *mode, char *comp, int clfile, int deltafile, char const *dev1name, char const *dev2name) {
 	int snapdev1, snapdev2, err, chunk_num = 0, ret = 0;
-	char *chunk_data1, *chunk_data2, *delta_data;
-	u64 chunkaddr;
+	char *chunk_data1, *chunk_data2, *delta_data, *comp_delta;
 	u32 chunk_size, chunk_size_bits, delta_size;
+	u64 chunkaddr, comp_size = (chunk_size*2);
 	struct cl_header cl = { };
 	struct delta_header dh = { };
 	struct delta_chunk_header dch = { .magic_num = MAGIC_NUM };
@@ -130,7 +134,8 @@ int generate_delta(char *mode, int clfile, int deltafile, char const *dev1name, 
 	chunk_data1 = (char *)malloc (chunk_size);
 	chunk_data2 = (char *)malloc (chunk_size);
 	delta_data  = (char *)malloc (chunk_size);
-	
+	comp_delta  = (char *)malloc (comp_size);
+
 	/* Delta header set-up */
 	write(deltafile, &dh, sizeof(struct delta_header));
 	
@@ -196,18 +201,50 @@ int generate_delta(char *mode, int clfile, int deltafile, char const *dev1name, 
 			}
                 }
 		
+		/* zlib compression */
+		comp_size = (chunk_size*2);
+		int comp_ret = compress(comp_delta, &comp_size, delta_data, delta_size);
+		if (comp_ret == Z_MEM_ERROR) {
+			printf("Not enough buffer memory for compression. \n");
+			close(snapdev1);
+			close(snapdev2);
+			return -1;
+		}
+		if (comp_ret == Z_BUF_ERROR) {
+			printf("Not enough room in the output buffer for compression.\n");
+			close(snapdev1);
+			close(snapdev2);
+			return -1;
+		}		
+
 		dch.check_sum = checksum((const unsigned char *)chunk_data2, chunk_size);
 		dch.chunk_addr = chunkaddr;
-		dch.data_length = delta_size;
+
+		if (comp_size < delta_size && (strcmp(comp, "-c") == 0)) {
+			dch.compress = YES;
+			dch.data_length = comp_size;
+		}
+		else {
+			dch.compress = NO;
+			dch.data_length = delta_size;
+		}
 		
 		/* write the chunk header and chunk delta data to the delta file*/
 		if (write(deltafile, &dch, sizeof(struct delta_chunk_header)) != sizeof(struct delta_chunk_header)) {
 			printf("delta_chunk_header was not written properly to deltafile. \n");
 			return -1;
 		}
-		if (write(deltafile, delta_data, delta_size) != delta_size) {
-			printf("delta_data was not written properly to deltafile. \n");
-			return -1;
+		
+		if (dch.compress == YES) {
+			if (write(deltafile, comp_delta, comp_size) != comp_size) {
+				printf("comp_delta was not written properly to deltafile. \n");
+				return -1;
+			}
+		} else {
+			if (write(deltafile, delta_data, delta_size) != delta_size) {
+				printf("delta_data was not written properly to deltafile. \n");
+				return -1;
+			}
 		}
 		
                 if (strcmp(mode, "-t") == 0) {
@@ -238,7 +275,7 @@ int generate_delta(char *mode, int clfile, int deltafile, char const *dev1name, 
 	return 0;
 }
 
-int ddsnap_generate_delta(char *mode, char const *changelistname, char const *deltaname, char const *dev1name, char const *dev2name) {
+int ddsnap_generate_delta(char *mode, char *comp, char const *changelistname, char const *deltaname, char const *dev1name, char const *dev2name) {
 	int clfile, deltafile;
 	
 	clfile = open(changelistname, O_RDONLY);
@@ -253,7 +290,7 @@ int ddsnap_generate_delta(char *mode, char const *changelistname, char const *de
 		return 1;
 	}
 	
-	if (generate_delta(mode, clfile, deltafile, dev1name, dev2name) < 0) {
+	if (generate_delta(mode, comp, clfile, deltafile, dev1name, dev2name) < 0) {
 		close(deltafile);
 		close(clfile);
 		return 1;
@@ -267,8 +304,8 @@ int ddsnap_generate_delta(char *mode, char const *changelistname, char const *de
 
 int apply_delta(int deltafile, char const *devname) {
 	int snapdev;
-	u64 chunkaddr;
-	char *chunk_data, *delta_data, *updated;
+	u64 chunkaddr, uncomp_size;
+	char *chunk_data, *delta_data, *updated, *comp_delta;
 	int err, check_chunk_num = 0, chunk_num = 0, chunk_size = 0, ret = 0;
 	struct delta_header dh = { };
 	struct delta_chunk_header dch = { };
@@ -298,8 +335,9 @@ int apply_delta(int deltafile, char const *devname) {
 	check_chunk_num = dh.chunk_num;
 	chunk_size = dh.chunk_size;
 	chunk_data = (char *)malloc (chunk_size);
-	delta_data = (char *)malloc (chunk_size);
+	delta_data = (char *)malloc (chunk_size*2);
 	updated    = (char *)malloc (chunk_size);
+	comp_delta = (char *)malloc (chunk_size);
 
         up_chunk1  = (char *)malloc (chunk_size);
         up_chunk2  = (char *)malloc (chunk_size);
@@ -312,11 +350,21 @@ int apply_delta(int deltafile, char const *devname) {
 			close(snapdev);
 			return -1;
 		}
-		if (read(deltafile, delta_data, dch.data_length) != dch.data_length) {
-			printf("Could not properly read delta_data from deltafile. \n");
-			close(snapdev);
-			return -1;
+
+		if (dch.compress == YES) {
+			if (read(deltafile, comp_delta, dch.data_length) != dch.data_length) {
+				printf("Could not properly read comp_delta from deltafile. \n");
+				close(snapdev);
+				return -1;
+			}
+		} else {
+			if (read(deltafile, delta_data, dch.data_length) != dch.data_length) {
+				printf("Could not properly read delta_data from deltafile. \n");
+				close(snapdev);
+				return -1;
+			}
 		}
+
 		chunkaddr = dch.chunk_addr;
 		if (diskio(snapdev, chunk_data, chunk_size, chunkaddr, 0) < 0) {
 			printf("Snapdev reading of downstream chunk1 has failed. \n");
@@ -324,16 +372,42 @@ int apply_delta(int deltafile, char const *devname) {
 			return -1;
 		}
 		printf("Updating chunkaddr: %Lu\n", chunkaddr);
-		
+
+		if (dch.compress == YES) {
+
+			printf("data was compressed \n");
+
+			/* zlib decompression */
+			uncomp_size = chunk_size*2;
+			int comp_ret = uncompress(delta_data, &uncomp_size, comp_delta, dch.data_length);
+			if (comp_ret == Z_MEM_ERROR) {
+				printf("Not enough buffer memory for decompression. \n");
+				close(snapdev);
+				return -1;
+			}
+			if (comp_ret == Z_BUF_ERROR) {
+				printf("Not enough room in the output buffer for decompression. \n");
+				close(snapdev);
+				return -1;
+			}
+			if (comp_ret == Z_DATA_ERROR) {
+				printf("The input data was corrupted for decompression. \n");
+				close(snapdev);
+				return -1;
+			}
+		} else 
+			uncomp_size = dch.data_length;
+
                 if (strcmp(dh.mode, "-r") == 0) {
 			memcpy(updated, delta_data, chunk_size);
 		} else {
-			if (dch.data_length == chunk_size)
+			if (uncomp_size == chunk_size)
 				memcpy(updated, delta_data, chunk_size);
 			else
-				ret = apply_delta_chunk(chunk_data, updated, delta_data, chunk_size, dch.data_length);
+				ret = apply_delta_chunk(chunk_data, updated, delta_data, chunk_size, uncomp_size);
 			
-			printf("ret %d data_length %d\n", ret, dch.data_length);
+			printf("uncomp_size %Lu & dch.data_length %u \n", uncomp_size, dch.data_length);
+			printf("ret %d \n", ret);
 			
 			if (ret < 0) {
 				printf("Delta for chunk address %Lu was not applied properly.\n", chunkaddr);
@@ -628,11 +702,11 @@ int main(int argc, char *argv[]) {
 	command = argv[1];
 
 	if (strcmp(command, "create-delta")==0) {
-		if (argc != 7) {
-			printf("usage: %s create-delta -mode <changelist> <deltafile> <snapdev1> <snapdev2>\n", argv[0]);
+		if (argc != 8) {
+			printf("usage: %s create-delta -mode -comp <changelist> <deltafile> <snapdev1> <snapdev2>\n", argv[0]);
 			return 1;
 		}
-		return ddsnap_generate_delta(argv[2], argv[3], argv[4], argv[5], argv[6]);
+		return ddsnap_generate_delta(argv[2], argv[3], argv[4], argv[5], argv[6], argv[7]);
 	} 
 	if (strcmp(command, "apply-delta")==0) {
 		if (argc != 4) {

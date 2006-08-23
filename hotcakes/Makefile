@@ -44,7 +44,7 @@ ddsnap-agent: ddsnap.agent.c $(ddsnap_deps)
 	cc ddsnap.agent.c $(flags) -I$(includes) -o ddsnap-agent
 
 ddsnap: ddsnap.c diskio.o xdelta3.o delta.o $(ddsnap_deps)
-	cc ddsnap.c $(flags) -I$(includes) xdelta/xdelta3.o delta.o diskio.o -o ddsnap -lpopt
+	cc ddsnap.c $(flags) -I$(includes) xdelta/xdelta3.o delta.o diskio.o -o ddsnap -lpopt -lz
 
 devspam: tests/devspam.c trace.h
 	cd tests && cc devspam.c $(flags) -I$(includes) -o ../devspam
@@ -126,8 +126,8 @@ ddraid-test9:
 #ddsnap-test: ddsnap-test1 ddsnap-test2 ddsnap-test3
 
 dd-init: 
-	ln -s /dev/hdb2 /dev/test-snapstore || true
-	ln -s /dev/hdb1 /dev/test-origin || true
+	ln -s /dev/sdb2 /dev/test-snapstore || true
+	ln -s /dev/sdb1 /dev/test-origin || true
 #	insmod /src/2.6.17-rc6-dd/drivers/md/dm-ddsnap.ko || true
 	killall ddsnapd || true
 	killall ddsnap-agent || true
