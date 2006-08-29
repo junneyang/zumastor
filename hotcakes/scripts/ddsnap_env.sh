@@ -6,7 +6,8 @@ SNAPSTORE_DEV=/dev/test-snapstore
 ORIGIN_DEV=/dev/test-origin
 LOGICAL_VOL_NAME=lvol
 SNAPSHOT_VOL_NAME=snap
-SERVER_SOCK_NAME=localhost:8080
+SERVER_SOCK_NAME=/tmp/server
+AGENT_SOCK_NAME=/tmp/control
 SIZE_LOGICAL_VOL=16064936  # number of sectors
 REMOTE_HOST=blinkin
 

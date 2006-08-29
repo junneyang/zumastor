@@ -1,4 +1,4 @@
-#!/bin/bash -x
+#!/bin/bash 
 
 # import all the sweet variables used throughout the ddsnap scripts
 . ddsnap_env.sh
@@ -9,4 +9,3 @@ echo "Initializing devices locally and remotely"
 ./mkddsnap $SNAPSTORE_DEV $ORIGIN_DEV
 ssh $REMOTE_HOST ${DDSNAP_HOME}/mkddsnap $SNAPSTORE_DEV $ORIGIN_DEV
 
-cd -  # go back to the original directory 
