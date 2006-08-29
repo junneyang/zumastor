@@ -1,7 +1,3 @@
->>> README says: I am pathetically out of date, please fix me! <<<
-
->>> Emergency update starts here <<<
-
 A few main points:
 
   * We historically built the user space code right in the kernel tree,
@@ -29,72 +25,119 @@ A few main points:
   * Email us and volunteer to help with things!  Our gmail names are on the
     main project page -- daniel
 
->>> Inaccurate old cruft begins here <<<
+Check out our sources (if you havn't already!):
 
-To install:
+  - svn checkout http://hotcakes.googlecode.com/svn/trunk/ hotcakes
 
-For 2.4:
+  - The rest of this document will be from the root ./hotcakes/hotcakes/
 
-  - Start with a 2.4.26 tree from kernel.org
+Set up Linux 2.6:
 
-  - Apply the 2.4.26 (pre) device mapper patch
+  - Get a 2.6.7 or older kernel.org tree, it already has device mapper
 
-For 2.6:
+  - Apply the ddsnap-2.6.XX patch. From the root of the 2.6 tree:
 
-  - Get a 2.6.7 kernel.org tree, it already has device mapper
+      patch -p1 < /path/to/hotcakes/patches/ddsnap-2.6.XX
 
-For both:
+  - Make sure that device mapper and the dm_dd* are selected to be installed 
+    as modules.
 
-  - Make sure device mapper is enabled in the configuration
-
-  - Now:
-      cd drivers/md
-      tar -xzf ddsnap-2.6.XX.tgz
-      cd ddsnap
-      make
-
-  - Apply the ddsnap-2.4.26 patch that you see in this directory.
-    From the root of the 2.6 tree:
-
-      patch -p1 <ddsnap-2.6.XX
+      Location:
+        -> Device Drivers
+          -> Multi-device support (RAID and LVM)
+            -> Multiple devices driver support (RAID and LVM) (MD [=y]) 
+              -> Device mapper support (BLK_DEV_DM [=m])
 
   - Rebuild the kernel on your test machine, install and reboot
 
-To run tests, you need a couple of block devices named /dev/test-origin 
-and /dev/test-snapstore.  These can just be symlinks to test partitions 
-on some disk, or they can even be files (I think, but I haven't tested 
-this for a while).  Once you have the devices you are ready to go:
+Build the dd-tools:
 
-      make test
+  - Before you build, check the Makefile to make sure that the 'kernel' line 
+    at the location of the Linux md drivers
 
-Check out what the test is actually doing by looking in the makefile.  
-Basically, it's:
+      ex: kernel=/usr/src/linux-2.6/drivers/md
 
-  - try to clean up from a previous test by killing the server and
-    removing the dm device
+  - Now it is time to build!
 
-  - recreate the snapshot store, so each test starts clean
+      make
 
-  - start the snapshot server
+Testing ddsnap:
 
-  - create a snapshot or origin client
+  - In order to get started you will need two block devices. 
 
-  - run pokedev, which randomly or sequentially reads or writes a bunch
-    of 4K blocks on the snapshot or origin virtual device
+  - Find dd-init in the Makefile and update it so it will correctly link 
+    /dev/test-snapstore and /dev/test-origin to the two block devices.
 
-Watch the tracing output to see what happened.  The kernel driver 
-tracing defaults to on at the moment, so there should be lots of 
-console output for each IO transfer.
+       ex: change /dev/sda8 and /dev/sda7 to be your devices
 
-Please let me know what I've forgotten in the above recipes, so that I 
-can incorporate improvements.  One thing: the makefile tests 
-arbitrarily bind the server to port 8080, chances are good you are 
-using this for something else.  I should think of a better default 
-port.  Anyway, just edit the makefile for now.
+           dd-init: 
+                   ln -s /dev/sda8 /dev/test-snapstore || true
+                   ln -s /dev/sda7 /dev/test-origin || true
 
-To remove the test device mapper device:
+  - The following command will setup the symlinks, load modules,  and get you
+    ready to start the ddsnap-agent and ddsnapd server.
 
-     make test9
+	make dd-init
 
-Note note note!  This source tree is in mid-hack!  It's pretty in place 
-and ugly in others.
+  - Now, we must start the ddsnap-agent.
+
+        make dd-agent
+
+  - Next, we start the ddsnapd server.
+
+        make dd-server
+
+    Note: neither ddsnapd or ddsnap-agent will daemonize.
+
+  - At this point you should see some debug messages, but everything should 
+    appear to be happy. Now that we have the server up it is time to create 
+    the logical volume for the origin.
+
+        make origin
+
+  - And viola! You should have /dev/mapper/vol to use as a test volume.
+    Time to put a filesystem on there.
+
+       mkfs.ext3 /dev/mapper/vol # ext3, but you can use any filesystem
+
+    You should now be able to use /dev/mapper/vol just like any other
+    partition.
+
+  - Time to actually use it. We will create a test snapshot.
+
+       ./ddsnap create-snapshot /tmp/server 0 
+
+       echo 0 29302496 ddsnap /dev/test-snapstore /dev/test-origin \
+          /tmp/control 0 | sudo dmsetup create snapshot0
+
+    Note: 29302496 is derived by taking the number of blocks from /proc/partition 
+    and multiplying by two. For example, if your device is named sda7, you can use
+    this to derive the number:
+
+       echo $((2 * `grep sda7 /proc/partitions | awk '{print $3'}`))
+
+    There should now be a /dev/mapper/snapshot0 device that reflects the newly 
+    made snapshot. 
+
+  - In order for snapshots to be helpful, we have to change the disk in some
+    way. Write a few files to disk or use the devspam utility included with
+    this distribution to add some random data to the device.
+
+  - Create another snapshot!
+
+       ./ddsnap create-snapshot /tmp/server 1
+
+       echo 0 29302496 ddsnap /dev/test-snapstore /dev/test-origin \
+          /tmp/control 1 | sudo dmsetup create snapshot1
+
+  - To create a delta, we will first create a changelist for the snapshots.
+
+       ./ddsnap generate-changelist /tmp/server changelist0-1 0 1
+
+    There should now be a filed called changelist0-1 in your working directory.
+
+  - Next, create the delta file using the changelist.
+
+       ./ddsnap create-delta -r -n changelist0-1 deltafile0-1 \ 
+            /dev/mapper/snapshot0 /dev/mapper/snapshot1
+
