@@ -1062,13 +1062,13 @@ static void gen_changelist_tree(struct superblock *sb, int snapshot1, int snapsh
 			node = buffer2node(nodebuf);
 			path[level].buffer = nodebuf;
 			path[level].pnext = node->entries;
-			trace(printf("push to level %i, %i nodes\n", level, node->count));
+			trace(printf("push to level %i, %i nodes\n", level, node->count););
 		} while (level < levels - 1);
 		
-		trace(printf("do %i leaf nodes\n", node->count));
+		trace(printf("do %i leaf nodes\n", node->count););
 		while (path[level].pnext  < node->entries + node->count) {
 			struct buffer *leafbuf = snapread(sb, path[level].pnext++->sector);
-			trace(printf("process leaf %Lx\n", leafbuf->sector));
+			trace(printf("process leaf %Lx\n", leafbuf->sector););
 			gen_changelist_leaf(buffer2leaf(leafbuf), snapshot1, snapshot2, change_fd);
 			brelse(leafbuf);
 		}
@@ -1079,7 +1079,7 @@ static void gen_changelist_tree(struct superblock *sb, int snapshot1, int snapsh
 				return;
 			nodebuf = path[--level].buffer;
 			node = buffer2node(nodebuf);
-			trace(printf("pop to level %i, %i of %i nodes\n", level, path[level].pnext - node->entries, node->count));
+			trace(printf("pop to level %i, %i of %i nodes\n", level, path[level].pnext - node->entries, node->count););
 		} while (path[level].pnext == node->entries + node->count);
 	}
 }
@@ -1268,7 +1268,7 @@ static int finish_copyout(struct superblock *sb)
 		assert(size <= sb->copybuf_size);
 		if (diskio(is_snap? sb->snapdev: sb->orgdev, sb->copybuf, size, 
 					source << sb->image.chunksize_bits, 0) < 0)
-			trace(printf("copyout death on read\n"));
+			trace(printf("copyout death on read\n"););
 		if (diskio(sb->snapdev, sb->copybuf, size, 
 					sb->dest_exception << sb->image.chunksize_bits, 1) < 0)
 			trace_on(printf("copyout death on write\n"););
@@ -1313,7 +1313,7 @@ static chunk_t make_unique(struct superblock *sb, chunk_t chunk, int snapnum)
 	struct etree_path path[levels + 1];
 	struct buffer *leafbuf = probe(sb, chunk, path);
 	chunk_t exception = 0;
-	trace(warn("chunk %Lx, snapnum %i", chunk, snapnum));
+	trace(warn("chunk %Lx, snapnum %i", chunk, snapnum););
 
 	if (snapnum == -1?
 		origin_chunk_unique(buffer2leaf(leafbuf), chunk, sb->snapmask):
@@ -1342,7 +1342,7 @@ static int test_unique(struct superblock *sb, chunk_t chunk, int snapnum, chunk_
 	unsigned levels = sb->image.etree_levels;
 	struct etree_path path[levels + 1];
 	struct buffer *leafbuf = probe(sb, chunk, path);
-	trace(warn("chunk %Lx, snapnum %i", chunk, snapnum));
+	trace(warn("chunk %Lx, snapnum %i", chunk, snapnum););
 	int result = snapnum == -1?
 		origin_chunk_unique(buffer2leaf(leafbuf), chunk, sb->snapmask):
 		snapshot_chunk_unique(buffer2leaf(leafbuf), chunk, snapnum, exception);
@@ -1807,21 +1807,21 @@ void waitfor_chunk(struct superblock *sb, chunk_t chunk, struct pending **pendin
 {
 	struct snaplock *lock;
 
-	trace(printf("enter waitfor_chunk\n"));
+	trace(printf("enter waitfor_chunk\n"););
 	if ((lock = find_snaplock(sb->snaplocks[snaplock_hash(sb, chunk)], chunk))) {
 		if (!*pending) {
 			// arguably we should know the client and fill it in here
 			*pending = calloc(1, sizeof(struct pending));
 			(*pending)->holdcount = 1;
 		}
-		trace(printf("new_snaplock_wait call\n"));
+		trace(printf("new_snaplock_wait call\n"););
 		struct snaplock_wait *wait = new_snaplock_wait(sb);
 		wait->pending = *pending;
 		wait->next = lock->waitlist;
 		lock->waitlist = wait;
 		(*pending)->holdcount++;
 	}
-	trace(printf("leaving waitfor_chunk\n"));
+	trace(printf("leaving waitfor_chunk\n"););
 	/* show_locks(sb); */
 }
 
@@ -1830,20 +1830,20 @@ void readlock_chunk(struct superblock *sb, chunk_t chunk, struct client *client)
 	struct snaplock **bucket = &sb->snaplocks[snaplock_hash(sb, chunk)];
 	struct snaplock *lock;
 	
-	trace(printf("enter readlock_chunk\n"));
+	trace(printf("enter readlock_chunk\n"););
 	if (!(lock = find_snaplock(*bucket, chunk))) {
-		trace(printf("creating a new lock\n"));
+		trace(printf("creating a new lock\n"););
 		lock = new_snaplock(sb);
 		*lock = (struct snaplock){ .chunk = chunk, .next = *bucket };
 		*bucket = lock;
 	}
-	trace(printf("holding snaplock\n"));
+	trace(printf("holding snaplock\n"););
 	struct snaplock_hold *hold = new_snaplock_hold(sb);
-	trace(printf("got the snaplock?\n"));
+	trace(printf("got the snaplock?\n"););
 	hold->client = client;
 	hold->next = lock->holdlist;
 	lock->holdlist = hold;
-	trace(printf("leaving readlock_chunk\n"));
+	trace(printf("leaving readlock_chunk\n"););
 }
 
 struct snaplock *release_lock(struct superblock *sb, struct snaplock *lock, struct client *client)
@@ -1851,7 +1851,7 @@ struct snaplock *release_lock(struct superblock *sb, struct snaplock *lock, stru
 	struct snaplock *ret = lock;
 	struct snaplock_hold **holdp = &lock->holdlist;
 
-	trace(printf("entered release_lock\n"));
+	trace(printf("entered release_lock\n"););
 	while (*holdp && (*holdp)->client != client)
 		holdp = &(*holdp)->next;
 
@@ -1884,13 +1884,13 @@ struct snaplock *release_lock(struct superblock *sb, struct snaplock *lock, stru
 	ret = lock->next;
 	free_snaplock(sb, lock);
 		
-	trace(printf("leaving release_lock\n"));
+	trace(printf("leaving release_lock\n"););
 	return ret;
 }
 
 int release_chunk(struct superblock *sb, chunk_t chunk, struct client *client)
 {
-	trace(printf("enter release_chunk\n"));
+	trace(printf("enter release_chunk\n"););
 	trace(printf("release %Lx\n", chunk););
 	struct snaplock **lockp = &sb->snaplocks[snaplock_hash(sb, chunk)];
 	
@@ -1911,7 +1911,7 @@ int release_chunk(struct superblock *sb, chunk_t chunk, struct client *client)
 	if (!next) 
 		return -2;
 	
-	trace(printf("release_chunk returning 0\n next lock %p\n",next));
+	trace(printf("release_chunk returning 0\n next lock %p\n",next););
 	return 0;
 }
 
@@ -1937,7 +1937,7 @@ void check_response_full(struct addto *r, unsigned bytes)
 
 void addto_response(struct addto *r, chunk_t chunk)
 {
-	trace(printf("inside addto_response\n"));
+	trace(printf("inside addto_response\n"););
 	if (chunk != r->nextchunk) {
 		if (r->top) {
 			trace(warn("finish old range\n"););
@@ -1956,7 +1956,7 @@ void addto_response(struct addto *r, chunk_t chunk)
 		r->top = (chunk_t *)(((shortcount *)r->top) + 1);
 	}
 	r->nextchunk = chunk + 1;
-	trace(printf("leaving addto_response\n"));
+	trace(printf("leaving addto_response\n"););
 }
 
 int finish_reply_(struct addto *r, unsigned code, unsigned id)
@@ -1975,9 +1975,9 @@ int finish_reply_(struct addto *r, unsigned code, unsigned id)
 void finish_reply(int sock, struct addto *r, unsigned code, unsigned id)
 {
 	if (finish_reply_(r, code, id)) {
-		trace(printf("sending reply... "));			
+		trace(printf("sending reply... "););			
 		reply(sock, (struct messagebuf *)r->reply);
-		trace(printf("done sending reply\n"));
+		trace(printf("done sending reply\n"););
 	}
 	free(r->reply);
 }
@@ -1995,7 +1995,7 @@ void setup_sb(struct superblock *sb)
 	unsigned blocksize_bits = sb->image.blocksize_bits;
 	unsigned chunksize_bits = sb->image.blocksize_bits;
 	sb->blocksize = 1 << blocksize_bits;
-	sb->chunksize = 1 << chunksize_bits, 
+	sb->chunksize = 1 << chunksize_bits;
 	sb->sectors_per_block_bits = blocksize_bits - SECTOR_BITS;
 	sb->sectors_per_chunk_bits = chunksize_bits - SECTOR_BITS;
 	sb->blocks_per_node = (sb->blocksize - offsetof(struct enode, entries)) / sizeof(struct index_entry);
@@ -2022,13 +2022,13 @@ void load_sb(struct superblock *sb)
 	struct buffer *buffer = bread(sb->metadev, SB_SECTOR, SB_SIZE);
 	memcpy(&sb->image, buffer->data, sizeof(sb->image));
 	
-	trace(printf("sb image.magic number is: %s and SB_MAGIC is: %s\n",sb->image.magic, SB_MAGIC));
+	trace(printf("sb image.magic number is: %s and SB_MAGIC is: %s\n",sb->image.magic, SB_MAGIC););
 	
 	assert(!memcmp(sb->image.magic, SB_MAGIC, sizeof(sb->image.magic)));
 	brelse(buffer);
 	setup_sb(sb);
 	sb->snapmask = calc_snapmask(sb);
-	trace_on(printf("Active snapshot mask: %016llx\n", sb->snapmask););
+	trace(printf("Active snapshot mask: %016llx\n", sb->snapmask););
 }
 
 void save_sb(struct superblock *sb)
@@ -2314,7 +2314,7 @@ int incoming(struct superblock *sb, struct client *client)
 	
 	if ((err = readpipe(sock, &message.head, sizeof(message.head))))
 		goto pipe_error;
-	trace(warn("%x/%u", message.head.code, message.head.length));
+	trace(warn("%x/%u", message.head.code, message.head.length););
 	if (message.head.length > maxbody)
 		goto message_too_long;
 	if ((err = readpipe(sock, &message.body, message.head.length)))
@@ -2357,7 +2357,7 @@ int incoming(struct superblock *sb, struct client *client)
 		struct rw_request *body = (struct rw_request *)message.body;
 		if (message.head.length < sizeof(*body))
 			goto message_too_short;
-		trace(printf("snapshot write request, %u ranges\n", body->count));
+		trace(printf("snapshot write request, %u ranges\n", body->count););
 		struct addto snap = { .nextchunk = -1 };
 		
 		for (i = 0; i < body->count; i++)
@@ -2381,23 +2381,23 @@ int incoming(struct superblock *sb, struct client *client)
 		struct rw_request *body = (struct rw_request *)message. body;
 		if (message.head.length < sizeof(*body))
 			goto message_too_short;
-		trace(printf("snapshot read request, %u ranges\n", body->count));
+		trace(printf("snapshot read request, %u ranges\n", body->count););
 		struct addto snap = { .nextchunk = -1 }, org = { .nextchunk = -1 };
 		
 		for (i = 0; i < body->count; i++)
 			for (j = 0; j < body->ranges[i].chunks; j++) {
 				chunk_t chunk = body->ranges[i].chunk + j, exception = 0;
-				trace(warn("read %Lx", chunk));
+				trace(warn("read %Lx", chunk););
 				test_unique(sb, chunk, client->snap, &exception);
 				if (exception) {
-					trace(warn("read exception %Lx", exception));
+					trace(warn("read exception %Lx", exception););
 					addto_response(&snap, chunk);
 					check_response_full(&snap, sizeof(chunk_t));
 					*(snap.top)++ = exception;
 				} else {
-					trace(warn("read origin %Lx", chunk));
+					trace(warn("read origin %Lx", chunk););
 					addto_response(&org, chunk);
-					trace(printf("locking chunk %Lx\n", chunk));
+					trace(printf("locking chunk %Lx\n", chunk););
 					readlock_chunk(sb, chunk, client);
 				}
 			}
@@ -2411,7 +2411,7 @@ int incoming(struct superblock *sb, struct client *client)
 		struct rw_request *body = (struct rw_request *)message.body;
 		if (message.head.length < sizeof(*body))
 			goto message_too_short;
-		trace(printf("finish snapshot read, %u ranges\n", body->count));
+		trace(printf("finish snapshot read, %u ranges\n", body->count););
 		
 		for (i = 0; i < body->count; i++)
 			for (j = 0; j < body->ranges[i].chunks; j++)
@@ -2462,7 +2462,7 @@ int incoming(struct superblock *sb, struct client *client)
 		load_sb(sb);
 		if (sb->image.flags & SB_BUSY) {
 			warn("Server was not shut down properly");
-			jtrace(show_journal(sb));
+			jtrace(show_journal(sb););
 			recover_journal(sb);
 		} else {
 			sb->image.flags |= SB_BUSY;
@@ -2522,7 +2522,7 @@ int incoming(struct superblock *sb, struct client *client)
 		break;
 
 	generate_error:
-		trace(printf(err_msg)); /* can't use warn macro */
+		trace(printf(err_msg);); /* can't use warn macro */
 		outbead(sock, REPLY_ERROR, struct { });
 		break;
 	}
