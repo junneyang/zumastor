@@ -1647,7 +1647,7 @@ static int
 xd3_check_pow2 (usize_t value, usize_t *logof)
 {
   int x = 1;
-  int nolog;
+  usize_t nolog;
   if (logof == NULL) {
     logof = &nolog;
   }
@@ -4693,7 +4693,7 @@ xd3_decode_input (xd3_stream *stream)
 #define BYTE_CASE(expr,x,nstate)                                               \
       do {                                                                     \
       if ( (expr) &&                                                           \
-           ((ret = xd3_decode_byte (stream, & (x))) != 0) ) { return ret; }    \
+           ((ret = xd3_decode_byte (stream, (uint *)(&(x)))) != 0) ) { return ret; }    \
       stream->dec_state = (nstate);                                            \
       } while (0)
 
@@ -4738,7 +4738,7 @@ xd3_decode_input (xd3_stream *stream)
       }
     case DEC_HDRIND:
       {
-	if ((ret = xd3_decode_byte (stream, & stream->dec_hdr_ind))) { return ret; }
+	if ((ret = xd3_decode_byte (stream, (uint *)&stream->dec_hdr_ind))) { return ret; }
 
 	if ((stream->dec_hdr_ind & VCD_INVHDR) != 0)
 	  {
@@ -4843,7 +4843,7 @@ xd3_decode_input (xd3_stream *stream)
       {
 	/* Start of a window: the window indicator */
 
-	if ((ret = xd3_decode_byte (stream, & stream->dec_win_ind))) { return ret; }
+	if ((ret = xd3_decode_byte (stream, (uint *)&stream->dec_win_ind))) { return ret; }
 
 	stream->current_window = stream->dec_window_count;
 
