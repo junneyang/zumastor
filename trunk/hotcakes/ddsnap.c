@@ -85,9 +85,10 @@ int create_socket(char *sockname) {
 
 int generate_delta(char *mode, char *comp, int clfile, int deltafile, char const *dev1name, char const *dev2name) {
 	int snapdev1, snapdev2, err, chunk_num = 0, ret = 0;
-	char *chunk_data1, *chunk_data2, *delta_data, *comp_delta;
+	unsigned char *chunk_data1, *chunk_data2, *delta_data, *comp_delta;
 	u32 chunk_size, chunk_size_bits, delta_size;
-	u64 chunkaddr, comp_size = (chunk_size*2);
+	u64 chunkaddr;
+	uLong comp_size = (chunk_size*2);
 	struct cl_header cl = { };
 	struct delta_header dh = { };
 	struct delta_chunk_header dch = { .magic_num = MAGIC_NUM };
@@ -131,10 +132,10 @@ int generate_delta(char *mode, char *comp, int clfile, int deltafile, char const
 	printf("chunksize bit: %u\t", chunk_size_bits);
 	chunk_size = 1 << chunk_size_bits;
 	printf("chunksize: %u\n", chunk_size);
-	chunk_data1 = (char *)malloc (chunk_size);
-	chunk_data2 = (char *)malloc (chunk_size);
-	delta_data  = (char *)malloc (chunk_size);
-	comp_delta  = (char *)malloc (comp_size);
+	chunk_data1 = (unsigned char *)malloc (chunk_size);
+	chunk_data2 = (unsigned char *)malloc (chunk_size);
+	delta_data  = (unsigned char *)malloc (chunk_size);
+	comp_delta  = (unsigned char *)malloc (comp_size);
 
 	/* Delta header set-up */
 	write(deltafile, &dh, sizeof(struct delta_header));
@@ -175,7 +176,7 @@ int generate_delta(char *mode, char *comp, int clfile, int deltafile, char const
 			}			
 			if (strcmp(mode, "-t") == 0 && ret != BUFFER_SIZE_ERROR && ret > 0) {
 				/* sanity test for delta creation */
-				char *delta_test = (char *)malloc (chunk_size);
+				unsigned char *delta_test = (unsigned char *)malloc (chunk_size);
 				ret = apply_delta_chunk(chunk_data1, delta_test, delta_data, chunk_size, delta_size);
 				
 				if (ret != chunk_size) {
@@ -304,8 +305,9 @@ int ddsnap_generate_delta(char *mode, char *comp, char const *changelistname, ch
 
 int apply_delta(int deltafile, char const *devname) {
 	int snapdev;
-	u64 chunkaddr, uncomp_size;
-	char *chunk_data, *delta_data, *updated, *comp_delta;
+	u64 chunkaddr;
+	uLong uncomp_size;
+	unsigned char *chunk_data, *delta_data, *updated, *comp_delta;
 	int err, check_chunk_num = 0, chunk_num = 0, chunk_size = 0, ret = 0;
 	struct delta_header dh = { };
 	struct delta_chunk_header dch = { };
@@ -334,10 +336,10 @@ int apply_delta(int deltafile, char const *devname) {
 	
 	check_chunk_num = dh.chunk_num;
 	chunk_size = dh.chunk_size;
-	chunk_data = (char *)malloc (chunk_size);
-	delta_data = (char *)malloc (chunk_size*2);
-	updated    = (char *)malloc (chunk_size);
-	comp_delta = (char *)malloc (chunk_size);
+	chunk_data = (unsigned char *)malloc (chunk_size);
+	delta_data = (unsigned char *)malloc (chunk_size*2);
+	updated    = (unsigned char *)malloc (chunk_size);
+	comp_delta = (unsigned char *)malloc (chunk_size);
 
         up_chunk1  = (char *)malloc (chunk_size);
         up_chunk2  = (char *)malloc (chunk_size);
@@ -406,7 +408,7 @@ int apply_delta(int deltafile, char const *devname) {
 			else
 				ret = apply_delta_chunk(chunk_data, updated, delta_data, chunk_size, uncomp_size);
 			
-			printf("uncomp_size %Lu & dch.data_length %u \n", uncomp_size, dch.data_length);
+			printf("uncomp_size %lu & dch.data_length %u \n", uncomp_size, dch.data_length);
 			printf("ret %d \n", ret);
 			
 			if (ret < 0) {
