@@ -88,7 +88,7 @@ int generate_delta(char *mode, char *comp, int clfile, int deltafile, char const
 	unsigned char *chunk_data1, *chunk_data2, *delta_data, *comp_delta;
 	u32 chunk_size, chunk_size_bits, delta_size;
 	u64 chunkaddr;
-	uLong comp_size = (chunk_size*2);
+	unsigned long comp_size = (chunk_size*2);
 	struct cl_header cl = { };
 	struct delta_header dh = { };
 	struct delta_chunk_header dch = { .magic_num = MAGIC_NUM };
@@ -306,7 +306,7 @@ int ddsnap_generate_delta(char *mode, char *comp, char const *changelistname, ch
 int apply_delta(int deltafile, char const *devname) {
 	int snapdev;
 	u64 chunkaddr;
-	uLong uncomp_size;
+	unsigned long uncomp_size;
 	unsigned char *chunk_data, *delta_data, *updated, *comp_delta;
 	int err, check_chunk_num = 0, chunk_num = 0, chunk_size = 0, ret = 0;
 	struct delta_header dh = { };
