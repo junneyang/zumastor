@@ -3008,10 +3008,10 @@ index 75fe949..d6977ca 100644
  		struct io_restrictions *rs = &ti->limits;
  
 diff --git a/net/socket.c b/net/socket.c
-index b4848ce..18ec4cb 100644
+index 6d261bf..4f8fadd 100644
 --- a/net/socket.c
 +++ b/net/socket.c
-@@ -2160,6 +2160,12 @@ static long compat_sock_ioctl(struct fil
+@@ -2161,6 +2161,12 @@ static long compat_sock_ioctl(struct fil
  }
  #endif
  
