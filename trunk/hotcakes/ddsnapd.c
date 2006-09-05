@@ -1411,6 +1411,24 @@ create:
 	return i;
 };
 
+void check_leaf(struct eleaf *leaf, u64 snapmask)
+{
+       struct exception *p;
+       int i;
+
+       for (i = 0; i < leaf->count; i++) {
+               trace(printf("%x=", leaf->map[i].rchunk););
+               // printf("@%i ", leaf->map[i].offset);
+               for (p = emap(leaf, i); p < emap(leaf, i+1); p++) {
+                 trace(printf("%Lx/%08llx%s", p->chunk, p->share, p+1 < emap(leaf, i+1)? ",": " "););
+                       if(p->share & snapmask)
+                         printf("Leaf bitmap contains %016llx some snapshots in snapmask %016llx\n", p->share, snapmask);
+               }
+       }
+       // printf("top@%i", leaf->map[i].offset);
+       printf("\n");
+}
+
 /*
  * delete_snapshot: remove all exceptions from a given snapshot from a leaf
  * working from top to bottom of the exception list clearing snapshot bits
@@ -1430,12 +1448,9 @@ static int delete_snapshots_from_leaf(struct superblock *sb, struct eleaf *leaf,
 	 * non-zero entries to top of block */
 	for (i = leaf->count; i--;) {
 		while (p != emap(leaf, i)) {
-			if (max_dirty >= dirty_buffer_count)
-				snapmask = 0;
 			u64 share = (--p)->share;
-
 			any |= share & snapmask;
-			if ((share &= ~snapmask))
+			if ((p->share &= ~snapmask))
 				*--dest = *p;
 			else 
 				free_chunk(sb, p->chunk);
