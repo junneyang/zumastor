@@ -166,7 +166,7 @@ int generate_delta(char *mode, char *comp, int clfile, int deltafile, char const
 			memcpy(delta_data, chunk_data2, chunk_size);
 			delta_size = chunk_size;
                 } else {
-			ret = create_delta_chunk(chunk_data1, chunk_data2, delta_data, chunk_size, &delta_size);
+			ret = create_delta_chunk(chunk_data1, chunk_data2, delta_data, chunk_size, (int *) &delta_size);
 			
 			/* If delta is larger than chunk_size, we want to just copy over the raw chunk */
 			if (ret == BUFFER_SIZE_ERROR) {
@@ -716,7 +716,7 @@ int main(int argc, char *argv[]) {
 	command = argv[1];
 
 	if (strcmp(command, "create-delta")==0) {
-		if (argc < 6) {
+		if (argc < 3) {
 			printf("usage: %s create-delta -mode -comp <changelist> <deltafile> <snapdev1> <snapdev2>\n", argv[0]);
 			return 1;
 		}
@@ -734,7 +734,7 @@ int main(int argc, char *argv[]) {
 			POPT_TABLEEND
 		};
 		
-		cdCon = poptGetContext(NULL, argc-1, &(argv[1]), cdOptions, 0);
+		cdCon = poptGetContext(NULL, argc-1, (const char **) &(argv[1]), cdOptions, 0);
 		poptSetOtherOptionHelp(cdCon, "<changelist> <deltafile> <snapdev1> <snapdev2>");
 		
 		while ((cdOpt = poptGetNextOpt(cdCon)) >= 0) {
