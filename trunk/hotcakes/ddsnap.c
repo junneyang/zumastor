@@ -9,6 +9,7 @@
 #include <errno.h>
 #include <inttypes.h>
 #include <netinet/in.h>
+#include <popt.h>
 #include <time.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -30,6 +31,10 @@
 #define DEFAULT_REPLICATION_PORT 4321
 #define YES 1
 #define NO 0
+#define TRUE 1
+#define FALSE 0
+#define POPT_AUTOHELP { NULL, '\0', POPT_ARG_INCLUDE_TABLE, poptHelpOptions, 0, "Help options:", NULL },
+#define POPT_TABLEEND { NULL, '\0', 0, 0, 0, NULL, NULL }
 
 struct cl_header {
 	char magic[MAGIC_SIZE];
@@ -693,6 +698,13 @@ void usage(void)
 		"	send-delta\n");
 }
 
+
+void cdUsage(poptContext optCon, int exitcode, char *error, char *addl) {
+	poptPrintUsage(optCon, stderr, 0);
+	if (error) fprintf(stderr, "%s: %s", error, addl);
+	exit(exitcode);
+}
+
 int main(int argc, char *argv[]) {
 	char const *command;
 	int sock;
@@ -704,11 +716,69 @@ int main(int argc, char *argv[]) {
 	command = argv[1];
 
 	if (strcmp(command, "create-delta")==0) {
-		if (argc != 8) {
+		if (argc < 6) {
 			printf("usage: %s create-delta -mode -comp <changelist> <deltafile> <snapdev1> <snapdev2>\n", argv[0]);
 			return 1;
 		}
-		return ddsnap_generate_delta(argv[2], argv[3], argv[4], argv[5], argv[6], argv[7]);
+
+		char cdOpt, *changelist, *deltafile, *snapdev1, *snapdev2;
+		int xd = FALSE, raw = FALSE, test = FALSE, gzip_level = -1, ret;
+		poptContext cdCon;
+		
+		struct poptOption cdOptions[] = {
+			{ "xdelta", 'x', POPT_ARG_NONE, &xd, 0, "Delta file format: xdelta chunk", NULL },
+			{ "raw", 'r', POPT_ARG_NONE, &raw, 0, "Delta file format: raw chunk from later snapshot", NULL },
+			{ "test", 't', POPT_ARG_NONE, &test, 0, "Delta file format: xdelta chunk, raw chunk from earlier snapshot and raw chunk from later snapshot", NULL },
+			{ "gzip", 'g', POPT_ARG_INT, &gzip_level, 0, "Compression via gzip (default level: 6)", "compression_level"},
+			POPT_AUTOHELP
+			POPT_TABLEEND
+		};
+		
+		cdCon = poptGetContext(NULL, argc-1, &(argv[1]), cdOptions, 0);
+		poptSetOtherOptionHelp(cdCon, "<changelist> <deltafile> <snapdev1> <snapdev2>");
+		
+		while ((cdOpt = poptGetNextOpt(cdCon)) >= 0) {
+		}
+		
+		if (cdOpt < -1) {
+			/* an error occurred during option processing */
+			fprintf(stderr, "%s: %s\n",
+				poptBadOption(cdCon, POPT_BADOPTION_NOALIAS),
+				poptStrerror(cdOpt));
+			return 1;
+		}
+		
+		changelist = (char *) poptGetArg(cdCon);
+		deltafile  = (char *) poptGetArg(cdCon);
+		snapdev1   = (char *) poptGetArg(cdCon);
+		snapdev2   = (char *) poptGetArg(cdCon);
+			
+		if((changelist == NULL) || !(poptPeekArg(cdCon) == NULL))
+			cdUsage(cdCon, 1, "Specify a changelist", ".e.g., cl01 \n");
+		if((deltafile == NULL) || !(poptPeekArg(cdCon) == NULL))
+			cdUsage(cdCon, 1, "Specify a deltafile", ".e.g., df01 \n");
+		if((snapdev1 == NULL) || !(poptPeekArg(cdCon) == NULL))
+			cdUsage(cdCon, 1, "Specify a snapdev1", ".e.g., /dev/mapper/snap0 \n");
+		if((snapdev2 == NULL) || !(poptPeekArg(cdCon) == NULL))
+		        cdUsage(cdCon, 1, "Specify a snapdev2", ".e.g., /dev/mapper/snap1 \n");
+		
+		if (xd && (gzip_level > -1))
+			ret = ddsnap_generate_delta("-d", "-c", changelist, deltafile, snapdev1, snapdev2);
+		if (xd) 
+			ret = ddsnap_generate_delta("-d", "-n", changelist, deltafile, snapdev1, snapdev2);
+		if (raw && (gzip_level > -1))
+			ret = ddsnap_generate_delta("-r", "-c", changelist, deltafile, snapdev1, snapdev2);
+		if (raw) 
+			ret = ddsnap_generate_delta("-r", "-n", changelist, deltafile, snapdev1, snapdev2);
+		if (test && (gzip_level > -1))
+			ret = ddsnap_generate_delta("-t", "-c", changelist, deltafile, snapdev1, snapdev2);
+		if (test) 
+			ret = ddsnap_generate_delta("-t", "-n", changelist, deltafile, snapdev1, snapdev2);
+		else 
+			ret = ddsnap_generate_delta("-d", "-c", changelist, deltafile, snapdev1, snapdev2);
+		
+		poptFreeContext(cdCon);
+		return ret;    
 	} 
 	if (strcmp(command, "apply-delta")==0) {
 		if (argc != 4) {
