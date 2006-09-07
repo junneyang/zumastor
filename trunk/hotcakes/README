@@ -1,7 +1,7 @@
 A few main points:
 
   * We historically built the user space code right in the kernel tree,
-    though now svn idiosyncracies pretty much force us to build externally,
+    though now svn idiosyncrasies pretty much force us to build externally,
     which may be a good thing.  It does mean we need to watch closely for
     protocol skew.  Time to start thinking about protocol stability I
     suppose.
@@ -25,7 +25,7 @@ A few main points:
   * Email us and volunteer to help with things!  Our gmail names are on the
     main project page -- daniel
 
-Check out our sources (if you havn't already!):
+Check out our sources (if you haven't already!):
 
   - svn checkout http://hotcakes.googlecode.com/svn/trunk/ hotcakes
 
@@ -35,7 +35,7 @@ Set up Linux 2.6:
 
   - Get a 2.6.7 or older kernel.org tree, it already has device mapper
 
-  - Apply the ddsnap-2.6.XX patch. From the root of the 2.6 tree:
+  - Apply the ddsnap-2.6.XX patch.  From the root of the 2.6 tree:
 
       patch -p1 < /path/to/hotcakes/patches/ddsnap-2.6.XX
 
@@ -79,18 +79,18 @@ Testing ddsnap:
 
 	make dd-init
 
-  - Now, we must start the ddsnap-agent.
+  - Now, we must start the ddsnap-agent.  This command will continue to run
+    in the foreground for the duration of this test.
 
         make dd-agent
 
-  - Next, we start the ddsnapd server.
+  - Next, we start the ddsnapd server.  This command will continue to run
+    in the foreground for the duration of this test.
 
         make dd-server
 
-    Note: neither ddsnapd or ddsnap-agent will daemonize.
-
   - At this point you should see some debug messages, but everything should 
-    appear to be happy. Now that we have the server up it is time to create 
+    appear to be happy.  Now that we have the server up it is time to create 
     the logical volume for the origin.
 
         make origin
@@ -103,16 +103,17 @@ Testing ddsnap:
     You should now be able to use /dev/mapper/vol just like any other
     partition.
 
-  - Time to actually use it. We will create a test snapshot.
+  - Time to actually use it.  We will create a test snapshot.
 
        ./ddsnap create-snapshot /tmp/server 0 
 
        echo 0 29302496 ddsnap /dev/test-snapstore /dev/test-origin \
           /tmp/control 0 | sudo dmsetup create snapshot0
 
-    Note: 29302496 is derived by taking the number of blocks from /proc/partition 
-    and multiplying by two. For example, if your device is named sda7, you can use
-    this to derive the number:
+    Note: 29302496 is the apparent size of the snapshot: the same size as the
+    origin.  It can be derived by taking the number of blocks from
+    /proc/partitions and multiplying by two.  For example, if your origin
+    device is named sda7, you can use this to derive the number:
 
        echo $((2 * `grep sda7 /proc/partitions | awk '{print $3'}`))
 
@@ -120,7 +121,7 @@ Testing ddsnap:
     made snapshot. 
 
   - In order for snapshots to be helpful, we have to change the disk in some
-    way. Write a few files to disk or use the devspam utility included with
+    way.  Write a few files to disk or use the devspam utility included with
     this distribution to add some random data to the device.
 
   - Create another snapshot!
@@ -134,10 +135,12 @@ Testing ddsnap:
 
        ./ddsnap generate-changelist /tmp/server changelist0-1 0 1
 
-    There should now be a filed called changelist0-1 in your working directory.
+    There should now be a file called changelist0-1 in your working directory.
 
   - Next, create the delta file using the changelist.
 
        ./ddsnap create-delta -r -n changelist0-1 deltafile0-1 \ 
             /dev/mapper/snapshot0 /dev/mapper/snapshot1
+
+    There should now be a file called deltafile0-1 in your working directory.
 
