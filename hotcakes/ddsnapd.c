@@ -130,10 +130,9 @@ typedef int fd_t;
  */
 static int fd_size(int fd, u64 *bytes)
 {
-	int error;
 	unsigned long sectors;
 
-	if ((error = ioctl(fd, BLKGETSIZE, &sectors)))
+	if (ioctl(fd, BLKGETSIZE, &sectors))
 		return -errno;
 	*bytes = ((u64)sectors) << 9;
 	return 0;
