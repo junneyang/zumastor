@@ -29,12 +29,15 @@
 #define MAGIC_NUM 0xbead0023
 
 #define DEFAULT_REPLICATION_PORT 4321
-#define YES 1
-#define NO 0
 #define TRUE 1
 #define FALSE 0
 #define POPT_AUTOHELP { NULL, '\0', POPT_ARG_INCLUDE_TABLE, poptHelpOptions, 0, "Help options:", NULL },
 #define POPT_TABLEEND { NULL, '\0', 0, 0, 0, NULL, NULL }
+
+
+#define XDELTA 1  
+#define RAW (1 << 1)
+#define TEST (1 << 2)
 
 struct cl_header {
 	char magic[MAGIC_SIZE];
@@ -44,7 +47,7 @@ struct delta_header {
 	char magic[MAGIC_SIZE];	
 	u64 chunk_num;
 	u32 chunk_size;
-	char mode[3];
+	u32 mode;
 };
 
 struct delta_chunk_header {
@@ -88,7 +91,7 @@ int create_socket(char *sockname) {
         return sock;
 }
 
-int generate_delta(char *mode, char *comp, int clfile, int deltafile, char const *dev1name, char const *dev2name) {
+int generate_delta(int mode, int level, int clfile, int deltafile, char const *dev1name, char const *dev2name) {
 	int snapdev1, snapdev2, err, chunk_num = 0, ret = 0;
 	unsigned char *chunk_data1, *chunk_data2, *delta_data, *comp_delta;
 	u32 chunk_size, chunk_size_bits, delta_size;
@@ -99,7 +102,7 @@ int generate_delta(char *mode, char *comp, int clfile, int deltafile, char const
 	struct delta_chunk_header dch = { .magic_num = MAGIC_NUM };
 	
 	strncpy(dh.magic, DELTA_MAGIC_ID, MAGIC_SIZE);
-        strncpy(dh.mode, mode, 3);
+        dh.mode = mode;
 	
 	snapdev1 = open(dev1name, O_RDONLY);
 	snapdev2 = open(dev2name, O_RDONLY);
@@ -148,21 +151,21 @@ int generate_delta(char *mode, char *comp, int clfile, int deltafile, char const
 	/* Chunk address followed by CHUNK_SIZE bytes of chunk data */
 	while (read(clfile, &chunkaddr, sizeof(u64)) == sizeof(u64) &&  chunkaddr != -1) {
 		chunk_num = chunk_num + 1;
-		printf("current chunkaddr: %Lu\n", chunkaddr);
+		printf(".");
 		chunkaddr = chunkaddr << chunk_size_bits;
 		
 		/* read in and generate the necessary chunk information */
 		if (diskio(snapdev1, chunk_data1, chunk_size, chunkaddr, 0) < 0) {
-			printf("chunk_data1 not read properly from snapdev1. \n");
+			printf("chunk_data1 for chunkaddr %Lu not read properly from snapdev1. \n", chunkaddr);
 			return -1;
 		}
 		if (diskio(snapdev2, chunk_data2, chunk_size, chunkaddr, 0) < 0) {
-			printf("chunk_data2 not read properly from snapdev2. \n");
+			printf("chunk_data2 for chunkaddr %Lu not read properly from snapdev2. \n", chunkaddr);
 			return -1;
 		}
 		
-		/* 3 different modes, -r (raw snapshot2 chunk), -d (xdelta), -t (xdelta, raw snapshot1 chunk & raw snapshot2 chunk) */
-                if (strcmp(mode, "-r") == 0) {
+		/* 3 different modes, raw (raw snapshot2 chunk), xdelta (xdelta), test (xdelta, raw snapshot1 chunk & raw snapshot2 chunk) */
+                if (mode == RAW) {
 			memcpy(delta_data, chunk_data2, chunk_size);
 			delta_size = chunk_size;
                 } else {
@@ -179,7 +182,7 @@ int generate_delta(char *mode, char *comp, int clfile, int deltafile, char const
 				close(snapdev2);
 				return -1;
 			}			
-			if (strcmp(mode, "-t") == 0 && ret != BUFFER_SIZE_ERROR && ret > 0) {
+			if (mode == TEST && ret != BUFFER_SIZE_ERROR && ret > 0) {
 				/* sanity test for delta creation */
 				unsigned char *delta_test = (unsigned char *)malloc (chunk_size);
 				ret = apply_delta_chunk(chunk_data1, delta_test, delta_data, chunk_size, delta_size);
@@ -209,7 +212,7 @@ int generate_delta(char *mode, char *comp, int clfile, int deltafile, char const
 		
 		/* zlib compression */
 		comp_size = (chunk_size*2);
-		int comp_ret = compress(comp_delta, &comp_size, delta_data, delta_size);
+		int comp_ret = compress2(comp_delta, &comp_size, delta_data, delta_size, level);
 		if (comp_ret == Z_MEM_ERROR) {
 			printf("Not enough buffer memory for compression. \n");
 			close(snapdev1);
@@ -222,16 +225,22 @@ int generate_delta(char *mode, char *comp, int clfile, int deltafile, char const
 			close(snapdev2);
 			return -1;
 		}		
-
+		if (comp_ret == Z_STREAM_ERROR) {
+			printf("Level parameter is invalid.\n");
+			close(snapdev1);
+			close(snapdev2);
+			return -1;
+		}
+		
 		dch.check_sum = checksum((const unsigned char *)chunk_data2, chunk_size);
 		dch.chunk_addr = chunkaddr;
 
-		if (comp_size < delta_size && (strcmp(comp, "-c") == 0)) {
-			dch.compress = YES;
+		if (comp_size < delta_size) {
+			dch.compress = TRUE;
 			dch.data_length = comp_size;
 		}
 		else {
-			dch.compress = NO;
+			dch.compress = FALSE;
 			dch.data_length = delta_size;
 		}
 		
@@ -241,7 +250,7 @@ int generate_delta(char *mode, char *comp, int clfile, int deltafile, char const
 			return -1;
 		}
 		
-		if (dch.compress == YES) {
+		if (dch.compress == TRUE) {
 			if (write(deltafile, comp_delta, comp_size) != comp_size) {
 				printf("comp_delta was not written properly to deltafile. \n");
 				return -1;
@@ -253,7 +262,7 @@ int generate_delta(char *mode, char *comp, int clfile, int deltafile, char const
 			}
 		}
 		
-                if (strcmp(mode, "-t") == 0) {
+                if (mode == TEST) {
 			write(deltafile, chunk_data1, chunk_size);
 			write(deltafile, chunk_data2, chunk_size);
                 }
@@ -281,7 +290,7 @@ int generate_delta(char *mode, char *comp, int clfile, int deltafile, char const
 	return 0;
 }
 
-int ddsnap_generate_delta(char *mode, char *comp, char const *changelistname, char const *deltaname, char const *dev1name, char const *dev2name) {
+int ddsnap_generate_delta(int mode, int level, char const *changelistname, char const *deltaname, char const *dev1name, char const *dev2name) {
 	int clfile, deltafile;
 	
 	clfile = open(changelistname, O_RDONLY);
@@ -296,7 +305,7 @@ int ddsnap_generate_delta(char *mode, char *comp, char const *changelistname, ch
 		return 1;
 	}
 	
-	if (generate_delta(mode, comp, clfile, deltafile, dev1name, dev2name) < 0) {
+	if (generate_delta(mode, level, clfile, deltafile, dev1name, dev2name) < 0) {
 		close(deltafile);
 		close(clfile);
 		return 1;
@@ -349,7 +358,7 @@ int apply_delta(int deltafile, char const *devname) {
         up_chunk1  = (char *)malloc (chunk_size);
         up_chunk2  = (char *)malloc (chunk_size);
 	
-        printf("Mode is %s\n", dh.mode);
+        printf("Mode is %d\n", dh.mode);
 	
 	while (read(deltafile, &dch, sizeof(struct delta_chunk_header)) == sizeof(struct delta_chunk_header)) {
 		if (dch.magic_num != MAGIC_NUM) {
@@ -358,7 +367,7 @@ int apply_delta(int deltafile, char const *devname) {
 			return -1;
 		}
 
-		if (dch.compress == YES) {
+		if (dch.compress == TRUE) {
 			if (read(deltafile, comp_delta, dch.data_length) != dch.data_length) {
 				printf("Could not properly read comp_delta from deltafile. \n");
 				close(snapdev);
@@ -380,7 +389,7 @@ int apply_delta(int deltafile, char const *devname) {
 		}
 		printf("Updating chunkaddr: %Lu\n", chunkaddr);
 
-		if (dch.compress == YES) {
+		if (dch.compress == TRUE) {
 
 			printf("data was compressed \n");
 
@@ -405,7 +414,7 @@ int apply_delta(int deltafile, char const *devname) {
 		} else 
 			uncomp_size = dch.data_length;
 
-                if (strcmp(dh.mode, "-r") == 0) {
+                if (dh.mode == RAW) {
 			memcpy(updated, delta_data, chunk_size);
 		} else {
 			if (uncomp_size == chunk_size)
@@ -421,7 +430,7 @@ int apply_delta(int deltafile, char const *devname) {
 				close(snapdev);
 				return -1;
 			}
-			if (strcmp(dh.mode, "-t") == 0) {
+			if (dh.mode == TEST) {
 				if (read(deltafile, up_chunk1, chunk_size) != chunk_size) {
 					printf("up_chunk1 not read properly from deltafile. \n");
 					return -1;
@@ -434,7 +443,7 @@ int apply_delta(int deltafile, char const *devname) {
 			}
 			if (dch.check_sum != checksum((const unsigned char *)updated, chunk_size)) {
 				printf("Check_sum failed for chunk address %Lu \n", chunkaddr);
-				if (strcmp(dh.mode, "-t") == 0) {
+				if (dh.mode == TEST) {
 					/* sanity check: does the checksum of upstream chunk1 = checksum of downstream chunk1? */
 					if (c1_chk_sum != checksum((const unsigned char *)up_chunk1, chunk_size)) {
 						printf("check_sum of chunk1 doesn't match for address %Lu \n", chunkaddr);
@@ -526,7 +535,7 @@ int list_snapshots(int sock) {
 		time_t snap_time = (time_t)(buffer[i]).ctime;
 		
 		printf("Snapshot[%d]: \n", i);
-		printf("\tsnap.tag= %Lu \t", (buffer[i]).snap);
+		printf("\tsnap.tag= %u \t", (buffer[i]).snap);
 		printf("snap.prio= %d \t", (buffer[i]).prio);
 		printf("snap.ctime= %s \n", ctime(&snap_time));
 	}
@@ -698,7 +707,6 @@ void usage(void)
 		"	send-delta\n");
 }
 
-
 void cdUsage(poptContext optCon, int exitcode, char *error, char *addl) {
 	poptPrintUsage(optCon, stderr, 0);
 	if (error) fprintf(stderr, "%s: %s", error, addl);
@@ -716,13 +724,9 @@ int main(int argc, char *argv[]) {
 	command = argv[1];
 
 	if (strcmp(command, "create-delta")==0) {
-		if (argc < 3) {
-			printf("usage: %s create-delta -mode -comp <changelist> <deltafile> <snapdev1> <snapdev2>\n", argv[0]);
-			return 1;
-		}
 
 		char cdOpt, *changelist, *deltafile, *snapdev1, *snapdev2;
-		int xd = FALSE, raw = FALSE, test = FALSE, gzip_level = -1, ret;
+		int xd = FALSE, raw = FALSE, test = FALSE, gzip_level = 0, ret = 0, mode = 0;
 		poptContext cdCon;
 		
 		struct poptOption cdOptions[] = {
@@ -737,7 +741,11 @@ int main(int argc, char *argv[]) {
 		cdCon = poptGetContext(NULL, argc-1, (const char **) &(argv[1]), cdOptions, 0);
 		poptSetOtherOptionHelp(cdCon, "<changelist> <deltafile> <snapdev1> <snapdev2>");
 		
-		while ((cdOpt = poptGetNextOpt(cdCon)) >= 0) {
+		cdOpt = poptGetNextOpt(cdCon);
+
+		if (argc<3) {
+			poptPrintUsage(cdCon, stderr, 0);
+			exit(1);
 		}
 		
 		if (cdOpt < -1) {
@@ -747,6 +755,12 @@ int main(int argc, char *argv[]) {
 				poptStrerror(cdOpt));
 			return 1;
 		}
+
+		/* Make sure the options are mutually exclusive */
+		if (xd+raw+test > 1) 
+			cdUsage(cdCon, 1, "Too many chunk options were selected. \nPlease select only one", "-x, -r, -t\n");
+
+		mode = (xd ? XDELTA : (raw ? RAW : TEST));
 		
 		changelist = (char *) poptGetArg(cdCon);
 		deltafile  = (char *) poptGetArg(cdCon);
@@ -760,25 +774,12 @@ int main(int argc, char *argv[]) {
 		if((snapdev1 == NULL) || !(poptPeekArg(cdCon) == NULL))
 			cdUsage(cdCon, 1, "Specify a snapdev1", ".e.g., /dev/mapper/snap0 \n");
 		if((snapdev2 == NULL) || !(poptPeekArg(cdCon) == NULL))
-		        cdUsage(cdCon, 1, "Specify a snapdev2", ".e.g., /dev/mapper/snap1 \n");
-		
-		if (xd && (gzip_level > -1))
-			ret = ddsnap_generate_delta("-d", "-c", changelist, deltafile, snapdev1, snapdev2);
-		if (xd) 
-			ret = ddsnap_generate_delta("-d", "-n", changelist, deltafile, snapdev1, snapdev2);
-		if (raw && (gzip_level > -1))
-			ret = ddsnap_generate_delta("-r", "-c", changelist, deltafile, snapdev1, snapdev2);
-		if (raw) 
-			ret = ddsnap_generate_delta("-r", "-n", changelist, deltafile, snapdev1, snapdev2);
-		if (test && (gzip_level > -1))
-			ret = ddsnap_generate_delta("-t", "-c", changelist, deltafile, snapdev1, snapdev2);
-		if (test) 
-			ret = ddsnap_generate_delta("-t", "-n", changelist, deltafile, snapdev1, snapdev2);
-		else 
-			ret = ddsnap_generate_delta("-d", "-c", changelist, deltafile, snapdev1, snapdev2);
+			cdUsage(cdCon, 1, "Specify a snapdev2", ".e.g., /dev/mapper/snap1 \n");
+    
+		ret = ddsnap_generate_delta(mode, gzip_level, changelist, deltafile, snapdev1, snapdev2);
 		
 		poptFreeContext(cdCon);
-		return ret;    
+		return ret;		
 	} 
 	if (strcmp(command, "apply-delta")==0) {
 		if (argc != 4) {
