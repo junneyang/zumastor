@@ -138,7 +138,7 @@ int monitor(char *sockname, struct context *context)
 	struct pollfd pollvec[others+maxclients];
 	struct client *clientvec[maxclients];
 	struct sockaddr_un addr = { .sun_family = AF_UNIX };
-	int addr_len = sizeof(addr) - sizeof(addr.sun_path) + strlen(sockname);
+	unsigned int addr_len = sizeof(addr) - sizeof(addr.sun_path) + strlen(sockname);
 	int listener = socket(AF_UNIX, SOCK_STREAM, 0); 
 
 	assert(listener > 0);
@@ -189,7 +189,7 @@ int monitor(char *sockname, struct context *context)
 			struct sockaddr_in addr;
 			int addr_len = sizeof(addr), sock;
 
-			if (!(sock = accept(listener, (struct sockaddr *)&addr, &addr_len)))
+			if (!(sock = accept(listener, (struct sockaddr *)&addr, (socklen_t *)&addr_len)))
 				error("Cannot accept connection");
 			trace_on(warn("Received connection %i", clients););
 			assert(clients < maxclients); // !!! make the array bigger

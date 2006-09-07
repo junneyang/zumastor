@@ -63,7 +63,7 @@ int eek(void) {
 	return 1;
 }
 
-u64 checksum(const unsigned char *data, int data_length) {
+u64 checksum(const unsigned char *data, u32 data_length) {
 	u64 result = 0;
 	int i;
 	
@@ -169,7 +169,7 @@ int generate_delta(int mode, int level, int clfile, int deltafile, char const *d
 			memcpy(delta_data, chunk_data2, chunk_size);
 			delta_size = chunk_size;
                 } else {
-			ret = create_delta_chunk(chunk_data1, chunk_data2, delta_data, chunk_size, (int *) &delta_size);
+			ret = create_delta_chunk(chunk_data1, chunk_data2, delta_data, chunk_size, (int *)&delta_size);
 			
 			/* If delta is larger than chunk_size, we want to just copy over the raw chunk */
 			if (ret == BUFFER_SIZE_ERROR) {
@@ -195,7 +195,8 @@ int generate_delta(int mode, int level, int clfile, int deltafile, char const *d
 					return -1;
 				}
 				
-				if (checksum(delta_test, chunk_size) != checksum(chunk_data2, chunk_size))
+				if (checksum((const unsigned char *)delta_test, chunk_size) 
+				    != checksum((const unsigned char *)chunk_data2, chunk_size))
 					printf("checksum of delta_test does not match check_sum of chunk_data2");
 				
 				if (memcmp(delta_test, chunk_data2, chunk_size) != 0) {
@@ -535,9 +536,10 @@ int list_snapshots(int sock) {
 		time_t snap_time = (time_t)(buffer[i]).ctime;
 		
 		printf("Snapshot[%d]: \n", i);
-		printf("\tsnap.tag= %u \t", (buffer[i]).snap);
-		printf("snap.prio= %d \t", (buffer[i]).prio);
-		printf("snap.ctime= %s \n", ctime(&snap_time));
+		printf("\ttag= %Lu \t", (buffer[i]).snap);
+		printf("priority= %d \t", (buffer[i]).prio);		
+		printf("use count= %d \t", (buffer[i]).usecnt);
+		printf("creation time= %s \n", ctime(&snap_time));
 	}
 	
 	trace_on(printf("reply = %x\n", head.code););
@@ -553,7 +555,7 @@ int generate_changelist(int sock, char const *changelist_filename, int snap1, in
 	unsigned maxbuf = 500;
 	char buf[maxbuf];
 	
-	int change_fd = open(changelist_filename, O_CREAT | O_TRUNC | O_WRONLY);
+	int change_fd = open(changelist_filename, O_CREAT | O_TRUNC | O_WRONLY, S_IRUSR | S_IWUSR);
 	
 	if (change_fd < 0) 
 		error("unable to open file: %s", changelist_filename);
@@ -636,13 +638,49 @@ int create_snapshot(int sock, int snap) {
 }
 
 int set_priority(int sock, uint32_t tag_val, int8_t pri_val) {
-	if (outbead(sock, SET_PRIORITY, struct create_snapshot, 0) < 0)
+	if (outbead(sock, SET_PRIORITY, struct snapinfo, tag_val, pri_val) < 0)
 		return eek();
 
-	struct snapinfo new_snap;
-	new_snap.snap = tag_val;
-	new_snap.prio = pri_val;
-	writepipe(sock, &new_snap, sizeof(struct snapinfo));
+	struct head head;
+	unsigned maxbuf = 500;
+	char buf[maxbuf];
+	int err = 0;
+
+	if ((err = readpipe(sock, &head, sizeof(head))))
+		return eek();
+	assert(head.length < maxbuf); // !!! don't die
+	if ((err = readpipe(sock, buf, head.length)))
+		return eek();
+	trace_on(printf("reply = %x\n", head.code););
+	err = (head.code != REPLY_SET_PRIORITY);
+
+	if (head.code == REPLY_ERROR || err)
+		error("%.*s", head.length - 4, buf + 4);
+
+	return 0;
+}
+
+int set_usecount(int sock, uint32_t tag_val, const char * op) {
+	int usecnt = (strcmp(op, "inc") == 0) ? 1 : ((strcmp(op, "dec") == 0) ? -1 : 0);
+
+	if (outbead(sock, SET_USECOUNT, struct snapinfo, tag_val, 0, usecnt) < 0)
+		return eek();
+
+	struct head head;
+	unsigned maxbuf = 500;
+	char buf[maxbuf];
+	int err = 0;
+
+	if ((err = readpipe(sock, &head, sizeof(head))))
+		return eek();
+	assert(head.length < maxbuf); // !!! don't die
+	if ((err = readpipe(sock, buf, head.length)))
+		return eek();
+	trace_on(printf("reply = %x\n", head.code););
+	err = (head.code != REPLY_SET_USECOUNT);
+
+	if (head.code == REPLY_ERROR || err)
+		error("%.*s", head.length - 4, buf + 4);
 
 	return 0;
 }
@@ -703,6 +741,7 @@ void usage(void)
 		"	create-snapshot\n"
 		"	generate-changelist\n"
 		"	set-priority\n"
+	        "        set-usecount\n"
 		"	daemon\n"
 		"	send-delta\n");
 }
@@ -724,7 +763,6 @@ int main(int argc, char *argv[]) {
 	command = argv[1];
 
 	if (strcmp(command, "create-delta")==0) {
-
 		char cdOpt, *changelist, *deltafile, *snapdev1, *snapdev2;
 		int xd = FALSE, raw = FALSE, test = FALSE, gzip_level = 0, ret = 0, mode = 0;
 		poptContext cdCon;
@@ -738,7 +776,7 @@ int main(int argc, char *argv[]) {
 			POPT_TABLEEND
 		};
 		
-		cdCon = poptGetContext(NULL, argc-1, (const char **) &(argv[1]), cdOptions, 0);
+		cdCon = poptGetContext(NULL, argc-1, (const char **)&(argv[1]), cdOptions, 0);
 		poptSetOtherOptionHelp(cdCon, "<changelist> <deltafile> <snapdev1> <snapdev2>");
 		
 		cdOpt = poptGetNextOpt(cdCon);
@@ -827,6 +865,14 @@ int main(int argc, char *argv[]) {
 		}
 		sock = create_socket(argv[2]);
 		return set_priority(sock, atoi(argv[3]), atoi(argv[4]));
+	} 
+	if (strcmp(command, "set-usecount")==0) {
+		if (argc != 5) {
+			printf("usage: ddsnap set-usecount sockname <snap_tag> <inc|dec>\n");
+			return 1;
+		}
+		sock = create_socket(argv[2]);
+		return set_usecount(sock, atoi(argv[3]), argv[4]);
 	} 
 	if (strcmp(command, "daemon")==0) {
 		char const *hostname;

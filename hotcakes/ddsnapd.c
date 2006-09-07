@@ -1,5 +1,5 @@
 /*
- * Clustered Snapshot Metadata Server
+ * Snapshot Metadata Server
  *
  * Daniel Phillips, Nov 2003 to May 2004
  * (c) 2003 Sistina Software Inc.
@@ -37,6 +37,8 @@
 #define trace trace_off
 #define jtrace trace_off
 #define BUSHY
+
+#define SECTORS_PER_BLOCK 3 
 
 /*
 Todo:
@@ -220,9 +222,10 @@ struct superblock
 		struct snapshot
 		{
 			u32 ctime; // relative to middle 32 bits of super ctime
-			u32 tag; // external name of snapshot
-			u8 bit; // internal snapshot number
-			s8 prio; // 0=normal, 127=highest, -128=lowestdrop
+			u32 tag;   // external name of snapshot
+			u8 bit;    // internal snapshot number
+			s8 prio;   // 0=normal, 127=highest, -128=lowestdrop
+			u8 usecnt; // use count on snapshot device (just use a bit?)
 			char reserved[7];
 		} snaplist[MAX_SNAPSHOTS];
 		u32 snapshots;
@@ -935,6 +938,59 @@ chunk_t alloc_chunk_range(struct superblock *sb, chunk_t chunk, chunk_t range)
 static int delete_snapshot(struct superblock *sb, unsigned tag);
 // !!! possible/practical to topsort away this forward ref?
 
+static int cmp_values(u64 one, u64 two) {
+	if(one < two)
+		return -1;
+	if(one > two)
+		return 1;
+      	return 0;
+}
+
+static int cmp_usecnt(const void *s1, const void *s2) 
+{
+	return cmp_values(((struct snapshot *)s1)->usecnt, ((struct snapshot *)s2)->usecnt);
+}
+
+static int cmp_prio(const void *s1, const void *s2) 
+{
+	return cmp_values(((struct snapshot *)s1)->prio, ((struct snapshot *)s2)->prio);
+}
+
+static int cmp_ctime(const void *s1, const void *s2) 
+{
+	return cmp_values(((struct snapshot *)s1)->ctime, ((struct snapshot *)s2)->ctime);
+}
+
+static int find_snapshot_to_delete(struct superblock *sb) 
+{
+	
+	struct snapshot slist[MAX_SNAPSHOTS]; 
+	u32 i, size = sb->image.snapshots;
+
+	memcpy(slist, sb->image.snaplist, sizeof(struct snapshot)*sb->image.snapshots);
+	/* sort by usecount first */
+	qsort(slist, size, sizeof(struct snapshot), cmp_usecnt);
+	for(i = 0; i < size - 1; i++)
+		if(slist[i].usecnt != slist[i+1].usecnt)
+			break;
+	if(i == 0)
+		goto found_snap;
+
+	/* sort by prio */
+	qsort(slist, i+1, sizeof(struct snapshot), cmp_prio);
+	for(i = 0; i < size - 1; i++)
+		if(slist[i].prio != slist[i+1].prio)
+			break;
+	if(i == 0)
+		goto found_snap;
+
+	/* sort by ctime */
+	qsort(slist, i+1, sizeof(struct snapshot), cmp_ctime);
+
+ found_snap:
+	return slist[0].tag;
+}
+
 static chunk_t alloc_chunk(struct superblock *sb)
 {
 	chunk_t last = sb->current_alloc->last_alloc, total = sb->current_alloc->chunks, found;
@@ -947,8 +1003,8 @@ static chunk_t alloc_chunk(struct superblock *sb)
 			return (found);
 		}
 	
-		int tag = sb->image.snaplist[0].tag;
-		warn("snapshot store full, release snapshot %i", tag);
+		int tag = find_snapshot_to_delete(sb);
+		warn("Snapshot store full, releasing snapshot %i", tag);
 		if (delete_snapshot(sb, tag))
 			error("snapshot delete failed");
 	} while (sb->image.snapshots);
@@ -2017,7 +2073,7 @@ void setup_sb(struct superblock *sb)
 #ifdef BUSHY
 	sb->blocks_per_node = 10;
 #endif
-	sb->copybuf = malloc_aligned(sb->copybuf_size = (32 * sb->chunksize), 4096); // !!! check failed
+   	sb->copybuf = malloc_aligned(sb->copybuf_size = (32 * sb->chunksize), 4096); // !!! check failed
 	sb->sectors_per_block = 1 << sb->sectors_per_block_bits;
 	sb->sectors_per_chunk = 1 << sb->sectors_per_chunk_bits;
 	sb->snapmask = 0;
@@ -2076,7 +2132,7 @@ int init_snapstore(struct superblock *sb)
 {
 	int i, error;
 
-	unsigned sectors_per_block_bits = 3;
+	unsigned sectors_per_block_bits = SECTORS_PER_BLOCK;
 	sb->image = (struct disksuper){ .magic = SB_MAGIC };
 	sb->image.etree_levels = 1,
 	sb->image.blocksize_bits = SECTOR_BITS + sectors_per_block_bits;
@@ -2279,15 +2335,15 @@ next:
 	return 0;
 }
 
-int valid_snaptag(struct superblock *sb, int tag) {
+struct snapshot * valid_snaptag(struct superblock *sb, int tag) {
 	int i, n = sb->image.snapshots;
 	struct snapshot *snap = sb->image.snaplist;
 	
 	for (i=0; i<n; i++) 
 		if(snap[i].tag == tag) 
-			return 1;
+			return &(snap[i]);
 	
-	return 0;
+	return (struct snapshot *)0;
 }
 
 #define check_client_locks(x, y) client_locks(x, y, 1)
@@ -2497,11 +2553,45 @@ int incoming(struct superblock *sb, struct client *client)
 		for (i=0; i<n; i++) {
 			write(sock, &(struct snapinfo){ 
 				.snap = (snap[i]).tag,
-					 .prio = (snap[i]).prio,
-					 .ctime = (snap[i]).ctime },
+					 .prio   = (snap[i]).prio,
+					 .ctime  = (snap[i]).ctime,
+					 .usecnt = (snap[i]).usecnt},
 			      sizeof(struct snapinfo));
 		}
 		
+		break;
+	}
+	case SET_PRIORITY:
+	{
+		u32 snap = ((struct snapinfo *)message.body)->snap;
+		s8 prio  = ((struct snapinfo *)message.body)->prio;
+		struct snapshot * snap_info;
+		
+		if(!(snap_info = valid_snaptag(sb, snap))) {
+			warn("Snapshot id %u is not a valid snapshot\n", snap);
+			goto set_prio_error;
+		}
+		snap_info->prio = prio;	
+		outbead(sock, REPLY_SET_PRIORITY, struct { });
+	set_prio_error:
+		outbead(sock, REPLY_ERROR, struct {});
+		break;
+	}
+	case SET_USECOUNT: 
+	{
+		u32 snap = ((struct snapinfo *)message.body)->snap;
+		s8 usecnt  = ((struct snapinfo *)message.body)->usecnt;
+		struct snapshot * snap_info;
+		
+		if(!(snap_info = valid_snaptag(sb, snap))) {
+			warn("Snapshot id %u is not a valid snapshot\n", snap);
+			goto set_usecnt_error;
+		}
+		usecnt += snap_info->usecnt;
+		snap_info->usecnt = usecnt > 0 ? usecnt : 0;
+		outbead(sock, REPLY_SET_USECOUNT, struct { });
+	set_usecnt_error:
+		outbead(sock, REPLY_ERROR, struct {});
 		break;
 	}
 	case GENERATE_CHANGE_LIST:
@@ -2573,7 +2663,7 @@ static int sigpipe;
 
 void sighandler(int signum)
 {
-	trace_off(printf("caught signal %i\n", signum););
+	trace_on(printf("caught signal %i\n", signum););
 	write(sigpipe, (char[]){signum}, 1);
 }
 
