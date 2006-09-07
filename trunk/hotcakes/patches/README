@@ -1,5 +1,5 @@
 Patch for kernel source tree 2.6.17-rc6:
-	Apply ddraid-2.6.17-rc6 and then ddraid-2.6.17-rc6-2
+	Apply hotcakes-2.6.17-rc6.patch
 
-Patch for kernel source tree 2.6.18-rc5:
-	Apply hotcakes-2.6.18-rc5.patch
+Patch for kernel source tree 2.6.18-rc6:
+	Apply hotcakes-2.6.18-rc6.patch
