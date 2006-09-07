@@ -131,9 +131,10 @@ typedef int fd_t;
 static int fd_size(int fd, u64 *bytes)
 {
 	int error;
-	unsigned sectors;
+	unsigned long sectors;
+
 	if ((error = ioctl(fd, BLKGETSIZE, &sectors)))
-		return error;
+		return -errno;
 	*bytes = ((u64)sectors) << 9;
 	return 0;
 }
@@ -2084,14 +2085,14 @@ int init_snapstore(struct superblock *sb)
 	setup_sb(sb);
 
 	u64 size;
-	if ((error = fd_size(sb->snapdev, &size)))
-		error("Error %i: %s determining snapshot store size", error, strerror(error));
+	if ((error = fd_size(sb->snapdev, &size)) < 0)
+		error("Error %i: %s determining snapshot store size", error, strerror(-error));
 	sb->snapdata->chunks = size >> sb->image.chunksize_bits;
-	if ((error = fd_size(sb->metadev, &size)))
-		error("Error %i: %s determining metadata store size", error, strerror(error));
+	if ((error = fd_size(sb->metadev, &size)) < 0)
+		error("Error %i: %s determining metadata store size", error, strerror(-error));
 	sb->metadata->chunks = size >> sb->image.chunksize_bits;
-	if ((error = fd_size(sb->orgdev, &size)))
-		error("Error %i: %s determining origin volume size", errno, strerror(errno));
+	if ((error = fd_size(sb->orgdev, &size)) < 0)
+		error("Error %i: %s determining origin volume size", errno, strerror(-errno));
 	sb->image.orgchunks = size >> sb->image.chunksize_bits;
 	
 	sb->image.journal_size = 100;
@@ -2817,15 +2818,15 @@ int main(int argc, const char *argv[])
 
 	init_buffers();
 
-	if (!(sb->snapdev = open(poptGetArg(optCon), O_RDWR | O_DIRECT)))
+	if ((sb->snapdev = open(poptGetArg(optCon), O_RDWR | O_DIRECT)) == -1)
 		error("Could not open snapshot store %s", argv[1]);
 
-	if (!(sb->orgdev = open(poptGetArg(optCon), O_RDONLY | O_DIRECT)))
+	if ((sb->orgdev = open(poptGetArg(optCon), O_RDONLY | O_DIRECT)) == -1)
 		error("Could not open origin volume %s", argv[2]);
 
 	sb->metadev = sb->snapdev; 
 #ifdef SERVER
-	if(argc == 6 && !(sb->metadev = open(poptGetArg(optCon), O_RDWR))) /* can I do an O_DIRECT on the ramdevice? */ 
+	if(argc == 6 && (sb->metadev = open(poptGetArg(optCon), O_RDWR)) == -1) /* can I do an O_DIRECT on the ramdevice? */ 
 		error("Could not open meta volume %s", argv[3]);
 
 	const char *agent_sockname = poptGetArg(optCon);
@@ -2833,7 +2834,7 @@ int main(int argc, const char *argv[])
 	poptFreeContext(optCon);
 	return snap_server(sb, agent_sockname, server_sockname);
 #else
-	if(argc == 4 && !(sb->metadev = open(poptGetArg(optCon), O_RDWR))) 
+	if(argc == 4 && (sb->metadev = open(poptGetArg(optCon), O_RDWR)) == -1) 
 		error("Could not open meta volume %s", argv[3]);
 	poptFreeContext(optCon);
 	
