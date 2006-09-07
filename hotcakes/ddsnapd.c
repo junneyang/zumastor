@@ -2818,23 +2818,23 @@ int main(int argc, const char *argv[])
 	init_buffers();
 
 	if ((sb->snapdev = open(poptGetArg(optCon), O_RDWR | O_DIRECT)) == -1)
-		error("Could not open snapshot store %s", argv[1]);
+		error("Could not open snapshot store %s: %s", argv[1], strerror(errno));
 
 	if ((sb->orgdev = open(poptGetArg(optCon), O_RDONLY | O_DIRECT)) == -1)
-		error("Could not open origin volume %s", argv[2]);
+		error("Could not open origin volume %s: %s", argv[2], strerror(errno));
 
 	sb->metadev = sb->snapdev; 
 #ifdef SERVER
-	if(argc == 6 && (sb->metadev = open(poptGetArg(optCon), O_RDWR)) == -1) /* can I do an O_DIRECT on the ramdevice? */ 
-		error("Could not open meta volume %s", argv[3]);
+	if (argc == 6 && (sb->metadev = open(poptGetArg(optCon), O_RDWR)) == -1) /* can I do an O_DIRECT on the ramdevice? */ 
+		error("Could not open meta volume %s: %s", argv[3], strerror(errno));
 
 	const char *agent_sockname = poptGetArg(optCon);
 	const char *server_sockname = poptGetArg(optCon);
 	poptFreeContext(optCon);
 	return snap_server(sb, agent_sockname, server_sockname);
 #else
-	if(argc == 4 && (sb->metadev = open(poptGetArg(optCon), O_RDWR)) == -1) 
-		error("Could not open meta volume %s", argv[3]);
+	if (argc == 4 && (sb->metadev = open(poptGetArg(optCon), O_RDWR)) == -1) 
+		error("Could not open meta volume %s: %s", argv[3], strerror(errno));
 	poptFreeContext(optCon);
 	
 #if 0
