@@ -1,5 +1,8 @@
 kernel=/src/2.6.17-rc6-dd/drivers/md
 
+#instdir=/usr/bin
+instdir=/tmp/ddsnap
+
 deps = Makefile trace.h diskio.h buffer.h list.h sock.h
 ddsnap_deps = $(deps) ddsnap.h $(kernel)/dm-ddsnap.h
 ddraid_deps = $(deps) ddraid.h $(kernel)/dm-ddraid.h
@@ -11,9 +14,9 @@ binaries =  $(ddraid_binaries) $(ddsnap_binaries) devspam
 includes = $(kernel)
 flags = -g -Wall -D_FILE_OFFSET_BITS=64
 
-all: diskio.o buffer.o xdelta3.o $(binaries)
+all: $(binaries)
 
-xdelta3.o:
+xdelta/xdelta3.o:
 	cd xdelta && cc xdelta3.c -c $(flags)
 
 delta.o: delta.c
@@ -25,26 +28,29 @@ diskio.o: diskio.c $(deps)
 buffer.o: buffer.c diskio.c $(deps)
 	cc buffer.c -c $(flags)
 
-mkddraid: ddraid.c buffer.o $(ddraid_deps)
+daemonize.o: daemonize.c $(deps)
+	cc daemonize.c -c $(flags)
+
+mkddraid: ddraid.c diskio.o buffer.o $(ddraid_deps)
 	cc -DCREATE ddraid.c $(flags) -I$(includes) diskio.o buffer.o -o mkddraid
 
-ddraidd: ddraid.c buffer.o $(ddraid_deps)
+ddraidd: ddraid.c diskio.o buffer.o $(ddraid_deps)
 	cc -DSERVER ddraid.c $(flags) -I$(includes) diskio.o buffer.o -o ddraidd
 
 ddraid-agent: ddraid.agent.c $(ddraid_deps)
-	cc ddraid.agent.c $(flags) -I$(includes) -lpthread -o ddraid-agent
+	cc ddraid.agent.c $(flags) -I$(includes) -lpthread -o ddraid-agent -lpopt
 
-mkddsnap: ddsnapd.c buffer.o $(ddsnap_deps)
+mkddsnap: ddsnapd.c diskio.o buffer.o $(ddsnap_deps)
 	cc -DCREATE ddsnapd.c $(flags) -I$(includes) diskio.o buffer.o -o mkddsnap -lpopt
 
-ddsnapd: ddsnapd.c buffer.o $(ddsnap_deps)
-	cc -DSERVER ddsnapd.c $(flags) -I$(includes) diskio.o buffer.o -o ddsnapd -lpopt
+ddsnapd: ddsnapd.c diskio.o buffer.o daemonize.o $(ddsnap_deps)
+	cc -DSERVER ddsnapd.c $(flags) -I$(includes) diskio.o buffer.o daemonize.o -o ddsnapd -lpopt
 
-ddsnap-agent: ddsnap.agent.c $(ddsnap_deps)
-	cc ddsnap.agent.c $(flags) -I$(includes) -o ddsnap-agent
+ddsnap-agent: ddsnap.agent.c daemonize.o $(ddsnap_deps)
+	cc ddsnap.agent.c $(flags) -I$(includes) daemonize.o -o ddsnap-agent -lpopt
 
-ddsnap: ddsnap.c diskio.o xdelta3.o delta.o $(ddsnap_deps)
-	cc ddsnap.c $(flags) -I$(includes) xdelta/xdelta3.o delta.o diskio.o -o ddsnap -lpopt -lz
+ddsnap: ddsnap.c xdelta/xdelta3.o delta.o diskio.o daemonize.o $(ddsnap_deps)
+	cc ddsnap.c $(flags) -I$(includes) xdelta/xdelta3.o delta.o diskio.o daemonize.o -o ddsnap -lpopt -lz
 
 devspam: tests/devspam.c trace.h
 	cd tests && cc devspam.c $(flags) -I$(includes) -o ../devspam
@@ -52,8 +58,9 @@ devspam: tests/devspam.c trace.h
 clean:
 	rm -f $(binaries) *.o xdelta/*.o a.out
 
-install:
-	cp $(binaries) /usr/bin
+install: $(binaries)
+	mkdir $(instdir) || true
+	cp $(binaries) $(instdir)
 
 kernel:
 	cd ../../.. && make bzImage
@@ -86,6 +93,10 @@ data4=hda10
 
 data=/dev/$(data0) /dev/$(data1) /dev/$(data2) /dev/$(data3) /dev/$(data4)
 #data=/dev/$(data0) /dev/$(data1)
+
+# README test values
+origindev=/dev/sda3
+snapstoredev=/dev/sda4
 
 ddraid-test: ddraid-test1 ddraid-test2
 
@@ -126,19 +137,20 @@ ddraid-test9:
 #ddsnap-test: ddsnap-test1 ddsnap-test2 ddsnap-test3
 
 dd-init: 
-	ln -s /dev/sdb2 /dev/test-snapstore || true
-	ln -s /dev/sdb1 /dev/test-origin || true
+	ln -s $(snapstoredev) /dev/test-snapstore || true
+	ln -s $(origindev) /dev/test-origin || true
 #	insmod /src/2.6.17-rc6-dd/drivers/md/dm-ddsnap.ko || true
 	killall ddsnapd || true
 	killall ddsnap-agent || true
-	./mkddsnap /dev/test-snapstore /dev/test-origin 
 	/sbin/dmsetup remove_all || true
+	./mkddsnap /dev/test-snapstore /dev/test-origin 
 
 dd-agent:
 	./ddsnap-agent /tmp/control
 
 dd-server:
 	./ddsnapd /dev/test-snapstore /dev/test-origin /tmp/control /tmp/server
+	#./ddsnapd -f /dev/test-snapstore /dev/test-origin /tmp/control /tmp/server
 
 dd-create:
 	./ddsnap create-snapshot /tmp/server 0
@@ -147,10 +159,26 @@ dd-delete:
 	./ddsnap delete-snapshot /tmp/server 0
  
 origin: 
-	echo 0 16064936 ddsnap /dev/test-snapstore /dev/test-origin /tmp/control -1 | sudo /sbin/dmsetup create vol
+	echo 0 $$((2 * $$(egrep $$(echo $(origindev) | sed -e 's@^.*/@@')'$$' /proc/partitions | awk '{print $$3}'))) ddsnap /dev/test-snapstore /dev/test-origin /tmp/control -1 | sudo /sbin/dmsetup create vol
 
-snap:
-	echo 0 16064936 ddsnap /dev/test-snapstore /dev/test-origin /tmp/control 0 | sudo /sbin/dmsetup create snap0
+snap0:
+	sudo ./ddsnap create-snapshot /tmp/server 0
+	echo 0 $$((2 * $$(egrep $$(echo $(origindev) | sed -e 's@^.*/@@')'$$' /proc/partitions | awk '{print $$3}'))) ddsnap /dev/test-snapstore /dev/test-origin /tmp/control 0 | sudo /sbin/dmsetup create snapshot0
+
+snap1:
+	sudo ./ddsnap create-snapshot /tmp/server 1
+	echo 0 $$((2 * $$(egrep $$(echo $(origindev) | sed -e 's@^.*/@@')'$$' /proc/partitions | awk '{print $$3}'))) ddsnap /dev/test-snapstore /dev/test-origin /tmp/control 1 | sudo /sbin/dmsetup create snapshot1
+
+snap2:
+	sudo ./ddsnap create-snapshot /tmp/server 2
+	echo 0 $$((2 * $$(egrep $$(echo $(origindev) | sed -e 's@^.*/@@')'$$' /proc/partitions | awk '{print $$3}'))) ddsnap /dev/test-snapstore /dev/test-origin /tmp/control 2 | sudo /sbin/dmsetup create snapshot2
+
+changelist:
+	sudo ./ddsnap list
+	sudo ./ddsnap generate-changelist /tmp/server changelist0-1 0 1
+
+delta:
+	sudo ./ddsnap create-delta -r changelist0-1 deltafile0-1 /dev/mapper/snapshot0 /dev/mapper/snapshot1
 
 ddsnap-test3: 
 #	sudo ./devpoke /dev/mapper/torigin write 2
@@ -164,3 +192,4 @@ ddsnap-test4:
 
 ddsnap-test9:
 	sudo /sbin/dmsetup remove torigin
+

@@ -15,11 +15,11 @@
 #include <stddef.h>
 #include <unistd.h>
 #include <fcntl.h>
-#include <errno.h> 
+#include <errno.h>
 #include <time.h>
 #include <signal.h>
 #include <sys/poll.h>
-#include <sys/types.h> 
+#include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <sys/ioctl.h>
@@ -33,12 +33,13 @@
 #include "ddsnap.h"
 #include "dm-ddsnap.h"
 #include "trace.h"
+#include "daemonize.h"
 
 #define trace trace_off
 #define jtrace trace_off
 #define BUSHY
 
-#define SECTORS_PER_BLOCK 3 
+#define SECTORS_PER_BLOCK 3
 
 /*
 Todo:
@@ -64,7 +65,7 @@ Journal
 
 File backing
   \ double linked list ops
-  - buffer lru 
+  - buffer lru
   - buffer writeout policy
   - buffer eviction policy
   - verify no busy buffers between operations
@@ -128,7 +129,7 @@ typedef int fd_t;
  * Ripped from libiddev.  It's not quite ugly enough to convince me to
  * add a new dependency on a library that nobody has yet, but it's close.
  *
- * Heavily modified so it would work with ramdisk devices. 
+ * Heavily modified so it would work with ramdisk devices.
  */
 static int fd_size(int fd, u64 *bytes)
 {
@@ -140,14 +141,14 @@ static int fd_size(int fd, u64 *bytes)
 	return 0;
 }
 
-void hexdump(void *data, unsigned length)
+static void hexdump(void const *data, unsigned length)
 {
-	while (length ) {
+	while (length) {
 		int row = length < 16? length: 16;
 		printf("%p: ", data);
 		length -= row;
 		while (row--)
-			printf("%02hhx ", *(unsigned char *)data++);
+			printf("%02hhx ", *(unsigned char const *)data++);
 		printf("\n");
 	}
 }
@@ -285,7 +286,7 @@ static inline struct commit_block *buf2block(struct buffer *buf)
 	return (void *)buf->data;
 }
 
-unsigned next_journal_block(struct superblock *sb)
+static unsigned next_journal_block(struct superblock *sb)
 {
 	unsigned next = sb->image.journal_next;
 
@@ -369,7 +370,7 @@ static void commit_transaction(struct superblock *sb)
 	brelse(commit_buffer);
 }
 
-int recover_journal(struct superblock *sb)
+static int recover_journal(struct superblock *sb)
 {
 	struct buffer *buffer;
 	typeof(((struct commit_block *)NULL)->sequence) sequence;
@@ -541,12 +542,12 @@ static void _show_journal(struct superblock *sb)
  *   - enforce 32 bit address range within leaf
  */
 
-struct buffer *snapread(struct superblock *sb, sector_t sector)
+static struct buffer *snapread(struct superblock *sb, sector_t sector)
 {
 	return bread(sb->metadev, sector, sb->blocksize);
 }
 
-void show_leaf(struct eleaf *leaf)
+static void show_leaf(struct eleaf *leaf)
 {
 	struct exception *p;
 	int i;
@@ -567,7 +568,7 @@ void show_leaf(struct eleaf *leaf)
  * have exceptions.
  */
 
-int origin_chunk_unique(struct eleaf *leaf, u64 chunk, u64 snapmask)
+static int origin_chunk_unique(struct eleaf *leaf, u64 chunk, u64 snapmask)
 {
 	u64 using = 0;
 	unsigned i, target = chunk - leaf->base_chunk;
@@ -590,7 +591,7 @@ found:
  * if the chunk has an exception we need to know the exception address.
  */
 
-int snapshot_chunk_unique(struct eleaf *leaf, u64 chunk, int snapshot, u64 *exception)
+static int snapshot_chunk_unique(struct eleaf *leaf, u64 chunk, int snapshot, u64 *exception)
 {
 	u64 mask = 1LL << snapshot;
 	unsigned i, target = chunk - leaf->base_chunk;
@@ -633,20 +634,20 @@ found:
  * leaf-editing code complexity down to a dull roar.
  */
 
-unsigned leaf_freespace(struct eleaf *leaf)
+static unsigned leaf_freespace(struct eleaf *leaf)
 {
 	char *maptop = (char *)(&leaf->map[leaf->count + 1]); // include sentinel
 	return (char *)emap(leaf, 0) - maptop;
 }
 
-unsigned leaf_payload(struct eleaf *leaf)
+static unsigned leaf_payload(struct eleaf *leaf)
 {
 	int lower = (char *)(&leaf->map[leaf->count]) - (char *)leaf->map;
 	int upper = (char *)emap(leaf, leaf->count) - (char *)emap(leaf, 0);
 	return lower + upper;
 }
 
-int add_exception_to_leaf(struct eleaf *leaf, u64 chunk, u64 exception, int snapshot, u64 active)
+static int add_exception_to_leaf(struct eleaf *leaf, u64 chunk, u64 exception, int snapshot, u64 active)
 {
 	unsigned i, j, target = chunk - leaf->base_chunk;
 	u64 mask = 1ULL << snapshot, sharemap;
@@ -709,7 +710,7 @@ insert:
  * the upper half of entries to the new leaf and move the lower half of
  * entries to the top of the original block.
  */
-u64 split_leaf(struct eleaf *leaf, struct eleaf *leaf2)
+static u64 split_leaf(struct eleaf *leaf, struct eleaf *leaf2)
 {
 	unsigned i, nhead = (leaf->count + 1) / 2, ntail = leaf->count - nhead, tailsize;
 	/* Should split at middle of data instead of median exception */
@@ -736,7 +737,7 @@ u64 split_leaf(struct eleaf *leaf, struct eleaf *leaf2)
 	return splitpoint;
 }
 
-void merge_leaves(struct eleaf *leaf, struct eleaf *leaf2)
+static void merge_leaves(struct eleaf *leaf, struct eleaf *leaf2)
 {
 	unsigned nhead = leaf->count, ntail = leaf2->count, i;
 	unsigned tailsize = (char *)emap(leaf2, ntail) - (char *)emap(leaf2, 0);
@@ -757,13 +758,13 @@ void merge_leaves(struct eleaf *leaf, struct eleaf *leaf2)
 	leaf->count += ntail;
 }
 
-void merge_nodes(struct enode *node, struct enode *node2)
+static void merge_nodes(struct enode *node, struct enode *node2)
 {
 	memcpy(&node->entries[node->count], &node2->entries[0], node2->count * sizeof(struct index_entry));
 	node->count += node2->count;
 }
 
-void init_leaf(struct eleaf *leaf, int block_size)
+static void init_leaf(struct eleaf *leaf, int block_size)
 {
 	leaf->magic = 0x1eaf;
 	leaf->version = 0;
@@ -783,7 +784,7 @@ void init_leaf(struct eleaf *leaf, int block_size)
 #define SB_SECTOR 8
 #define SB_SIZE 4096
 
-void set_sb_dirty(struct superblock *sb)
+static void set_sb_dirty(struct superblock *sb)
 {
 	sb->flags |= SB_DIRTY;
 }
@@ -883,7 +884,7 @@ static inline void free_block(struct superblock *sb, sector_t address)
 	free_chunk(sb, address >> sb->sectors_per_chunk_bits); // !!! assumes blocksize = chunksize
 }
 
-void grab_chunk(struct superblock *sb, chunk_t chunk) // just for testing
+static void grab_chunk(struct superblock *sb, chunk_t chunk) // just for testing
 {
 	unsigned bitmap_shift = sb->image.blocksize_bits + 3, bitmap_mask = (1 << bitmap_shift ) - 1;
 	u64 bitmap_block = chunk >> bitmap_shift;
@@ -894,7 +895,7 @@ void grab_chunk(struct superblock *sb, chunk_t chunk) // just for testing
 	brelse_dirty(buffer);
 }
 
-chunk_t alloc_chunk_range(struct superblock *sb, chunk_t chunk, chunk_t range)
+static chunk_t alloc_chunk_range(struct superblock *sb, chunk_t chunk, chunk_t range)
 {
 	unsigned bitmap_shift = sb->image.blocksize_bits + 3, bitmap_mask = (1 << bitmap_shift ) - 1;
 	u64 blocknum = chunk >> bitmap_shift;
@@ -1467,7 +1468,7 @@ create:
 	return i;
 };
 
-void check_leaf(struct eleaf *leaf, u64 snapmask)
+static void check_leaf(struct eleaf *leaf, u64 snapmask)
 {
        struct exception *p;
        int i;
@@ -1805,44 +1806,44 @@ struct snaplock
 };
 
 // used to be malloc... changed to calloc
-struct snaplock *new_snaplock(struct superblock *sb)
+static struct snaplock *new_snaplock(struct superblock *sb)
 {
 	return calloc(1, sizeof(struct snaplock));
 }
 
-struct snaplock_wait *new_snaplock_wait(struct superblock *sb)
+static struct snaplock_wait *new_snaplock_wait(struct superblock *sb)
 {
 	return calloc(1, sizeof(struct snaplock_wait));
 }
 
-struct snaplock_hold *new_snaplock_hold(struct superblock *sb)
+static struct snaplock_hold *new_snaplock_hold(struct superblock *sb)
 {
 	return calloc(1, sizeof(struct snaplock_hold));
 }
 
-void free_snaplock(struct superblock *sb, struct snaplock *p)
+static void free_snaplock(struct superblock *sb, struct snaplock *p)
 {
 	free(p);
 }
 
-void free_snaplock_hold(struct superblock *sb, struct snaplock_hold *p)
+static void free_snaplock_hold(struct superblock *sb, struct snaplock_hold *p)
 {
 	free(p);
 }
 
-void free_snaplock_wait(struct superblock *sb, struct snaplock_wait *p)
+static void free_snaplock_wait(struct superblock *sb, struct snaplock_wait *p)
 {
 	free(p);
 }
 
-unsigned snaplock_hash(struct superblock *sb, chunk_t chunk)
+static unsigned snaplock_hash(struct superblock *sb, chunk_t chunk)
 {
 	unsigned bin = ((u32)(chunk * 3498734713U)) >> (32 - sb->snaplock_hash_bits);
 	assert(bin >= 0 && bin < (1 << sb->snaplock_hash_bits));
 	return bin;
 }
 
-struct snaplock *find_snaplock(struct snaplock *list, chunk_t chunk)
+static struct snaplock *find_snaplock(struct snaplock *list, chunk_t chunk)
 {
 	for (; list; list = list->next) 
 		if (list->chunk == chunk) 
@@ -1850,7 +1851,7 @@ struct snaplock *find_snaplock(struct snaplock *list, chunk_t chunk)
 	return NULL;
 }
 
-void show_locks(struct superblock *sb)
+static void show_locks(struct superblock *sb)
 {
 	unsigned n = 0, i;
 	for (i = 0; i < (1 << sb->snaplock_hash_bits); i++) {
@@ -1874,7 +1875,7 @@ void show_locks(struct superblock *sb)
 	if (!n) printf("-- no locks --\n");
 }
 
-void waitfor_chunk(struct superblock *sb, chunk_t chunk, struct pending **pending)
+static void waitfor_chunk(struct superblock *sb, chunk_t chunk, struct pending **pending)
 {
 	struct snaplock *lock;
 
@@ -1896,7 +1897,7 @@ void waitfor_chunk(struct superblock *sb, chunk_t chunk, struct pending **pendin
 	/* show_locks(sb); */
 }
 
-void readlock_chunk(struct superblock *sb, chunk_t chunk, struct client *client)
+static void readlock_chunk(struct superblock *sb, chunk_t chunk, struct client *client)
 {
 	struct snaplock **bucket = &sb->snaplocks[snaplock_hash(sb, chunk)];
 	struct snaplock *lock;
@@ -1917,7 +1918,7 @@ void readlock_chunk(struct superblock *sb, chunk_t chunk, struct client *client)
 	trace(printf("leaving readlock_chunk\n"););
 }
 
-struct snaplock *release_lock(struct superblock *sb, struct snaplock *lock, struct client *client)
+static struct snaplock *release_lock(struct superblock *sb, struct snaplock *lock, struct client *client)
 {
 	struct snaplock *ret = lock;
 	struct snaplock_hold **holdp = &lock->holdlist;
@@ -1954,12 +1955,12 @@ struct snaplock *release_lock(struct superblock *sb, struct snaplock *lock, stru
 	}
 	ret = lock->next;
 	free_snaplock(sb, lock);
-		
+
 	trace(printf("leaving release_lock\n"););
 	return ret;
 }
 
-int release_chunk(struct superblock *sb, chunk_t chunk, struct client *client)
+static int release_chunk(struct superblock *sb, chunk_t chunk, struct client *client)
 {
 	trace(printf("enter release_chunk\n"););
 	trace(printf("release %Lx\n", chunk););
@@ -1999,14 +2000,14 @@ struct addto
 	char *lim;
 };
 
-void check_response_full(struct addto *r, unsigned bytes)
+static void check_response_full(struct addto *r, unsigned bytes)
 {
 	if ((char *)r->top < r->lim - bytes)
 		return;
 	error("Need realloc");
 }
 
-void addto_response(struct addto *r, chunk_t chunk)
+static void addto_response(struct addto *r, chunk_t chunk)
 {
 	trace(printf("inside addto_response\n"););
 	if (chunk != r->nextchunk) {
@@ -2030,7 +2031,7 @@ void addto_response(struct addto *r, chunk_t chunk)
 	trace(printf("leaving addto_response\n"););
 }
 
-int finish_reply_(struct addto *r, unsigned code, unsigned id)
+static int finish_reply_(struct addto *r, unsigned code, unsigned id)
 {
 	if (!r->countp)
 		return 0;
@@ -2043,10 +2044,10 @@ int finish_reply_(struct addto *r, unsigned code, unsigned id)
 	return 1;
 }
 
-void finish_reply(int sock, struct addto *r, unsigned code, unsigned id)
+static void finish_reply(int sock, struct addto *r, unsigned code, unsigned id)
 {
 	if (finish_reply_(r, code, id)) {
-		trace(printf("sending reply... "););			
+		trace(printf("sending reply... "););
 		reply(sock, (struct messagebuf *)r->reply);
 		trace(printf("done sending reply\n"););
 	}
@@ -2055,13 +2056,14 @@ void finish_reply(int sock, struct addto *r, unsigned code, unsigned id)
 
 /* Initialization, State load/save */
 
-void setup_alloc_sb(struct superblock *sb) {
+static void setup_alloc_sb(struct superblock *sb)
+{
 	sb->metadata = &(sb->image.alloc[0]);
 	sb->snapdata = &(sb->image.alloc[((sb->metadev == sb->snapdev) ? 0 : 1)]);
 	sb->current_alloc = sb->metadata; /* why? because I can */
 }
 
-void setup_sb(struct superblock *sb)
+static void setup_sb(struct superblock *sb)
 {
 	unsigned blocksize_bits = sb->image.blocksize_bits;
 	unsigned chunksize_bits = sb->image.blocksize_bits;
@@ -2073,7 +2075,7 @@ void setup_sb(struct superblock *sb)
 #ifdef BUSHY
 	sb->blocks_per_node = 10;
 #endif
-   	sb->copybuf = malloc_aligned(sb->copybuf_size = (32 * sb->chunksize), 4096); // !!! check failed
+	sb->copybuf = malloc_aligned(sb->copybuf_size = (32 * sb->chunksize), 4096); // !!! check failed
 	sb->sectors_per_block = 1 << sb->sectors_per_block_bits;
 	sb->sectors_per_chunk = 1 << sb->sectors_per_chunk_bits;
 	sb->snapmask = 0;
@@ -2088,7 +2090,7 @@ void setup_sb(struct superblock *sb)
 	setup_alloc_sb(sb);
 }
 
-void load_sb(struct superblock *sb)
+static void load_sb(struct superblock *sb)
 {
 	struct buffer *buffer = bread(sb->metadev, SB_SECTOR, SB_SIZE);
 	memcpy(&sb->image, buffer->data, sizeof(sb->image));
@@ -2102,7 +2104,7 @@ void load_sb(struct superblock *sb)
 	trace(printf("Active snapshot mask: %016llx\n", sb->snapmask););
 }
 
-void save_sb(struct superblock *sb)
+static void save_sb(struct superblock *sb)
 {
 	if (sb->flags & SB_DIRTY) {
 		struct buffer *buffer = getblk(sb->metadev, SB_SECTOR, SB_SIZE);
@@ -2113,7 +2115,7 @@ void save_sb(struct superblock *sb)
 	}
 }
 
-void save_state(struct superblock *sb)
+static void save_state(struct superblock *sb)
 {
 	flush_buffers();
 	save_sb(sb);
@@ -2128,7 +2130,7 @@ void save_state(struct superblock *sb)
  * require further unit testing.
  */
 
-int init_snapstore(struct superblock *sb)
+static int init_snapstore(struct superblock *sb)
 {
 	int i, error;
 
@@ -2310,7 +2312,7 @@ return 0;
 /* } */
 
 
-int client_locks(struct superblock *sb, struct client *client, int check)
+static int client_locks(struct superblock *sb, struct client *client, int check)
 {
 	int i;
 
@@ -2335,7 +2337,7 @@ next:
 	return 0;
 }
 
-struct snapshot * valid_snaptag(struct superblock *sb, int tag) {
+static struct snapshot * valid_snaptag(struct superblock *sb, int tag) {
 	int i, n = sb->image.snapshots;
 	struct snapshot *snap = sb->image.snaplist;
 	
@@ -2377,7 +2379,7 @@ struct snapshot * valid_snaptag(struct superblock *sb, int tag) {
  * The implementation ends up looking nice and tidy, but appearances
  * can be deceiving.
  */
-int incoming(struct superblock *sb, struct client *client)
+static int incoming(struct superblock *sb, struct client *client)
 {
 	struct messagebuf message;
 	unsigned sock = client->sock;
@@ -2661,13 +2663,13 @@ int incoming(struct superblock *sb, struct client *client)
 
 static int sigpipe;
 
-void sighandler(int signum)
+static void sighandler(int signum)
 {
 	trace_on(printf("caught signal %i\n", signum););
 	write(sigpipe, (char[]){signum}, 1);
 }
 
-int cleanup(struct superblock *sb)
+static int cleanup(struct superblock *sb)
 {
 	warn("cleaning up");
 	sb->image.flags &= ~SB_BUSY;
@@ -2676,7 +2678,7 @@ int cleanup(struct superblock *sb)
 	return 0;
 }
 
-int resolve_host(char *name, int family, void *result, int length)
+static int resolve_host(char *name, int family, void *result, int length)
 {
 	struct hostent host, *bogus;
 	char work[500];
@@ -2690,7 +2692,7 @@ int resolve_host(char *name, int family, void *result, int length)
 	return host.h_length;
 }
 
-int resolve_self(int family, void *result, int length)
+static int resolve_self(int family, void *result, int length)
 {
 	char name[HOST_NAME_MAX + 1];
 	if (gethostname(name, HOST_NAME_MAX) == -1)
@@ -2699,78 +2701,84 @@ int resolve_self(int family, void *result, int length)
 	return resolve_host(name, family, result, length);
 }
 
-int snap_server(struct superblock *sb, const char *agent_sockname, const char *server_sockname)
+#ifdef SERVER
+static int snap_server_setup(const char *agent_sockname, const char *server_sockname, int *listenfd, int *getsigfd, int *agentfd)
 {
-	unsigned maxclients = 100, clients = 0, others = 3;
-	struct client *clientvec[maxclients];
-	struct pollfd pollvec[others+maxclients];
-	int listener, getsig, pipevec[2], err = 0;
+	int pipevec[2];
+
 	struct sockaddr_un server_addr = { .sun_family = AF_UNIX };
 	int server_addr_len = sizeof(server_addr) - sizeof(server_addr.sun_path) + strlen(server_sockname);
 
 	struct server server = { .type = AF_UNIX };
 	strncpy(server.address, server_sockname, MAX_ADDRESS);
 
-	if (pipe(pipevec))
-		error("Can't open pipe");
+	if (pipe(pipevec) == -1)
+		error("Can't create pipe: %s", strerror(errno));
 	sigpipe = pipevec[1];
-	getsig = pipevec[0];
-	
-	if ((listener = socket(AF_UNIX, SOCK_STREAM, 0)) < 0) 
-		error("Can't get socket");
-	
+	*getsigfd = pipevec[0];
+
+	if ((*listenfd = socket(AF_UNIX, SOCK_STREAM, 0)) == -1)
+		error("Can't get AF_UNIX socket: %s", strerror(errno));
+
 	unlink(server_sockname);
 	strncpy(server_addr.sun_path, server_sockname, sizeof(server_addr.sun_path));
-	
-	if (bind(listener, (struct sockaddr *)&server_addr, server_addr_len) || listen(listener, 5))
-		error("Can't bind to socket");
-	
+
+	if (bind(*listenfd, (struct sockaddr *)&server_addr, server_addr_len) == -1)
+		error("Can't bind to socket %s: %s", server_sockname, strerror(errno));
+	if (listen(*listenfd, 5) == -1)
+		error("Can't listen on socket: %s", strerror(errno));
+
 	warn("ddsnapd server bound to socket %s", server_sockname);
-	
+
 	/* Get agent connection */
 	struct sockaddr_un agent_addr = { .sun_family = AF_UNIX };
 	int agent_addr_len = sizeof(agent_addr) - sizeof(agent_addr.sun_path) + strlen(agent_sockname);
-	int sock;
 
 	trace(warn("Connect to control socket %s", agent_sockname););
-	if ((sock = socket(AF_UNIX, SOCK_STREAM, 0)) == -1)
-		error("Can't get socket");
+	if ((*agentfd = socket(AF_UNIX, SOCK_STREAM, 0)) == -1)
+		error("Can't get AF_UNIX socket: %s", strerror(errno));
 	strncpy(agent_addr.sun_path, agent_sockname, sizeof(agent_addr.sun_path));
 	if (agent_sockname[0] == '@')
-		agent_addr.sun_path[0] = 0;
-	if (connect(sock, (struct sockaddr *)&agent_addr, agent_addr_len) == -1)
-		error("Can't connect to control socket");
-	trace(warn("Received control connection"););
-	
-	if (writepipe(sock, &(struct head){ SERVER_READY, sizeof(server) }, sizeof(struct head)) < 0 ||
-	    writepipe(sock, &server, sizeof(server)) < 0) 
-		error("Unable to send SEVER_READY msg to agent");
-	
-#if 0
-	switch (fork()) {
-	case -1:
-		error("fork failed");
-	case 0: // !!! daemonize goes here
-		break;
-	default:
-		return 0;
-	}
+		agent_addr.sun_path[0] = '\0';
+	if (connect(*agentfd, (struct sockaddr *)&agent_addr, agent_addr_len) == -1)
+		error("Can't connect to control socket %s: %s", agent_sockname, strerror(errno));
+	trace(warn("Established agent control connection"););
+
+	return 0;
+}
 #endif
 
-	pollvec[0] = (struct pollfd){ .fd = listener, .events = (POLLIN | POLLHUP | POLLERR) };
-	pollvec[1] = (struct pollfd){ .fd = getsig, .events = (POLLIN | POLLHUP | POLLERR) };
-	pollvec[2] = (struct pollfd){ .fd = sock, .events = (POLLIN | POLLHUP | POLLERR) };
+#ifdef SERVER
+static int snap_server(struct superblock *sb, const char *server_sockname, int listenfd, int getsigfd, int agentfd)
+{
+	unsigned maxclients = 100, clients = 0, others = 3;
+	struct client *clientvec[maxclients];
+	struct pollfd pollvec[others+maxclients];
+	int err = 0; /* FIXME: we never use this */
+        struct server server = { .type = AF_UNIX };
+
+        strncpy(server.address, server_sockname, MAX_ADDRESS);
+
+	if (writepipe(agentfd, &(struct head){ SERVER_READY, sizeof(server) }, sizeof(struct head)) < 0 ||
+	    writepipe(agentfd, &server, sizeof(server)) < 0)
+		error("Unable to send SEVER_READY msg to agent: %s", strerror(errno));
+
+	pollvec[0] = (struct pollfd){ .fd = listenfd, .events = (POLLIN | POLLHUP | POLLERR) };
+	pollvec[1] = (struct pollfd){ .fd = getsigfd, .events = (POLLIN | POLLHUP | POLLERR) };
+	pollvec[2] = (struct pollfd){ .fd = agentfd, .events = (POLLIN | POLLHUP | POLLERR) };
 
 	signal(SIGINT, sighandler);
 	signal(SIGTERM, sighandler);
 	signal(SIGPIPE, SIG_IGN);
 
 	while (1) {
+		trace(warn("Waiting for activity"););
+
 		int activity = poll(pollvec, others+clients, -1);
 
 		if (activity < 0) {
 			if (errno != EINTR)
-				error("poll failed, %s", strerror(errno));
+				error("poll failed: %s", strerror(errno));
 			continue;
 		}
 
@@ -2782,19 +2790,20 @@ int snap_server(struct superblock *sb, const char *agent_sockname, const char *s
 		/* New connection? */
 		if (pollvec[0].revents) {
 			struct sockaddr_in addr;
-			unsigned int addr_len = sizeof(addr), sock;
+			unsigned int addr_len = sizeof(addr);
+			int clientfd;
 
-			if (!(sock = accept(listener, (struct sockaddr *)&addr, &addr_len)))
-				error("Cannot accept connection");
+			if ((clientfd = accept(listenfd, (struct sockaddr *)&addr, &addr_len))<0)
+				error("Cannot accept connection: %s", strerror(errno));
 
 			trace_on(warn("Received connection"););
 			assert(clients < maxclients); // !!! send error and disconnect
 
 			struct client *client = malloc(sizeof(struct client));
-			*client = (struct client){ .sock = sock };
+			*client = (struct client){ .sock = clientfd };
 			clientvec[clients] = client;
 			pollvec[others+clients] = 
-				(struct pollfd){ .fd = sock, .events = (POLLIN | POLLHUP | POLLERR) };
+				(struct pollfd){ .fd = clientfd, .events = (POLLIN | POLLHUP | POLLERR) };
 			clients++;
 		}
 
@@ -2802,19 +2811,19 @@ int snap_server(struct superblock *sb, const char *agent_sockname, const char *s
 		if (pollvec[1].revents) {
 			u8 sig = 0;
 			/* it's stupid but this read also gets interrupted, so... */
-			do { } while (read(getsig, &sig, 1) == -1 && errno == EINTR);
+			do { } while (read(getsigfd, &sig, 1) == -1 && errno == EINTR);
 			trace_on(warn("caught signal %i", sig););
 			cleanup(sb); // !!! don't do it on segfault
-			if (sig == SIGINT) { 
-		        	signal(SIGINT, SIG_DFL);
-        			kill(getpid(), sig); /* commit harikiri */
+			if (sig == SIGINT) {
+				signal(SIGINT, SIG_DFL);
+				kill(getpid(), sig); /* commit harikiri */ /* FIXME: use raise()? */
 			}
 			goto done;
 		}
 
 		/* Agent message? */
 		if (pollvec[2].revents)
-			incoming(sb, &(struct client){ .sock = sock, .id = -2, .snap = -2 });
+			incoming(sb, &(struct client){ .sock = agentfd, .id = -2, .snap = -2 });
 
 		/* Client message? */
 		unsigned i = 0;
@@ -2845,9 +2854,10 @@ int snap_server(struct superblock *sb, const char *agent_sockname, const char *s
 	}
 done:
 	// in a perfect world we'd close all the connections
-	close(listener);
+	close(listenfd);
 	return err;
 }
+#endif
 
 #if 0
 void usage(poptContext optCon, int exitcode, char *error, char *addl) {
@@ -2865,70 +2875,121 @@ static void *useme[] = {
 int main(int argc, const char *argv[])
 {
 	poptContext optCon;
+	int nobg=0;
 	unsigned volsize;
+	char const *snapdev, *origdev, *metadev;
+#ifdef SERVER
+	char const *agent_sockname, *server_sockname;
+#endif
 
 	struct poptOption optionsTable[] = {
+	     { "foreground", 'f', POPT_ARG_NONE, &nobg, 0, "do not daemonize server", NULL },
 	     { "size", 's', POPT_ARG_INT, &volsize, 0, "volume size", "size" },
 	     POPT_AUTOHELP
 	     { NULL, 0, 0, NULL, 0 }
 	};
 
-	optCon = poptGetContext(NULL, argc, argv, optionsTable, 0);
+	optCon = poptGetContext(NULL, argc, (char const **)argv, optionsTable, 0);
 
 #ifdef SERVER
-	poptSetOtherOptionHelp(optCon, "dev/snapshot dev/origin [dev/meta] agent_socket server_socket");
-	if (argc < 5) {
+	poptSetOtherOptionHelp(optCon, "<dev/snapshot> <dev/origin> [dev/meta] <agent_socket> <server_socket>");
 #else
-	poptSetOtherOptionHelp(optCon, "dev/snapshot dev/origin [dev/meta]");
-	if (!(argc == 3 || argc == 4)) {
+	poptSetOtherOptionHelp(optCon, "<dev/snapshot> <dev/origin> [dev/meta]");
 #endif
-		poptPrintUsage(optCon, stderr, 0);
-		exit(1);
-	}
 
 	char c;
-	while ((c = poptGetNextOpt(optCon)) >= 0)
-		;
-#if 0
-	snapname = poptGetArg(optCon);
-	if(!(poptPeekArg(optCon) == NULL)) {
-		poptPrintUsage(optCon, stderr, 0);
-		exit(1);
-	}
-#endif
+
+	while ((c = poptGetNextOpt(optCon)) >= 0);
 	if (c < -1) {
-		 fprintf(stderr, "%s: %s\n",
-			 poptBadOption(optCon, POPT_BADOPTION_NOALIAS),
-			 poptStrerror(c));
+		 fprintf(stderr, "%s: %s: %s\n", argv[0], poptBadOption(optCon, POPT_BADOPTION_NOALIAS), poptStrerror(c));
 		 return 1;
 	}
+
+	snapdev = poptGetArg(optCon);
+	if (!snapdev) {
+                fprintf(stderr, "%s: snapshot device must be specified\n", argv[0]);
+                poptPrintUsage(optCon, stderr, 0);
+                return 1;
+        }
+
+	origdev = poptGetArg(optCon);
+	if (!origdev) {
+                fprintf(stderr, "%s: origin device must be specified\n", argv[0]);
+                poptPrintUsage(optCon, stderr, 0);
+                return 1;
+        }
+
+#ifdef SERVER
+	char const *extra_arg[3];
+
+	extra_arg[0] = poptGetArg(optCon);
+	extra_arg[1] = poptGetArg(optCon);
+	extra_arg[2] = poptGetArg(optCon);
+
+	if (!extra_arg[0] || !extra_arg[1]) {
+                fprintf(stderr, "%s: agent and server socket names must both be specified\n", argv[0]);
+                poptPrintUsage(optCon, stderr, 0);
+                return 1;
+	}
+
+	if (extra_arg[2]) {
+		metadev = extra_arg[0];
+		agent_sockname = extra_arg[1];
+		server_sockname = extra_arg[2];
+	} else {
+		metadev = NULL;
+		agent_sockname = extra_arg[0];
+		server_sockname = extra_arg[1];
+	}
+#else
+	metadev = poptGetArg(optCon); /* ok if NULL */
+#endif
+
+        if (poptPeekArg(optCon) != NULL) {
+                fprintf(stderr, "%s: too many arguments\n", argv[0]);
+                poptPrintUsage(optCon, stderr, 0);
+                return 1;
+        }
 
 	struct superblock *sb = &(struct superblock){};
 
 	init_buffers();
 
-	if ((sb->snapdev = open(poptGetArg(optCon), O_RDWR | O_DIRECT)) == -1)
-		error("Could not open snapshot store %s: %s", argv[1], strerror(errno));
+	if ((sb->snapdev = open(snapdev, O_RDWR | O_DIRECT)) == -1)
+		error("Could not open snapshot store %s: %s", snapdev, strerror(errno));
 
-	if ((sb->orgdev = open(poptGetArg(optCon), O_RDONLY | O_DIRECT)) == -1)
-		error("Could not open origin volume %s: %s", argv[2], strerror(errno));
+	if ((sb->orgdev = open(origdev, O_RDONLY | O_DIRECT)) == -1)
+		error("Could not open origin volume %s: %s", origdev, strerror(errno));
 
-	sb->metadev = sb->snapdev; 
+	sb->metadev = sb->snapdev;
+	if (metadev && (sb->metadev = open(metadev, O_RDWR)) == -1) /* can I do an O_DIRECT on the ramdevice? */
+		error("Could not open meta volume %s: %s", metadev, strerror(errno));
+
+	poptFreeContext(optCon);
+
 #ifdef SERVER
-	if (argc == 6 && (sb->metadev = open(poptGetArg(optCon), O_RDWR)) == -1) /* can I do an O_DIRECT on the ramdevice? */ 
-		error("Could not open meta volume %s: %s", argv[3], strerror(errno));
+	int listenfd, getsigfd, agentfd;
 
-	const char *agent_sockname = poptGetArg(optCon);
-	const char *server_sockname = poptGetArg(optCon);
-	poptFreeContext(optCon);
-	return snap_server(sb, agent_sockname, server_sockname);
+	if (snap_server_setup(agent_sockname, server_sockname, &listenfd, &getsigfd, &agentfd) < 0)
+	    error("Could not setup snapshot server\n");
+	if (!nobg) {
+	    pid_t pid;
+
+	    pid = daemonize("/tmp/ddsnapd.log");
+	    if (pid == -1)
+		error("Could not daemonize\n");
+	    if (pid != 0) {
+		trace_on(printf("pid = %lu\n", (unsigned long)pid););
+		return 0;
+	    }
+	}
+	if (snap_server(sb, server_sockname, listenfd, getsigfd, agentfd) < 0)
+	    error("Could not start snapshot server\n");
+
+	return 0; /* not reached */
 #else
-	if (argc == 4 && (sb->metadev = open(poptGetArg(optCon), O_RDWR)) == -1) 
-		error("Could not open meta volume %s: %s", argv[3], strerror(errno));
-	poptFreeContext(optCon);
-	
-#if 0
-	init_snapstore(sb); 
+# if 0
+	init_snapstore(sb);
 	create_snapshot(sb, 0);
 
 	int i;
@@ -2944,9 +3005,10 @@ int main(int argc, const char *argv[])
 	warn("dirty buffers = %i", dirty_buffer_count);
 	show_tree(sb);
 	return 0;
-#endif /* end of test code */
+# endif /* end of test code */
 
-	return init_snapstore(sb); 
+	return init_snapstore(sb);
 #endif
 	if (useme) ;
 }
+
