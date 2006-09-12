@@ -1,12 +1,13 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <errno.h> 
+#include <errno.h>
 #include <unistd.h> // read
 #include <sys/socket.h>
 #include <sys/poll.h>
 #include <sys/un.h>
 #include <netinet/in.h>
 //#include <libdlm.h>
+#include <popt.h>
 #include "dm-ddraid.h" // message codes
 #include "ddraid.h" // outbead
 #include "trace.h"
@@ -19,7 +20,7 @@ struct client { int sock; };
 struct context {
 	struct server active, local;
 	int serv;
-	int waiters; 
+	int waiters;
 	struct client *waiting[100];
 	int polldelay;
 	unsigned ast_state;
@@ -30,7 +31,7 @@ static inline int have_address(struct server *server)
 	return !!server->address_len;
 }
 
-int connect_clients(struct context *context)
+static int connect_clients(struct context *context)
 {
 	warn("connect clients to %x", *(int *)(context->active.address));
 	while (context->waiters)
@@ -59,7 +60,7 @@ int connect_clients(struct context *context)
 	return 0;
 }
 
-int try_to_instantiate(struct context *context)
+static int try_to_instantiate(struct context *context)
 {
 	warn("Activate local server");
 	memcpy(&context->active, &context->local, sizeof(struct server));
@@ -69,7 +70,7 @@ int try_to_instantiate(struct context *context)
 	return 0;
 }
 
-int incoming(struct context *context, struct client *client)
+static int incoming(struct context *context, struct client *client)
 {
 	int err;
 	struct messagebuf message;
@@ -124,7 +125,7 @@ pipe_error:
 	return -1;
 }
 
-int monitor(char *sockname, struct context *context)
+static int monitor(int nobg, char const *sockname, struct context *context)
 {
 	unsigned maxclients = 100, clients = 0, others = 1;
 	struct pollfd pollvec[others+maxclients];
@@ -133,18 +134,21 @@ int monitor(char *sockname, struct context *context)
 	int addr_len = sizeof(addr) - sizeof(addr.sun_path) + strlen(sockname);
 	int listener = socket(AF_UNIX, SOCK_STREAM, 0);
 
-	assert(listener > 0);
+	assert(listener >= 0);
 	strncpy(addr.sun_path, sockname, sizeof(addr.sun_path));
 	if (sockname[0] == '@')
 		addr.sun_path[0] = 0;
 	else
 		unlink(sockname);
 
-	if (bind(listener, (struct sockaddr *)&addr, addr_len) || listen(listener, 5))
-		error("Can't bind to control socket (is it in use?)");
+	if (bind(listener, (struct sockaddr *)&addr, addr_len) == -1)
+		error("Can't bind to control socket %s: %s", sockname, strerror(errno));
+	if (listen(listener, 5) == -1)
+		error("Can't listen to control socket: %s", strerror(errno));
 
-	if (daemon(0, 0) == -1)
-		error("Can't start daemon, %s (%i)", strerror(errno), errno);
+	if (!nobg)
+		if (daemon(0, 0) == -1)
+			error("Can't start daemon, %s (%i)", strerror(errno), errno);
 
 	pollvec[0] = (struct pollfd){ .fd = listener, .events = POLLIN };
 	assert(pollvec[0].fd > 0);
@@ -203,8 +207,43 @@ int monitor(char *sockname, struct context *context)
 
 int main(int argc, char *argv[])
 {
-	if (argc != 2)
-		error("usage: %s sockname", argv[0]);
+        poptContext optCon;
+	char c;
+        int nobg=0;
+        char const *sockname;
 
-	return monitor(argv[1], &(struct context){ .polldelay = -1 });
+        struct poptOption optionsTable[] = {
+                { "foreground", 'f', POPT_ARG_NONE, &nobg, 0, "do not daemonize server", NULL },
+                POPT_AUTOHELP
+                { NULL, 0, 0, NULL, 0 }
+        };
+
+        optCon = poptGetContext(NULL, argc, (char const **)argv, optionsTable, 0);
+        poptSetOtherOptionHelp(optCon, "<agent_socket>");
+
+	while ((c = poptGetNextOpt(optCon)) >= 0);
+	if (c < -1) {
+		fprintf(stderr, "%s: %s: %s\n", argv[0], poptBadOption(optCon, POPT_BADOPTION_NOALIAS), poptStrerror(c));
+		return 1;
+	}
+
+        sockname = poptGetArg(optCon);
+        if (sockname == NULL) {
+                fprintf(stderr, "%s: socket name for ddraid agent must be specified\n", argv[0]);
+                poptPrintUsage(optCon, stderr, 0);
+                return 1;
+        }
+        if (poptPeekArg(optCon) != NULL) {
+                fprintf(stderr, "%s: only one socket name may be specified\n", argv[0]);
+                poptPrintUsage(optCon, stderr, 0);
+                return 1;
+        }
+
+        poptFreeContext(optCon);
+
+        if (monitor(nobg, sockname, &(struct context){ .polldelay = -1 }) < 0)
+                error("Could not start ddraid agent server\n");
+
+        return 0; /* not reached */
 }
+

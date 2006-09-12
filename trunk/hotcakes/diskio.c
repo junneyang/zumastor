@@ -1,7 +1,8 @@
 #define _XOPEN_SOURCE 500 /* pwrite */
 #include <unistd.h>
-#include <errno.h> 
+#include <errno.h>
 #include "trace.h"
+#include "diskio.h"
 
 /* Sane pread/pwrite wrapper */
 

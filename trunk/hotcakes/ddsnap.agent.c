@@ -1,16 +1,18 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <errno.h> 
+#include <errno.h>
 #include <unistd.h> // read
 #include <sys/socket.h>
 #include <sys/poll.h>
 #include <sys/un.h>
 #include <netinet/in.h>
 //#include <libdlm.h>
+#include <popt.h>
 #include "dm-ddsnap.h" // message codes
 #include "ddsnap.h" // outbead
 #include "trace.h"
 #include "sock.h" // send_fd, read/writepipe, connect_socket
+#include "daemonize.h"
 
 #define trace trace_off
 
@@ -19,7 +21,7 @@ struct client { int sock; enum { CLIENT_CON, SERVER_CON } type; };
 struct context {
 	struct server active, local;
 	int serv;
-	int waiters; 
+	int waiters;
 	struct client *waiting[100];
 	int polldelay;
 	unsigned ast_state;
@@ -72,7 +74,7 @@ int try_to_instantiate(struct context *context)
 	return 0;
 }
 
-int incoming(struct context *context, struct client *client)
+static int incoming(struct context *context, struct client *client)
 {
 	int err;
 	struct messagebuf message;
@@ -110,14 +112,15 @@ int incoming(struct context *context, struct client *client)
 		trace_on(printf("NEED SERVER is being called\n"););
 		if (have_address(&context->active)) {
 			trace_on(printf("Calling connect_clients\n"););
-			connect_clients(context);
+			if (connect_clients(context) == 0)
+			    trace_on(printf("connected\n"););
 			break;
 		}
 		break;
 	case REPLY_CONNECT_SERVER:
 		warn("Everything connected properly, all is well");
 		break;
-	default: 
+	default:
 		warn("Unknown message %x", message.head.code);
 		break;
 	}
@@ -132,35 +135,32 @@ pipe_error:
 	return -1;
 }
 
-int monitor(char *sockname, struct context *context)
+static int monitor_setup(char const *sockname, int *listenfd)
+{
+	struct sockaddr_un addr = { .sun_family = AF_UNIX };
+	unsigned int addr_len = sizeof(addr) - sizeof(addr.sun_path) + strlen(sockname);
+
+	*listenfd = socket(AF_UNIX, SOCK_STREAM, 0);
+
+	assert(*listenfd >= 0);
+	strncpy(addr.sun_path, sockname, sizeof(addr.sun_path));
+	unlink(sockname);
+
+	if (bind(*listenfd, (struct sockaddr *)&addr, addr_len) == -1)
+		error("Can't bind to control socket %s: %s", sockname, strerror(errno));
+	if (listen(*listenfd, 5) == -1)
+		error("Can't listen on control socket: %s", strerror(errno));
+
+	return 0;
+}
+
+static int monitor(int listenfd, struct context *context)
 {
 	unsigned maxclients = 100, clients = 0, others = 1;
 	struct pollfd pollvec[others+maxclients];
 	struct client *clientvec[maxclients];
-	struct sockaddr_un addr = { .sun_family = AF_UNIX };
-	unsigned int addr_len = sizeof(addr) - sizeof(addr.sun_path) + strlen(sockname);
-	int listener = socket(AF_UNIX, SOCK_STREAM, 0); 
 
-	assert(listener > 0);
-	strncpy(addr.sun_path, sockname, sizeof(addr.sun_path));
-	unlink(sockname);
-
-	if (bind(listener, (struct sockaddr *)&addr, addr_len) || listen(listener, 5))
-		error("Can't bind to control socket (is it in use?)");
-
-#if 0
-	/* Launch daemon and exit */
-	switch (fork()) {
-	case -1:
-		error("fork failed");
-	case 0:
-		break; // !!! should daemonize properly
-	default:
-		return 0;
-	}
-#endif
-
-	pollvec[0] = (struct pollfd){ .fd = listener, .events = (POLLIN | POLLHUP | POLLERR) };
+	pollvec[0] = (struct pollfd){ .fd = listenfd, .events = (POLLIN | POLLHUP | POLLERR) };
 	assert(pollvec[0].fd > 0);
 
 	while (1) {
@@ -189,7 +189,7 @@ int monitor(char *sockname, struct context *context)
 			struct sockaddr_in addr;
 			int addr_len = sizeof(addr), sock;
 
-			if (!(sock = accept(listener, (struct sockaddr *)&addr, (socklen_t *)&addr_len)))
+			if (!(sock = accept(listenfd, (struct sockaddr *)&addr, (socklen_t *)&addr_len)))
 				error("Cannot accept connection");
 			trace_on(warn("Received connection %i", clients););
 			assert(clients < maxclients); // !!! make the array bigger
@@ -236,8 +236,59 @@ int monitor(char *sockname, struct context *context)
 
 int main(int argc, char *argv[])
 {
-	if (argc != 2)
-		error("usage: %s sockname", argv[0]);
+	poptContext optCon;
+	char c;
+	int nobg=0;
+	char const *sockname;
+	int listenfd;
 
-	return monitor(argv[1], &(struct context){ .polldelay = -1 });
+	struct poptOption optionsTable[] = {
+		{ "foreground", 'f', POPT_ARG_NONE, &nobg, 0, "do not daemonize server", NULL },
+		POPT_AUTOHELP
+		{ NULL, 0, 0, NULL, 0 }
+	};
+
+	optCon = poptGetContext(NULL, argc, (char const **)argv, optionsTable, 0);
+	poptSetOtherOptionHelp(optCon, "<agent_socket>");
+
+	while ((c = poptGetNextOpt(optCon)) >= 0);
+	if (c < -1) {
+		fprintf(stderr, "%s: %s: %s\n", argv[0], poptBadOption(optCon, POPT_BADOPTION_NOALIAS), poptStrerror(c));
+		return 1;
+	}
+
+	sockname = poptGetArg(optCon);
+	if (sockname == NULL) {
+		fprintf(stderr, "%s: socket name for ddsnap agent must be specified\n", argv[0]);
+		poptPrintUsage(optCon, stderr, 0);
+		return 1;
+	}
+	if (poptPeekArg(optCon) != NULL) {
+		fprintf(stderr, "%s: only one socket name may be specified\n", argv[0]);
+		poptPrintUsage(optCon, stderr, 0);
+		return 1;
+	}
+
+	poptFreeContext(optCon);
+
+	if (monitor_setup(sockname, &listenfd) < 0)
+		error("Could not setup ddsnap agent server\n");
+
+	if (!nobg) {
+		pid_t pid;
+
+		pid = daemonize("/tmp/ddsnap.agent.log");
+		if (pid == -1)
+			error("Could not daemonize\n");
+		if (pid != 0) {
+			trace_on(printf("pid = %lu\n", (unsigned long)pid););
+			return 0;
+		}
+	}
+
+	if (monitor(listenfd, &(struct context){ .polldelay = -1 }) < 0)
+		error("Could not start ddsnap agent server\n");
+
+	return 0; /* not reached */
 }
+

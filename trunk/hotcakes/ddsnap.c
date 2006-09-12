@@ -21,6 +21,7 @@
 #include "trace.h"
 #include "sock.h"
 #include "delta.h"
+#include "daemonize.h"
 
 /* changelist and delta file header info */
 #define MAGIC_SIZE 8
@@ -35,7 +36,7 @@
 #define POPT_TABLEEND { NULL, '\0', 0, 0, 0, NULL, NULL }
 
 
-#define XDELTA 1  
+#define XDELTA 1
 #define RAW (1 << 1)
 #define TEST (1 << 2)
 
@@ -44,7 +45,7 @@ struct cl_header {
 };
 
 struct delta_header {
-	char magic[MAGIC_SIZE];	
+	char magic[MAGIC_SIZE];
 	u64 chunk_num;
 	u32 chunk_size;
 	u32 mode;
@@ -58,36 +59,36 @@ struct delta_chunk_header {
 	int compress;
 };
 
-int eek(void) {
+static int eek(void) {
 	error("%s (%i)", strerror(errno), errno);
 	return 1;
 }
 
-u64 checksum(const unsigned char *data, u32 data_length) {
+static u64 checksum(const unsigned char *data, u32 data_length) {
 	u64 result = 0;
 	int i;
-	
-	for(i = 0; i < data_length; i++) 
+
+	for (i = 0; i < data_length; i++)
 		result = result + data[i];
-	
+
 	return result;
 }
 
-int create_socket(char *sockname) {
-	
+static int create_socket(char const *sockname) {
+
 	struct sockaddr_un addr = { .sun_family = AF_UNIX };
 	int addr_len = sizeof(addr) - sizeof(addr.sun_path) + strlen(sockname);
 	int sock;
-	
+
 	if ((sock = socket(AF_UNIX, SOCK_STREAM, 0)) == -1)
-		error("Can't get socket");
+		error("Can't get AF_UNIX socket: %s", strerror(errno));
 	strncpy(addr.sun_path, sockname, sizeof(addr.sun_path));
 	if (sockname[0] == '@')
 		addr.sun_path[0] = 0;
-	
+
 	if (connect(sock, (struct sockaddr *)&addr, addr_len) == -1)
-		error("Can't connect to control socket");
-	
+		error("Can't connect to control socket %s: %s", sockname, strerror(errno));
+
         return sock;
 }
 
@@ -96,27 +97,27 @@ int generate_delta(int mode, int level, int clfile, int deltafile, char const *d
 	unsigned char *chunk_data1, *chunk_data2, *delta_data, *comp_delta;
 	u32 chunk_size, chunk_size_bits, delta_size;
 	u64 chunkaddr;
-	unsigned long comp_size = (chunk_size*2);
+	unsigned long comp_size;
 	struct cl_header cl = { };
 	struct delta_header dh = { };
 	struct delta_chunk_header dch = { .magic_num = MAGIC_NUM };
 	
 	strncpy(dh.magic, DELTA_MAGIC_ID, MAGIC_SIZE);
-        dh.mode = mode;
+	dh.mode = mode;
+	printf("mode: %d\n", mode);
+	printf("level: %d\n", level);
 	
 	snapdev1 = open(dev1name, O_RDONLY);
-	snapdev2 = open(dev2name, O_RDONLY);
-	
-	/* Make sure the snapdevice files were opened properly */
 	if (snapdev1 < 0) {
 		err = -errno;
-		printf("Could not open snapdev file \"%s\" for reading.\n", dev1name);
+		printf("Could not open snapdev file \"%s\" for reading: %s\n", dev1name, strerror(errno));
 		return err;
 	}
-	
+
+	snapdev2 = open(dev2name, O_RDONLY);
 	if (snapdev2 < 0) {
 		err = -errno;
-		printf("Could not open snapdev file \"%s\" for reading.\n", dev2name);
+		printf("Could not open snapdev file \"%s\" for reading: %s\n", dev2name, strerror(errno));
 		return err;
 	}
 	
@@ -132,43 +133,46 @@ int generate_delta(int mode, int level, int clfile, int deltafile, char const *d
 		printf("Not a proper changelist file (wrong magic in header).\n");
 		close(snapdev1);
 		close(snapdev2);
-		return -1; /* FIXME: use named error */	
+		return -1; /* FIXME: use named error */
 	}
 	
 	/* Variable set up */
 	read(clfile, &chunk_size_bits, sizeof(u32));
-	printf("chunksize bit: %u\t", chunk_size_bits);
 	chunk_size = 1 << chunk_size_bits;
-	printf("chunksize: %u\n", chunk_size);
+	comp_size = chunk_size*2;
 	chunk_data1 = (unsigned char *)malloc (chunk_size);
 	chunk_data2 = (unsigned char *)malloc (chunk_size);
 	delta_data  = (unsigned char *)malloc (chunk_size);
 	comp_delta  = (unsigned char *)malloc (comp_size);
 
+	printf("chunksize bit: %u\t", chunk_size_bits);
+	printf("chunksize: %u\n", chunk_size);
+	printf("comp_size: %lu\n", comp_size);
+
 	/* Delta header set-up */
 	write(deltafile, &dh, sizeof(struct delta_header));
 	
 	/* Chunk address followed by CHUNK_SIZE bytes of chunk data */
-	while (read(clfile, &chunkaddr, sizeof(u64)) == sizeof(u64) &&  chunkaddr != -1) {
+	while (read(clfile, &chunkaddr, sizeof(u64)) == sizeof(u64) && chunkaddr != -1) {
 		chunk_num = chunk_num + 1;
 		printf(".");
 		chunkaddr = chunkaddr << chunk_size_bits;
 		
 		/* read in and generate the necessary chunk information */
 		if (diskio(snapdev1, chunk_data1, chunk_size, chunkaddr, 0) < 0) {
-			printf("chunk_data1 for chunkaddr %Lu not read properly from snapdev1. \n", chunkaddr);
+			printf("chunk_data1 for chunkaddr %Lu not read properly from snapdev1.\n", chunkaddr);
 			return -1;
 		}
 		if (diskio(snapdev2, chunk_data2, chunk_size, chunkaddr, 0) < 0) {
-			printf("chunk_data2 for chunkaddr %Lu not read properly from snapdev2. \n", chunkaddr);
+			printf("chunk_data2 for chunkaddr %Lu not read properly from snapdev2.\n", chunkaddr);
 			return -1;
 		}
 		
 		/* 3 different modes, raw (raw snapshot2 chunk), xdelta (xdelta), test (xdelta, raw snapshot1 chunk & raw snapshot2 chunk) */
-                if (mode == RAW) {
+		if (mode == RAW) {
 			memcpy(delta_data, chunk_data2, chunk_size);
 			delta_size = chunk_size;
-                } else {
+		} else {
 			ret = create_delta_chunk(chunk_data1, chunk_data2, delta_data, chunk_size, (int *)&delta_size);
 			
 			/* If delta is larger than chunk_size, we want to just copy over the raw chunk */
@@ -181,7 +185,7 @@ int generate_delta(int mode, int level, int clfile, int deltafile, char const *d
 				close(snapdev1);
 				close(snapdev2);
 				return -1;
-			}			
+			}
 			if (mode == TEST && ret != BUFFER_SIZE_ERROR && ret > 0) {
 				/* sanity test for delta creation */
 				unsigned char *delta_test = (unsigned char *)malloc (chunk_size);
@@ -209,13 +213,13 @@ int generate_delta(int mode, int level, int clfile, int deltafile, char const *d
 				printf("Able to generate delta\n");
 				free(delta_test);
 			}
-                }
+		}
 		
 		/* zlib compression */
-		comp_size = (chunk_size*2);
+		comp_size = chunk_size*2;
 		int comp_ret = compress2(comp_delta, &comp_size, delta_data, delta_size, level);
 		if (comp_ret == Z_MEM_ERROR) {
-			printf("Not enough buffer memory for compression. \n");
+			printf("Not enough buffer memory for compression.\n");
 			close(snapdev1);
 			close(snapdev2);
 			return -1;
@@ -225,9 +229,9 @@ int generate_delta(int mode, int level, int clfile, int deltafile, char const *d
 			close(snapdev1);
 			close(snapdev2);
 			return -1;
-		}		
+		}
 		if (comp_ret == Z_STREAM_ERROR) {
-			printf("Level parameter is invalid.\n");
+			printf("Parameter is invalid: level=%d delta_size=%d\n", level, delta_size);
 			close(snapdev1);
 			close(snapdev2);
 			return -1;
@@ -239,8 +243,7 @@ int generate_delta(int mode, int level, int clfile, int deltafile, char const *d
 		if (comp_size < delta_size) {
 			dch.compress = TRUE;
 			dch.data_length = comp_size;
-		}
-		else {
+		} else {
 			dch.compress = FALSE;
 			dch.data_length = delta_size;
 		}
@@ -268,6 +271,7 @@ int generate_delta(int mode, int level, int clfile, int deltafile, char const *d
 			write(deltafile, chunk_data2, chunk_size);
                 }
 	}
+	printf("\n");
 	
 	/* Make sure everything in changelist was properly transmitted */
 	if (chunkaddr != -1) {
@@ -337,7 +341,7 @@ int apply_delta(int deltafile, char const *devname) {
 		return err;
 	}
 	
-	/* Make sure it's a proper delta file */	
+	/* Make sure it's a proper delta file */
 	if (read(deltafile, &dh, sizeof(struct delta_header)) != sizeof(struct delta_header)) {
 		printf("Not a proper delta file (too short).\n");
 		close(snapdev);
@@ -440,7 +444,7 @@ int apply_delta(int deltafile, char const *devname) {
 					printf("up_chunk2 not read properly from deltafile. \n");
 					return -1;
 				}
-				c1_chk_sum = checksum((const unsigned char *)chunk_data, chunk_size);	
+				c1_chk_sum = checksum((const unsigned char *)chunk_data, chunk_size);
 			}
 			if (dch.check_sum != checksum((const unsigned char *)updated, chunk_size)) {
 				printf("Check_sum failed for chunk address %Lu \n", chunkaddr);
@@ -466,7 +470,7 @@ int apply_delta(int deltafile, char const *devname) {
 							printf("chunk_data for chunk1 does not match. \n");
 						else
 							printf("chunk_data for chunk1 does matche up. \n");
-						memcpy(updated, up_chunk2, chunk_size);   
+						memcpy(updated, up_chunk2, chunk_size);
 					}
 				} else {
 					close(snapdev);
@@ -534,10 +538,10 @@ int list_snapshots(int sock) {
 	
 	for (i=0; i<count; i++) {
 		time_t snap_time = (time_t)(buffer[i]).ctime;
-		
+
 		printf("Snapshot[%d]: \n", i);
 		printf("\ttag= %Lu \t", (buffer[i]).snap);
-		printf("priority= %d \t", (buffer[i]).prio);		
+		printf("priority= %d \t", (buffer[i]).prio);
 		printf("use count= %d \t", (buffer[i]).usecnt);
 		printf("creation time= %s \n", ctime(&snap_time));
 	}
@@ -557,8 +561,8 @@ int generate_changelist(int sock, char const *changelist_filename, int snap1, in
 	
 	int change_fd = open(changelist_filename, O_CREAT | O_TRUNC | O_WRONLY, S_IRUSR | S_IWUSR);
 	
-	if (change_fd < 0) 
-		error("unable to open file: %s", changelist_filename);
+	if (change_fd < 0)
+		error("unable to open file %s: %s", changelist_filename, strerror(errno));
 	
 	struct cl_header cl = { };
 	strncpy(cl.magic, CHANGELIST_MAGIC_ID, MAGIC_SIZE);
@@ -582,10 +586,10 @@ int generate_changelist(int sock, char const *changelist_filename, int snap1, in
                 return eek();
 
         trace_on(printf("reply = %x\n", head.code););
-        err  = head.code != REPLY_GENERATE_CHANGE_LIST;
+        err = head.code != REPLY_GENERATE_CHANGE_LIST; /* FIXME: we don't use err after this */
 
         if (head.code == REPLY_ERROR)
-                error("%.*s", head.length - 4, buf + 4);
+                error("received error code: %.*s", head.length - 4, buf + 4);
 
 	close(change_fd);
         return 0;
@@ -603,6 +607,7 @@ int delete_snapshot(int sock, int snap) {
 	if ((err = readpipe(sock, &head, sizeof(head))))
 		return eek();
 	assert(head.length < maxbuf); // !!! don't die
+	trace_on(printf("reply head.length = %x\n", head.length););
 	if ((err = readpipe(sock, buf, head.length)))
 		return eek();
 	trace_on(printf("reply = %x\n", head.code););
@@ -685,55 +690,30 @@ int set_usecount(int sock, uint32_t tag_val, const char * op) {
 	return 0;
 }
 
-int daemonize(int lsock, char const *devname)
+static int daemon(int lsock, char const *devname)
 {
-	struct sigaction sa;
-	pid_t pid;
 	int csock;
 
-	sa.sa_handler = SIG_IGN;
-	sigemptyset(&sa.sa_mask);
-	sa.sa_flags = 0;
-	if (sigaction(SIGCHLD, &sa, NULL) == -1)
-		error("could not disable SIGCHLD: %s", strerror(errno));
+	for (;;) {
+		if ((csock = accept_socket(lsock)) < 0)
+			goto cleanup_connection; /* FIXME: log errors */
 
-	pid = fork();
+		/* FIXME: fork */
+		if (apply_delta(csock, devname) < 0)
+			goto cleanup_connection; /* FIXME: log errors */
 
-	if (pid == 0) {
-		setpgid(0, 0);
-
-		close(2);
-		close(1);
-		close(0);
-
-		/* FIXME: we should chdir to the root, but some pathnames may be relative */
-
-		for (;;) {
-			if ((csock = accept_socket(lsock)) < 0)
-				goto cleanup_connection; /* FIXME: log errors */
-
-			/* FIXME: fork */
-			if (apply_delta(csock, devname) < 0)
-				goto cleanup_connection; /* FIXME: log errors */
-
-		cleanup_connection:
-			close(csock);
-		}
+	cleanup_connection:
+		close(csock);
 	}
-
-	if (pid == -1) {
-		error("could not fork: %s", strerror(errno));
-		return 1;
-	}
-
-	trace_on(printf("pid = %lu\n", (unsigned long)pid););
 
 	return 0;
 }
 
-void usage(void)
+static void usage(void)
 {
-	printf("usage: ddsnap <command>\n"
+	printf("usage: ddsnap [--help] <subcommand>\n"
+		"\n"
+		"Available subcommands:\n"
 		"	apply-delta\n"
 		"	create-delta\n"
 		"	list\n"
@@ -741,12 +721,12 @@ void usage(void)
 		"	create-snapshot\n"
 		"	generate-changelist\n"
 		"	set-priority\n"
-	        "        set-usecount\n"
+		"	set-usecount\n"
 		"	daemon\n"
 		"	send-delta\n");
 }
 
-void cdUsage(poptContext optCon, int exitcode, char *error, char *addl) {
+static void cdUsage(poptContext optCon, int exitcode, char const *error, char const *addl) {
 	poptPrintUsage(optCon, stderr, 0);
 	if (error) fprintf(stderr, "%s: %s", error, addl);
 	exit(exitcode);
@@ -762,11 +742,15 @@ int main(int argc, char *argv[]) {
 	}
 	command = argv[1];
 
+	if (strcmp(command, "--help")==0) {
+		usage();
+		return 0;
+	}
 	if (strcmp(command, "create-delta")==0) {
 		char cdOpt, *changelist, *deltafile, *snapdev1, *snapdev2;
 		int xd = FALSE, raw = FALSE, test = FALSE, gzip_level = 0, ret = 0, mode = 0;
 		poptContext cdCon;
-		
+
 		struct poptOption cdOptions[] = {
 			{ "xdelta", 'x', POPT_ARG_NONE, &xd, 0, "Delta file format: xdelta chunk", NULL },
 			{ "raw", 'r', POPT_ARG_NONE, &raw, 0, "Delta file format: raw chunk from later snapshot", NULL },
@@ -775,17 +759,17 @@ int main(int argc, char *argv[]) {
 			POPT_AUTOHELP
 			POPT_TABLEEND
 		};
-		
+
 		cdCon = poptGetContext(NULL, argc-1, (const char **)&(argv[1]), cdOptions, 0);
 		poptSetOtherOptionHelp(cdCon, "<changelist> <deltafile> <snapdev1> <snapdev2>");
-		
+
 		cdOpt = poptGetNextOpt(cdCon);
 
 		if (argc<3) {
 			poptPrintUsage(cdCon, stderr, 0);
 			exit(1);
 		}
-		
+
 		if (cdOpt < -1) {
 			/* an error occurred during option processing */
 			fprintf(stderr, "%s: %s\n",
@@ -795,37 +779,37 @@ int main(int argc, char *argv[]) {
 		}
 
 		/* Make sure the options are mutually exclusive */
-		if (xd+raw+test > 1) 
+		if (xd+raw+test > 1)
 			cdUsage(cdCon, 1, "Too many chunk options were selected. \nPlease select only one", "-x, -r, -t\n");
 
 		mode = (xd ? XDELTA : (raw ? RAW : TEST));
-		
+
 		changelist = (char *) poptGetArg(cdCon);
 		deltafile  = (char *) poptGetArg(cdCon);
 		snapdev1   = (char *) poptGetArg(cdCon);
 		snapdev2   = (char *) poptGetArg(cdCon);
-			
-		if((changelist == NULL) || !(poptPeekArg(cdCon) == NULL))
+
+		if ((changelist == NULL) || !(poptPeekArg(cdCon) == NULL))
 			cdUsage(cdCon, 1, "Specify a changelist", ".e.g., cl01 \n");
-		if((deltafile == NULL) || !(poptPeekArg(cdCon) == NULL))
+		if ((deltafile == NULL) || !(poptPeekArg(cdCon) == NULL))
 			cdUsage(cdCon, 1, "Specify a deltafile", ".e.g., df01 \n");
-		if((snapdev1 == NULL) || !(poptPeekArg(cdCon) == NULL))
+		if ((snapdev1 == NULL) || !(poptPeekArg(cdCon) == NULL))
 			cdUsage(cdCon, 1, "Specify a snapdev1", ".e.g., /dev/mapper/snap0 \n");
-		if((snapdev2 == NULL) || !(poptPeekArg(cdCon) == NULL))
+		if ((snapdev2 == NULL) || !(poptPeekArg(cdCon) == NULL))
 			cdUsage(cdCon, 1, "Specify a snapdev2", ".e.g., /dev/mapper/snap1 \n");
-    
+
 		ret = ddsnap_generate_delta(mode, gzip_level, changelist, deltafile, snapdev1, snapdev2);
-		
+
 		poptFreeContext(cdCon);
-		return ret;		
-	} 
+		return ret;
+	}
 	if (strcmp(command, "apply-delta")==0) {
 		if (argc != 4) {
 			printf("usage: ddsnap apply-delta <deltafile> <dev>\n");
 			return 1;
 		}
 		return ddsnap_apply_delta(argv[2], argv[3]);
-	} 
+	}
 	if (strcmp(command, "list")==0) {
 		if (argc != 3) {
 			printf("usage: ddsnap list sockname\n");
@@ -833,7 +817,7 @@ int main(int argc, char *argv[]) {
 		}
 		sock = create_socket(argv[2]);
 		return list_snapshots(sock);
-	} 
+	}
 	if (strcmp(command, "delete-snapshot")==0) {
 		if (argc != 4) {
 			printf("usage: ddsnap delete-snapshot sockname <snapshot>\n");
@@ -841,7 +825,7 @@ int main(int argc, char *argv[]) {
 		}
 		sock = create_socket(argv[2]);
 		return delete_snapshot(sock, atoi(argv[3]));
-	} 
+	}
 	if (strcmp(command, "create-snapshot")==0) {
 		if (argc != 4) {
 			printf("usage: ddsnap create-snapshot sockname <snapshot>\n");
@@ -849,7 +833,7 @@ int main(int argc, char *argv[]) {
 		}
 		sock = create_socket(argv[2]);
 		return create_snapshot(sock, atoi(argv[3]));
-	} 
+	}
 	if (strcmp(command, "generate-changelist")==0) {
 		if (argc != 6) {
 			printf("usage: ddsnap generate-changelist sockname <changelist> <snapshot1> <snapshot2>\n");
@@ -857,7 +841,7 @@ int main(int argc, char *argv[]) {
 		}
 		sock = create_socket(argv[2]);
 		return generate_changelist(sock, argv[3], atoi(argv[4]), atoi(argv[5]));
-	} 
+	}
 	if (strcmp(command, "set-priority")==0) {
 		if (argc != 5) {
 			printf("usage: ddsnap set-priority sockname <snap_tag> <new_priority_value>\n");
@@ -865,7 +849,7 @@ int main(int argc, char *argv[]) {
 		}
 		sock = create_socket(argv[2]);
 		return set_priority(sock, atoi(argv[3]), atoi(argv[4]));
-	} 
+	}
 	if (strcmp(command, "set-usecount")==0) {
 		if (argc != 5) {
 			printf("usage: ddsnap set-usecount sockname <snap_tag> <inc|dec>\n");
@@ -873,7 +857,7 @@ int main(int argc, char *argv[]) {
 		}
 		sock = create_socket(argv[2]);
 		return set_usecount(sock, atoi(argv[3]), argv[4]);
-	} 
+	}
 	if (strcmp(command, "daemon")==0) {
 		char const *hostname;
 		unsigned port;
@@ -908,7 +892,19 @@ int main(int argc, char *argv[]) {
 			printf("Error: unable to bind to %s port %u\n", hostname, port);
 			return 1;
 		}
-		return daemonize(sock, devname);
+
+		pid_t pid;
+
+		pid = daemonize("/tmp/ddsnap.log");
+		if (pid == -1)
+			error("Error: could not daemonize\n");
+		if (pid != 0) {
+			trace_on(printf("pid = %lu\n", (unsigned long)pid););
+			return 0;
+		}
+
+		return daemon(sock, devname);
+
 	}
 	if (strcmp(command, "send-delta")==0) {
 		char const *hostname;
@@ -947,3 +943,4 @@ int main(int argc, char *argv[]) {
 	printf("Unrecognized command %s.\n", command);
 	return 1;
 }
+

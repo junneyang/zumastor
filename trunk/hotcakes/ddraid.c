@@ -14,11 +14,11 @@
 #include <stddef.h>
 #include <unistd.h>
 #include <fcntl.h>
-#include <errno.h> 
+#include <errno.h>
 #include <time.h>
 #include <signal.h>
 #include <sys/poll.h>
-#include <sys/types.h> 
+#include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <sys/ioctl.h>
@@ -83,14 +83,14 @@ unsigned available(unsigned sock)
 	return bytes;
 }
 
-void hexdump(void *data, unsigned length)
+static void hexdump(void const *data, unsigned length)
 {
 	while (length ) {
 		int row = length < 16? length: 16;
 		printf("%p: ", data);
 		length -= row;
 		while (row--)
-			printf("%02hhx ", *(unsigned char *)data++);
+			printf("%02hhx ", *(unsigned char const *)data++);
 		printf("\n");
 	}
 }
@@ -1136,7 +1136,7 @@ int main(int argc, char *argv[])
 
 	if ((sb->logdev = open(argv[1], O_RDWR | O_DIRECT)) == -1)
 		error("Could not open log device %s, %s (%i)", argv[argc - 3], strerror(errno), errno);
-	
+
 	warn("create mirror log");
 	sb->members = 0; // !!! we could depend on a client to do the copying and not need to know the members at all, just a thought
 	sb->image.journal_base = 16;
@@ -1202,3 +1202,4 @@ int main(int argc, char *argv[])
 	void *useme = show_regions;
 	useme = show_journal;
 }
+
