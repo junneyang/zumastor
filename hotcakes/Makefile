@@ -1,7 +1,7 @@
 kernel=/src/2.6.17-rc6-dd/drivers/md
 
-#instdir=/usr/bin
-instdir=/tmp/ddsnap
+instdir=/usr/bin
+#instdir=/tmp/ddsnap
 
 deps = Makefile trace.h diskio.h buffer.h list.h sock.h
 ddsnap_deps = $(deps) ddsnap.h $(kernel)/dm-ddsnap.h
@@ -59,7 +59,7 @@ clean:
 	rm -f $(binaries) *.o xdelta/*.o a.out
 
 install: $(binaries)
-	mkdir $(instdir) || true
+	mkdir -p $(instdir) || true
 	cp $(binaries) $(instdir)
 
 kernel:
@@ -150,7 +150,6 @@ dd-agent:
 
 dd-server:
 	./ddsnapd /dev/test-snapstore /dev/test-origin /tmp/control /tmp/server
-	#./ddsnapd -f /dev/test-snapstore /dev/test-origin /tmp/control /tmp/server
 
 dd-create:
 	./ddsnap create-snapshot /tmp/server 0
@@ -174,7 +173,7 @@ snap2:
 	echo 0 $$((2 * $$(egrep $$(echo $(origindev) | sed -e 's@^.*/@@')'$$' /proc/partitions | awk '{print $$3}'))) ddsnap /dev/test-snapstore /dev/test-origin /tmp/control 2 | sudo /sbin/dmsetup create snapshot2
 
 changelist:
-	sudo ./ddsnap list
+	sudo ./ddsnap list /tmp/server
 	sudo ./ddsnap generate-changelist /tmp/server changelist0-1 0 1
 
 delta:
