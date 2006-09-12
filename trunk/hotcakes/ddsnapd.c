@@ -39,7 +39,7 @@
 #define jtrace trace_off
 #define BUSHY
 
-#define SECTORS_PER_BLOCK 3
+#define SECTORS_PER_BLOCK 4
 
 /*
 Todo:
@@ -2500,7 +2500,7 @@ static int incoming(struct superblock *sb, struct client *client)
 		client->snap =  (tag == -1) ? tag : tag_snapnum(sb, tag);
 		client->id = ((struct identify *)message.body)->id;
 		warn("client id %Li, snapshot %i (snapnum %i)", client->id, tag, client->snap);
-		outbead(sock, REPLY_IDENTIFY, struct { });
+		outbead(sock, REPLY_IDENTIFY, struct identify, 0, 0, sb->image.chunksize_bits); // return another structure?
 		break;
 	}
 	
@@ -2561,6 +2561,8 @@ static int incoming(struct superblock *sb, struct client *client)
 			      sizeof(struct snapinfo));
 		}
 		
+		show_tree(sb);
+
 		break;
 	}
 	case SET_PRIORITY:
