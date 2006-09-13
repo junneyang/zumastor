@@ -1711,8 +1711,8 @@ diff -urp 2.6.17-rc6/drivers/md/dm-ddraid.h 2.6.17-rc6-dd/drivers/md/dm-ddraid.h
 +#define MIN_REGION_BITS 12
 diff -urp 2.6.17-rc6/drivers/md/dm-ddsnap.c 2.6.17-rc6-dd/drivers/md/dm-ddsnap.c
 --- 2.6.17-rc6/drivers/md/dm-ddsnap.c	2006-09-07 14:28:06.000000000 -0700
-+++ 2.6.17-rc6-dd/drivers/md/dm-ddsnap.c	2006-09-11 16:39:06.000000000 -0700
-@@ -0,0 +1,1156 @@
++++ 2.6.17-rc6-dd/drivers/md/dm-ddsnap.c	2006-09-12 18:20:38.000000000 -0700
+@@ -0,0 +1,1204 @@
 +#include <linux/fs.h>
 +#include <linux/slab.h>
 +#include <linux/mm.h>
@@ -2035,7 +2035,7 @@ diff -urp 2.6.17-rc6/drivers/md/dm-ddsnap.c 2.6.17-rc6-dd/drivers/md/dm-ddsnap.c
 +
 +/* This is the part that does all the work. */
 +
-+int replied_rw(struct dm_target *target, struct rw_request *body, unsigned length, int rw, int snap)
++int replied_rw(struct dm_target *target, struct rw_request *body, unsigned length, int rw, int snap, int failed_io)
 +{
 +	struct devinfo *info = target->private;
 +	struct chunk_range *p = body->ranges;
@@ -2070,6 +2070,13 @@ diff -urp 2.6.17-rc6/drivers/md/dm-ddsnap.c 2.6.17-rc6-dd/drivers/md/dm-ddsnap.c
 +
 +		bio = pending->bio;
 +		trace(warn("Handle pending IO sector %Lx", (long long)bio->bi_sector);)
++
++		if(failed_io) {
++			warn("Unable to handle pending IO server %Lx", (long long)bio->bi_sector);
++			kmem_cache_free(pending_cache, pending);
++			bio_io_error(bio, bio->bi_size);
++			return -1;
++		}
 +
 +		if (chunks != pending->chunks) {
 +			warn("Message mismatch, expected %x got %x", chunks, chunks);
@@ -2115,6 +2122,7 @@ diff -urp 2.6.17-rc6/drivers/md/dm-ddsnap.c 2.6.17-rc6-dd/drivers/md/dm-ddsnap.c
 +		kick(info->orgdev->bdev);
 +		kick(info->snapdev->bdev);
 +	}
++
 +	return 0;
 +}
 +
@@ -2179,6 +2187,10 @@ diff -urp 2.6.17-rc6/drivers/md/dm-ddsnap.c 2.6.17-rc6-dd/drivers/md/dm-ddsnap.c
 +	int err, length;
 +	u32 chunksize_bits;
 +
++	struct head head;
++	unsigned maxbuf = 500;
++	char buf[maxbuf];
++	
 +	strcpy(task->comm, "ddsnap-client");
 +	down(&info->exit2_sem);
 +	trace(warn("Client thread started, pid=%i", current->pid);)
@@ -2191,7 +2203,7 @@ diff -urp 2.6.17-rc6/drivers/md/dm-ddsnap.c 2.6.17-rc6-dd/drivers/md/dm-ddsnap.c
 +	sock = info->sock;
 +
 +	while (running(info)) { // stop on module exit
-+		int rw, to_snap;
++		int rw, to_snap, failed_io = 0;
 +
 +		trace(warn("wait message");)
 +		if ((err = readpipe(sock, &message.head, sizeof(message.head))))
@@ -2229,10 +2241,28 @@ diff -urp 2.6.17-rc6/drivers/md/dm-ddsnap.c 2.6.17-rc6-dd/drivers/md/dm-ddsnap.c
 +			trace_on(warn("identify succeeded. chunksize %u", chunksize_bits););
 +			info->chunksize_bits = chunksize_bits;
 +			info->chunkshift     = chunksize_bits - SECTOR_SHIFT;
++			/* set usecount */
++			if (outbead(info->sock, SET_USECOUNT, struct snapinfo, info->snap, 0, 1) < 0) {
++				warn("unable to send message to snapshot server");
++				goto finish_create;
++			}
++			if ((err = readpipe(info->sock, &head, sizeof(head))))
++				goto finish_create;
++			assert(head.length < maxbuf); // !!! don't die
++			if ((err = readpipe(info->sock, buf, head.length)))
++				goto finish_create;
++			err = (head.code != REPLY_SET_USECOUNT);
++			if (head.code == REPLY_ERROR || err)
++				warn("unable to unset usecount for snapshot %d",info->snap);
++			
++		finish_create:
 +			up(&info->server_out_sem);
 +			outbead(info->control_socket, REPLY_CONNECT_SERVER, struct { });
 +			continue;
-+
++		case REPLY_ERROR:	
++			trace_on(warn("failed i/o"););
++			failed_io = 1;
++			break;
 +		default: 
 +			warn("Unknown message %x", message.head.code);
 +			continue;
@@ -2240,7 +2270,7 @@ diff -urp 2.6.17-rc6/drivers/md/dm-ddsnap.c 2.6.17-rc6-dd/drivers/md/dm-ddsnap.c
 +		if (length < sizeof(struct rw_request))
 +			goto message_too_short;
 +
-+		replied_rw(target, (void *)message.body, length, rw, to_snap);
++		replied_rw(target, (void *)message.body, length, rw, to_snap, failed_io);
 +	}
 +out:
 +	up(&info->exit2_sem); /* !!! will crash if module unloaded before ret executes */
@@ -2623,11 +2653,29 @@ diff -urp 2.6.17-rc6/drivers/md/dm-ddsnap.c 2.6.17-rc6-dd/drivers/md/dm-ddsnap.c
 +{
 +	struct devinfo *info = target->private;
 +	int err; /* I have no mouth but I must scream */
++	struct head head;
++	unsigned maxbuf = 500;
++	char buf[maxbuf];
 +
 +	trace(warn("%p", target);)
 +	if (!info)
 +		return;
 +
++	/* unset the usecount for this device */
++	if (outbead(info->sock, SET_USECOUNT, struct snapinfo, info->snap, 0, -1) < 0) {
++		warn("unable to send message to snapshot server");
++		goto finish_delete;
++	}
++	if ((err = readpipe(info->sock, &head, sizeof(head))))
++		goto finish_delete;
++	assert(head.length < maxbuf); // !!! don't die
++	if ((err = readpipe(info->sock, buf, head.length)))
++		goto finish_delete;
++	err = (head.code != REPLY_SET_USECOUNT);
++	if (head.code == REPLY_ERROR || err)
++		warn("unable to unset usecount for snapshot %d",info->snap);
++
++ finish_delete:
 +	/* Unblock helper threads */
 +	info->flags |= FINISH_FLAG;
 +	up(&info->server_in_sem); // unblock incoming thread
