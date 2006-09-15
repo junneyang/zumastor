@@ -32,9 +32,6 @@
 #define DEFAULT_REPLICATION_PORT 4321
 #define TRUE 1
 #define FALSE 0
-#define POPT_AUTOHELP { NULL, '\0', POPT_ARG_INCLUDE_TABLE, poptHelpOptions, 0, "Help options:", NULL },
-#define POPT_TABLEEND { NULL, '\0', 0, 0, 0, NULL, NULL }
-
 
 #define XDELTA 1
 #define RAW (1 << 1)
@@ -552,6 +549,8 @@ int list_snapshots(int sock) {
 	if (head.code == REPLY_ERROR)
 		error("%.*s", head.length - 4, buf + 4);
 	
+	/* server doesn't return a reply? should return something */
+
 	return 0;
 }
 
@@ -709,21 +708,21 @@ static int daemon(int lsock, char const *devname)
 	return 0;
 }
 
-static void usage(void)
+static void mainUsage(void)
 {
-	printf("usage: ddsnap [--help] <subcommand>\n"
+	printf("usage: ddsnap [-?|--help] <subcommand>\n"
 		"\n"
 		"Available subcommands:\n"
-		"	apply-delta\n"
-		"	create-delta\n"
+		"	create-snap\n"
+		"	delete-snap\n"
 		"	list\n"
-		"	delete-snapshot\n"
-		"	create-snapshot\n"
-		"	generate-changelist\n"
 		"	set-priority\n"
 		"	set-usecount\n"
-		"	daemon\n"
-		"	send-delta\n");
+		"	create-cl\n"
+		"	create-delta\n"
+		"	apply-delta\n"
+		"	send-delta\n"
+		"	daemon\n");
 }
 
 static void cdUsage(poptContext optCon, int exitcode, char const *error, char const *addl) {
@@ -734,38 +733,138 @@ static void cdUsage(poptContext optCon, int exitcode, char const *error, char co
 
 int main(int argc, char *argv[]) {
 	char const *command;
-	int sock;
+	int sock, help = 0, usage = 0;
+	int xd = FALSE, raw = FALSE, test = FALSE, gzip_level = 0, ret = 0, mode = 0;
+	
+	struct poptOption noOptions[] = {
+		POPT_TABLEEND
+	};
+	struct poptOption cdOptions[] = {
+		{ "xdelta", 'x', POPT_ARG_NONE, &xd, 0, "Delta file format: xdelta chunk", NULL },
+		{ "raw", 'r', POPT_ARG_NONE, &raw, 0, "Delta file format: raw chunk from later snapshot", NULL },
+		{ "test", 't', POPT_ARG_NONE, &test, 0, "Delta file format: xdelta chunk, raw chunk from earlier snapshot and raw chunk from later snapshot", NULL },
+		{ "gzip", 'g', POPT_ARG_INT, &gzip_level, 0, "Compression via gzip (default level: 6)", "compression_level"},
+		POPT_TABLEEND
+	};
+ 
+	poptContext mainCon;
+	struct poptOption mainOptions[] = {
+		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &noOptions, 0,
+		  "Create snapshot usage: create-snap <sockname> <snapshot>" , NULL },		
+		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &noOptions, 0,
+		  "Delete snapshot usage: delete-snap <sockname> <snapshot>" , NULL },
+		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &noOptions, 0,
+		  "List snapshots usage: list <sockname>" , NULL },
+		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &noOptions, 0,
+		  "Set priority usage: set-priority <sockname> <snap_tag> <new_priority_value>" , NULL },	
+		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &noOptions, 0,
+		  "Set usecount usage: set-usecount <sockname> <snap_tag> <inc|dec>" , NULL },
+		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &noOptions, 0,
+		  "Create changelist usage: create-cl <sockname> <changelist> <snapshot1> <snapshot2>" , NULL },	
+		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &cdOptions, 0,
+		  "Create delta usage: create-delta <changelist> <deltafile> <snapshot1> <snapshot2>" , NULL },
+		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &noOptions, 0,
+		  "Apply delta usage: apply-delta <deltafile> <dev>" , NULL },
+		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &noOptions, 0,
+		  "Send delta usage: send-delta <changelist> host[:port] <snapshot1> <snapshot2>" , NULL },	
+		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &noOptions, 0,
+		  "Daemon usage: daemon [host[:port]] <dev>" , NULL },	
+		POPT_AUTOHELP
+		POPT_TABLEEND
+	};
+	mainCon = poptGetContext(NULL, argc, (const char **)argv, mainOptions, 0);
 
-	if (argc<2) {
-		usage();
-		return 1;
+	if (help || argc < 2) {
+		poptPrintHelp(mainCon, stdout, 0);
+		exit(1);
 	}
+	
+	// no usage displayed overall
+	if (usage) {
+		poptPrintUsage(mainCon, stdout, 0);
+		exit(1);
+	}
+
 	command = argv[1];
 
-	if (strcmp(command, "--help")==0) {
-		usage();
-		return 0;
+	if (strcmp(command, "--help")==0 || strcmp(command, "-?")==0) {
+		poptPrintHelp(mainCon, stdout, 0);
+		exit(1);
+	}
+	if (strcmp(command, "--usage")==0) {
+		mainUsage();
+		exit(1);
+	}
+
+	//poptResetContext(mainCon);
+	mainCon = poptFreeContext(mainCon);	
+
+	if (strcmp(command, "create-snap")==0) {
+		if (argc != 4) {
+			printf("Usage: %s create-snap <sockname> <snapshot>\n", argv[0]);
+			return 1;
+		}
+		sock = create_socket(argv[2]);
+		return create_snapshot(sock, atoi(argv[3]));
+	}
+	if (strcmp(command, "delete-snap")==0) {
+		if (argc != 4) {
+			printf("Usage: %s delete-snap <sockname> <snapshot>\n", argv[0]);
+			return 1;
+		}
+		sock = create_socket(argv[2]);
+		return delete_snapshot(sock, atoi(argv[3]));
+	}
+	if (strcmp(command, "list")==0) {
+		if (argc != 3) {
+			printf("Usage: %s list <sockname>\n", argv[0]);
+			return 1;
+		}
+		sock = create_socket(argv[2]);
+		return list_snapshots(sock);
+	}
+	if (strcmp(command, "set-priority")==0) {
+		if (argc != 5) {
+			printf("usage: %s set-priority <sockname> <snap_tag> <new_priority_value>\n", argv[0]);
+			return 1;
+		}
+		sock = create_socket(argv[2]);
+		return set_priority(sock, atoi(argv[3]), atoi(argv[4]));
+	}
+	if (strcmp(command, "set-usecount")==0) {
+		if (argc != 5) {
+			printf("usage: %s set-usecount <sockname> <snap_tag> <inc|dec>\n", argv[0]);
+			return 1;
+		}
+		sock = create_socket(argv[2]);
+		return set_usecount(sock, atoi(argv[3]), argv[4]);
+	}
+	if (strcmp(command, "create-cl")==0) {
+		if (argc != 6) {
+			printf("usage: %s create-cl <sockname> <changelist> <snapshot1> <snapshot2>\n", argv[0]);
+			return 1;
+		}
+		sock = create_socket(argv[2]);
+		return generate_changelist(sock, argv[3], atoi(argv[4]), atoi(argv[5]));
 	}
 	if (strcmp(command, "create-delta")==0) {
 		char cdOpt, *changelist, *deltafile, *snapdev1, *snapdev2;
-		int xd = FALSE, raw = FALSE, test = FALSE, gzip_level = 0, ret = 0, mode = 0;
+	
 		poptContext cdCon;
 
-		struct poptOption cdOptions[] = {
-			{ "xdelta", 'x', POPT_ARG_NONE, &xd, 0, "Delta file format: xdelta chunk", NULL },
-			{ "raw", 'r', POPT_ARG_NONE, &raw, 0, "Delta file format: raw chunk from later snapshot", NULL },
-			{ "test", 't', POPT_ARG_NONE, &test, 0, "Delta file format: xdelta chunk, raw chunk from earlier snapshot and raw chunk from later snapshot", NULL },
-			{ "gzip", 'g', POPT_ARG_INT, &gzip_level, 0, "Compression via gzip (default level: 6)", "compression_level"},
+		struct poptOption options[] = {
+			{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &cdOptions, 0,
+			  NULL, NULL },
 			POPT_AUTOHELP
 			POPT_TABLEEND
 		};
-
-		cdCon = poptGetContext(NULL, argc-1, (const char **)&(argv[1]), cdOptions, 0);
+	
+		cdCon = poptGetContext(NULL, argc-1, (const char **)&(argv[1]), options, 0);
 		poptSetOtherOptionHelp(cdCon, "<changelist> <deltafile> <snapdev1> <snapdev2>");
-
+		
 		cdOpt = poptGetNextOpt(cdCon);
 
-		if (argc<3) {
+		if (argc < 3) {
 			poptPrintUsage(cdCon, stderr, 0);
 			exit(1);
 		}
@@ -805,58 +904,43 @@ int main(int argc, char *argv[]) {
 	}
 	if (strcmp(command, "apply-delta")==0) {
 		if (argc != 4) {
-			printf("usage: ddsnap apply-delta <deltafile> <dev>\n");
+			printf("usage: %s apply-delta <deltafile> <dev>\n", argv[0]);
 			return 1;
 		}
 		return ddsnap_apply_delta(argv[2], argv[3]);
 	}
-	if (strcmp(command, "list")==0) {
-		if (argc != 3) {
-			printf("usage: ddsnap list sockname\n");
-			return 1;
-		}
-		sock = create_socket(argv[2]);
-		return list_snapshots(sock);
-	}
-	if (strcmp(command, "delete-snapshot")==0) {
-		if (argc != 4) {
-			printf("usage: ddsnap delete-snapshot sockname <snapshot>\n");
-			return 1;
-		}
-		sock = create_socket(argv[2]);
-		return delete_snapshot(sock, atoi(argv[3]));
-	}
-	if (strcmp(command, "create-snapshot")==0) {
-		if (argc != 4) {
-			printf("usage: ddsnap create-snapshot sockname <snapshot>\n");
-			return 1;
-		}
-		sock = create_socket(argv[2]);
-		return create_snapshot(sock, atoi(argv[3]));
-	}
-	if (strcmp(command, "generate-changelist")==0) {
+	if (strcmp(command, "send-delta")==0) {
+		char const *hostname;
+		unsigned port;
+		int retval;
+
 		if (argc != 6) {
-			printf("usage: ddsnap generate-changelist sockname <changelist> <snapshot1> <snapshot2>\n");
+			printf("usage: %s send-delta <changelist> host[:port] <snapshot1> <snapshot2>\n", argv[0]);
 			return 1;
 		}
-		sock = create_socket(argv[2]);
-		return generate_changelist(sock, argv[3], atoi(argv[4]), atoi(argv[5]));
-	}
-	if (strcmp(command, "set-priority")==0) {
-		if (argc != 5) {
-			printf("usage: ddsnap set-priority sockname <snap_tag> <new_priority_value>\n");
+
+		hostname = argv[3];
+		if (strchr(hostname, ':')) {
+			unsigned int len = strlen(hostname);
+
+			port = parse_port(hostname, &len);
+			argv[3][len] = '\0';
+		} else {
+			port = DEFAULT_REPLICATION_PORT;
+		}
+
+		sock = open_socket(hostname, port);
+		if (sock < 0) {
+			printf("Error: unable to connect to %s port %u\n", hostname, port);
 			return 1;
 		}
-		sock = create_socket(argv[2]);
-		return set_priority(sock, atoi(argv[3]), atoi(argv[4]));
-	}
-	if (strcmp(command, "set-usecount")==0) {
-		if (argc != 5) {
-			printf("usage: ddsnap set-usecount sockname <snap_tag> <inc|dec>\n");
-			return 1;
-		}
-		sock = create_socket(argv[2]);
-		return set_usecount(sock, atoi(argv[3]), argv[4]);
+		/* FIX ME */
+		/*
+		retval = ddsnap_generate_delta(argv[2], sock, argv[4], argv[5]);
+		*/
+		close(sock);
+
+		return retval;
 	}
 	if (strcmp(command, "daemon")==0) {
 		char const *hostname;
@@ -864,7 +948,7 @@ int main(int argc, char *argv[]) {
 		char const *devname;
 
 		if (argc < 3 || argc > 4) {
-			printf("usage: ddsnap daemon [host[:port]] <dev>\n");
+			printf("usage: %s daemon [host[:port]] <dev>\n", argv[0]);
 			return 1;
 		}
 
@@ -906,40 +990,6 @@ int main(int argc, char *argv[]) {
 		return daemon(sock, devname);
 
 	}
-	if (strcmp(command, "send-delta")==0) {
-		char const *hostname;
-		unsigned port;
-		int retval;
-
-		if (argc != 6) {
-			printf("usage: ddsnap send-delta <changelist> host[:port] <snapdev1> <snapdev2>\n");
-			return 1;
-		}
-
-		hostname = argv[3];
-		if (strchr(hostname, ':')) {
-			unsigned int len = strlen(hostname);
-
-			port = parse_port(hostname, &len);
-			argv[3][len] = '\0';
-		} else {
-			port = DEFAULT_REPLICATION_PORT;
-		}
-
-		sock = open_socket(hostname, port);
-		if (sock < 0) {
-			printf("Error: unable to connect to %s port %u\n", hostname, port);
-			return 1;
-		}
-		/* FIX ME */
-		/*
-		retval = ddsnap_generate_delta(argv[2], sock, argv[4], argv[5]);
-		*/
-		close(sock);
-
-		return retval;
-	}
-
 	printf("Unrecognized command %s.\n", command);
 	return 1;
 }
