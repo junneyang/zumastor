@@ -2859,7 +2859,7 @@ int main(int argc, const char *argv[])
 	     { "foreground", 'f', POPT_ARG_NONE, &nobg, 0, "do not daemonize server", NULL },
 	     { "size", 's', POPT_ARG_INT, &volsize, 0, "volume size", "size" },
 	     POPT_AUTOHELP
-	     { NULL, 0, 0, NULL, 0 }
+	     POPT_TABLEEND
 	};
 
 	optCon = poptGetContext(NULL, argc, (char const **)argv, optionsTable, 0);

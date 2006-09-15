@@ -245,7 +245,7 @@ int main(int argc, char *argv[])
 	struct poptOption optionsTable[] = {
 		{ "foreground", 'f', POPT_ARG_NONE, &nobg, 0, "do not daemonize server", NULL },
 		POPT_AUTOHELP
-		{ NULL, 0, 0, NULL, 0 }
+		POPT_TABLEEND
 	};
 
 	optCon = poptGetContext(NULL, argc, (char const **)argv, optionsTable, 0);
