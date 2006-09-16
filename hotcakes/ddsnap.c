@@ -713,17 +713,17 @@ static void mainUsage(void)
 	printf("usage: ddsnap [-?|--help] <subcommand>\n"
 		"\n"
 		"Available subcommands:\n"
-		"	create-snap\n"
-		"	delete-snap\n"
-		"	list\n"
-		"	set-priority\n"
-		"	set-usecount\n"
-		"	create-cl\n"
-		"	create-delta\n"
-		"	apply-delta\n"
-		"	send-delta\n"
-		"	daemon\n");
-}
+		"	create-snap       Creates a snapshot\n"
+		"	delete-snap       Deletes a snapshot\n"
+		"	list              Returns a list of snapshots\n"
+		"	set-priority      Sets the priority of a snapshot\n"
+		"	set-usecount      Sets the use count of a snapshot\n"
+		"	create-cl         Creates a changelist given 2 snapshots\n"
+		"	create-delta      Creates a delta file given a changelist and 2 snapshots\n"
+		"	apply-delta       Applies a delta file to the given device\n"
+		"	send-delta        Sends a delta file\n"
+		"	daemon            Listen for deltas\n");
+} 
 
 static void cdUsage(poptContext optCon, int exitcode, char const *error, char const *addl) {
 	poptPrintUsage(optCon, stderr, 0);
@@ -733,7 +733,7 @@ static void cdUsage(poptContext optCon, int exitcode, char const *error, char co
 
 int main(int argc, char *argv[]) {
 	char const *command;
-	int sock, help = 0, usage = 0;
+	int sock;
 	int xd = FALSE, raw = FALSE, test = FALSE, gzip_level = 0, ret = 0, mode = 0;
 	
 	struct poptOption noOptions[] = {
@@ -750,38 +750,32 @@ int main(int argc, char *argv[]) {
 	poptContext mainCon;
 	struct poptOption mainOptions[] = {
 		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &noOptions, 0,
-		  "Create snapshot usage: create-snap <sockname> <snapshot>" , NULL },		
+		  "Create snapshot\n\t Function: Creates a snapshot\n\t Usage: create-snap <sockname> <snapshot>" , NULL },		
 		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &noOptions, 0,
-		  "Delete snapshot usage: delete-snap <sockname> <snapshot>" , NULL },
+		  "Delete snapshot\n\t Function: Deletes a snapshot\n\t Usage: delete-snap <sockname> <snapshot>" , NULL },
 		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &noOptions, 0,
-		  "List snapshots usage: list <sockname>" , NULL },
+		  "List snapshots\n\t Function: Returns a list of snapshots\n\t Usage: list <sockname>" , NULL },
 		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &noOptions, 0,
-		  "Set priority usage: set-priority <sockname> <snap_tag> <new_priority_value>" , NULL },	
+		  "Set priority\n\t Function: Sets the priority of a snapshot\n\t Usage: set-priority <sockname> <snap_tag> <new_priority_value>" , NULL },	
 		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &noOptions, 0,
-		  "Set usecount usage: set-usecount <sockname> <snap_tag> <inc|dec>" , NULL },
+		  "Set usecount\n\t Function: Sets the use count of a snapshot\n\t Usage: set-usecount <sockname> <snap_tag> <inc|dec>" , NULL },
 		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &noOptions, 0,
-		  "Create changelist usage: create-cl <sockname> <changelist> <snapshot1> <snapshot2>" , NULL },	
+		  "Create changelist\n\t Function: Creates a changelist given 2 snapshots\n\t Usage: create-cl <sockname> <changelist> <snapshot1> <snapshot2>" , NULL },	
 		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &cdOptions, 0,
-		  "Create delta usage: create-delta <changelist> <deltafile> <snapshot1> <snapshot2>" , NULL },
+		  "Create delta\n\t Function: Creates a delta file given a changelist and 2 snapshots\n\t Usage: create-delta [OPTION...] <changelist> <deltafile> <snapshot1> <snapshot2>\n" , NULL },
 		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &noOptions, 0,
-		  "Apply delta usage: apply-delta <deltafile> <dev>" , NULL },
+		  "Apply delta\n\t Function: Applies a delta file to the given device\n\t Usage: apply-delta <deltafile> <dev>" , NULL },
 		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &noOptions, 0,
-		  "Send delta usage: send-delta <changelist> host[:port] <snapshot1> <snapshot2>" , NULL },	
+		  "Send delta\n\t Function: Sends a delta file\n\t Usage: send-delta <changelist> host[:port] <snapshot1> <snapshot2>" , NULL },	
 		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &noOptions, 0,
-		  "Daemon usage: daemon [host[:port]] <dev>" , NULL },	
+		  "Daemon\n\t Function: Listen for deltas\n\t Usage: daemon [host[:port]] <dev>" , NULL },	
 		POPT_AUTOHELP
 		POPT_TABLEEND
 	};
 	mainCon = poptGetContext(NULL, argc, (const char **)argv, mainOptions, 0);
 
-	if (help || argc < 2) {
+	if (argc < 2) {
 		poptPrintHelp(mainCon, stdout, 0);
-		exit(1);
-	}
-	
-	// no usage displayed overall
-	if (usage) {
-		poptPrintUsage(mainCon, stdout, 0);
 		exit(1);
 	}
 
@@ -888,14 +882,16 @@ int main(int argc, char *argv[]) {
 		snapdev1   = (char *) poptGetArg(cdCon);
 		snapdev2   = (char *) poptGetArg(cdCon);
 
-		if ((changelist == NULL) || !(poptPeekArg(cdCon) == NULL))
+		if (changelist == NULL) 
 			cdUsage(cdCon, 1, "Specify a changelist", ".e.g., cl01 \n");
-		if ((deltafile == NULL) || !(poptPeekArg(cdCon) == NULL))
+		if (deltafile == NULL)
 			cdUsage(cdCon, 1, "Specify a deltafile", ".e.g., df01 \n");
-		if ((snapdev1 == NULL) || !(poptPeekArg(cdCon) == NULL))
+		if (snapdev1 == NULL)
 			cdUsage(cdCon, 1, "Specify a snapdev1", ".e.g., /dev/mapper/snap0 \n");
-		if ((snapdev2 == NULL) || !(poptPeekArg(cdCon) == NULL))
+		if (snapdev2 == NULL)
 			cdUsage(cdCon, 1, "Specify a snapdev2", ".e.g., /dev/mapper/snap1 \n");
+		if (!(poptPeekArg(cdCon) == NULL))
+			cdUsage(cdCon, 1, "Too many arguments inputted", "\n");
 
 		ret = ddsnap_generate_delta(mode, gzip_level, changelist, deltafile, snapdev1, snapdev2);
 
