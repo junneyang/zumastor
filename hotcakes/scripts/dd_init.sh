@@ -5,7 +5,12 @@
 
 cd $DDSNAP_HOME
 
+/sbin/dmsetup remove_all || true
+killall ddsnapd
+killall ddsnap-agent
+
 echo "Initializing devices locally and remotely"
 ./mkddsnap $SNAPSTORE_DEV $ORIGIN_DEV
-ssh $REMOTE_HOST ${DDSNAP_HOME}/mkddsnap $SNAPSTORE_DEV $ORIGIN_DEV
 
+./ddsnap-agent ${AGENT_SOCK_NAME}
+./ddsnapd ${SNAPSTORE_DEV} ${ORIGIN_DEV} ${AGENT_SOCK_NAME} ${SERVER_SOCK_NAME}
