@@ -296,13 +296,13 @@ int ddsnap_generate_delta(int mode, int level, char const *changelistname, char 
 	int clfile, deltafile;
 	
 	clfile = open(changelistname, O_RDONLY);
-	if (clfile<0) {
+	if (clfile < 0) {
 		printf("Could not open changelist file \"%s\" for reading.\n", changelistname);
 		return 1;
 	}
 	
 	deltafile = open(deltaname, O_CREAT|O_WRONLY|O_TRUNC, S_IRWXU);
-	if (deltafile<0) {
+	if (deltafile < 0) {
 		printf("Could not create delta file \"%s\"\n", deltaname);
 		return 1;
 	}
@@ -324,7 +324,7 @@ int apply_delta(int deltafile, char const *devname) {
 	u64 chunkaddr;
 	unsigned long uncomp_size;
 	unsigned char *chunk_data, *delta_data, *updated, *comp_delta;
-	int err, check_chunk_num = 0, chunk_num = 0, chunk_size = 0, ret = 0;
+	int check_chunk_num = 0, chunk_num = 0, chunk_size = 0, ret = 0;
 	struct delta_header dh = { };
 	struct delta_chunk_header dch = { };
 	
@@ -333,7 +333,7 @@ int apply_delta(int deltafile, char const *devname) {
 	
 	snapdev = open(devname, O_RDWR); /* FIXME: why not O_WRONLY? */
 	if (snapdev < 0) {
-		err = -errno;
+		int err = -errno;
 		printf("Could not open snapdev file \"%s\" for writing.\n", devname);
 		return err;
 	}
@@ -413,7 +413,7 @@ int apply_delta(int deltafile, char const *devname) {
 				close(snapdev);
 				return -1;
 			}
-		} else 
+		} else
 			uncomp_size = dch.data_length;
 
                 if (dh.mode == RAW) {
@@ -520,9 +520,8 @@ int list_snapshots(int sock) {
 	struct head head;
 	unsigned maxbuf = 500;
 	char buf[maxbuf];
-	int err;
 	
-	if ((err = readpipe(sock, &head, sizeof(head))))
+	if (readpipe(sock, &head, sizeof(head)))
 		return eek();
 	
 	struct snapinfo * buffer = (struct snapinfo *) malloc(head.length-sizeof(int));
@@ -544,7 +543,6 @@ int list_snapshots(int sock) {
 	}
 	
 	trace_on(printf("reply = %x\n", head.code););
-	err = head.code != SNAPSHOT_LIST;
 	
 	if (head.code == REPLY_ERROR)
 		error("%.*s", head.length - 4, buf + 4);
@@ -554,40 +552,40 @@ int list_snapshots(int sock) {
 	return 0;
 }
 
-int generate_changelist(int sock, char const *changelist_filename, int snap1, int snap2) {
-	unsigned maxbuf = 500;
-	char buf[maxbuf];
-	
+static int generate_changelist(int serv_fd, char const *changelist_filename, int snap1, int snap2)
+{
 	int change_fd = open(changelist_filename, O_CREAT | O_TRUNC | O_WRONLY, S_IRUSR | S_IWUSR);
-	
+
 	if (change_fd < 0)
 		error("unable to open file %s: %s", changelist_filename, strerror(errno));
-	
+
+	if (outbead(serv_fd, GENERATE_CHANGE_LIST, struct generate_changelist, snap1, snap2) < 0)
+		return eek();
+
 	struct cl_header cl = { };
 	strncpy(cl.magic, CHANGELIST_MAGIC_ID, MAGIC_SIZE);
 
 	if (write(change_fd, &cl, sizeof(cl)) < 0)
 		error("unable to write magic information to changelist file");
 
-	if (outbead(sock, GENERATE_CHANGE_LIST, struct generate_changelist, snap1, snap2) < 0)
-		return eek();
-	
 	/* send fd to server */
-	if (send_fd(sock, change_fd) < 0)
+	if (send_fd(serv_fd, change_fd) < 0)
 		error("unable to send fd to server");
-	
+
         struct head head;
-	int err;
-        if ((err = readpipe(sock, &head, sizeof(head))))
+        if (readpipe(serv_fd, &head, sizeof(head)))
                 return eek();
+
+	unsigned maxbuf = 500;
+	char buf[maxbuf];
+
         assert(head.length < maxbuf); // !!! don't die
-        if ((err = readpipe(sock, buf, head.length)))
+        if (readpipe(serv_fd, buf, head.length))
                 return eek();
 
         trace_on(printf("reply = %x\n", head.code););
-        err = head.code != REPLY_GENERATE_CHANGE_LIST; /* FIXME: we don't use err after this */
 
-        if (head.code == REPLY_ERROR)
+        if (head.code != REPLY_GENERATE_CHANGE_LIST)
                 error("received error code: %.*s", head.length - 4, buf + 4);
 
 	close(change_fd);
@@ -601,18 +599,17 @@ int delete_snapshot(int sock, int snap) {
 	struct head head;
 	unsigned maxbuf = 500;
 	char buf[maxbuf];
-	int err;
 
-	if ((err = readpipe(sock, &head, sizeof(head))))
+	if (readpipe(sock, &head, sizeof(head)))
 		return eek();
 	assert(head.length < maxbuf); // !!! don't die
 	trace_on(printf("reply head.length = %x\n", head.length););
-	if ((err = readpipe(sock, buf, head.length)))
+	if (readpipe(sock, buf, head.length))
 		return eek();
-	trace_on(printf("reply = %x\n", head.code););
-	err = head.code != REPLY_DELETE_SNAPSHOT;
 
-	if (head.code == REPLY_ERROR)
+	trace_on(printf("reply = %x\n", head.code););
+
+	if (head.code != REPLY_DELETE_SNAPSHOT)
 		error("%.*s", head.length - 4, buf + 4);
 
 	return 0;
@@ -625,17 +622,16 @@ int create_snapshot(int sock, int snap) {
 	struct head head;
 	unsigned maxbuf = 500;
 	char buf[maxbuf];
-	int err;
 
-	if ((err = readpipe(sock, &head, sizeof(head))))
+	if (readpipe(sock, &head, sizeof(head)))
 		return eek();
 	assert(head.length < maxbuf); // !!! don't die
-	if ((err = readpipe(sock, buf, head.length)))
+	if (readpipe(sock, buf, head.length))
 		return eek();
-	trace_on(printf("reply = %x\n", head.code););
-	err = head.code != REPLY_CREATE_SNAPSHOT;
 
-	if (head.code == REPLY_ERROR)
+	trace_on(printf("reply = %x\n", head.code););
+
+	if (head.code != REPLY_CREATE_SNAPSHOT)
 		error("%.*s", head.length - 4, buf + 4);
 
 	return 0;
@@ -648,15 +644,14 @@ int set_priority(int sock, uint32_t tag_val, int8_t pri_val) {
 	struct head head;
 	unsigned maxbuf = 500;
 	char buf[maxbuf];
-	int err = 0;
 
-	if ((err = readpipe(sock, &head, sizeof(head))))
+	if (readpipe(sock, &head, sizeof(head)))
 		return eek();
 	assert(head.length < maxbuf); // !!! don't die
-	if ((err = readpipe(sock, buf, head.length)))
+	if (readpipe(sock, buf, head.length))
 		return eek();
 	trace_on(printf("reply = %x\n", head.code););
-	err = (head.code != REPLY_SET_PRIORITY);
+	int err = (head.code != REPLY_SET_PRIORITY);
 
 	if (head.code == REPLY_ERROR || err)
 		error("%.*s", head.length - 4, buf + 4);
@@ -673,15 +668,14 @@ int set_usecount(int sock, uint32_t tag_val, const char * op) {
 	struct head head;
 	unsigned maxbuf = 500;
 	char buf[maxbuf];
-	int err = 0;
 
-	if ((err = readpipe(sock, &head, sizeof(head))))
+	if (readpipe(sock, &head, sizeof(head)))
 		return eek();
 	assert(head.length < maxbuf); // !!! don't die
-	if ((err = readpipe(sock, buf, head.length)))
+	if (readpipe(sock, buf, head.length))
 		return eek();
 	trace_on(printf("reply = %x\n", head.code););
-	err = (head.code != REPLY_SET_USECOUNT);
+	int err = (head.code != REPLY_SET_USECOUNT);
 
 	if (head.code == REPLY_ERROR || err)
 		error("%.*s", head.length - 4, buf + 4);
@@ -723,7 +717,7 @@ static void mainUsage(void)
 		"	apply-delta       Applies a delta file to the given device\n"
 		"	send-delta        Sends a delta file\n"
 		"	daemon            Listen for deltas\n");
-} 
+}
 
 static void cdUsage(poptContext optCon, int exitcode, char const *error, char const *addl) {
 	poptPrintUsage(optCon, stderr, 0);
@@ -746,7 +740,7 @@ int main(int argc, char *argv[]) {
 		{ "gzip", 'g', POPT_ARG_INT, &gzip_level, 0, "Compression via gzip (default level: 6)", "compression_level"},
 		POPT_TABLEEND
 	};
- 
+
 	poptContext mainCon;
 	struct poptOption mainOptions[] = {
 		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &noOptions, 0,
@@ -791,7 +785,7 @@ int main(int argc, char *argv[]) {
 	}
 
 	//poptResetContext(mainCon);
-	mainCon = poptFreeContext(mainCon);	
+	poptFreeContext(mainCon);
 
 	if (strcmp(command, "create-snap")==0) {
 		if (argc != 4) {
