@@ -95,8 +95,8 @@ data=/dev/$(data0) /dev/$(data1) /dev/$(data2) /dev/$(data3) /dev/$(data4)
 #data=/dev/$(data0) /dev/$(data1)
 
 # README test values
-origindev=/dev/sda3
-snapstoredev=/dev/sda4
+origindev=/dev/hdb1
+snapstoredev=/dev/hdb2
 
 ddraid-test: ddraid-test1 ddraid-test2
 
@@ -152,29 +152,29 @@ dd-server:
 	./ddsnapd /dev/test-snapstore /dev/test-origin /tmp/control /tmp/server
 
 dd-create:
-	./ddsnap create-snapshot /tmp/server 0
+	./ddsnap create-snap /tmp/server 0
  
 dd-delete:
-	./ddsnap delete-snapshot /tmp/server 0
+	./ddsnap delete-snap /tmp/server 0
  
 origin: 
 	echo 0 $$((2 * $$(egrep $$(echo $(origindev) | sed -e 's@^.*/@@')'$$' /proc/partitions | awk '{print $$3}'))) ddsnap /dev/test-snapstore /dev/test-origin /tmp/control -1 | sudo /sbin/dmsetup create vol
 
 snap0:
-	sudo ./ddsnap create-snapshot /tmp/server 0
+	sudo ./ddsnap create-snap /tmp/server 0
 	echo 0 $$((2 * $$(egrep $$(echo $(origindev) | sed -e 's@^.*/@@')'$$' /proc/partitions | awk '{print $$3}'))) ddsnap /dev/test-snapstore /dev/test-origin /tmp/control 0 | sudo /sbin/dmsetup create snapshot0
 
 snap1:
-	sudo ./ddsnap create-snapshot /tmp/server 1
+	sudo ./ddsnap create-snap /tmp/server 1
 	echo 0 $$((2 * $$(egrep $$(echo $(origindev) | sed -e 's@^.*/@@')'$$' /proc/partitions | awk '{print $$3}'))) ddsnap /dev/test-snapstore /dev/test-origin /tmp/control 1 | sudo /sbin/dmsetup create snapshot1
 
 snap2:
-	sudo ./ddsnap create-snapshot /tmp/server 2
+	sudo ./ddsnap create-snap /tmp/server 2
 	echo 0 $$((2 * $$(egrep $$(echo $(origindev) | sed -e 's@^.*/@@')'$$' /proc/partitions | awk '{print $$3}'))) ddsnap /dev/test-snapstore /dev/test-origin /tmp/control 2 | sudo /sbin/dmsetup create snapshot2
 
 changelist:
 	sudo ./ddsnap list /tmp/server
-	sudo ./ddsnap generate-changelist /tmp/server changelist0-1 0 1
+	sudo ./ddsnap create-cl /tmp/server changelist0-1 0 1
 
 delta:
 	sudo ./ddsnap create-delta -r changelist0-1 deltafile0-1 /dev/mapper/snapshot0 /dev/mapper/snapshot1
