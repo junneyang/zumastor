@@ -2573,7 +2573,9 @@ static int incoming(struct superblock *sb, struct client *client)
 		char * err_msg = "invalid snapshot tag";
 		
 		/* check that each snapshot is a valid tag */
-		if (!valid_snaptag(sb, snap1) || !valid_snaptag(sb, snap2)) 
+		struct snapshot *snapshot1, *snapshot2;
+		if (!( snapshot1 = valid_snaptag(sb, snap1)) 
+		    || !(snapshot2 = valid_snaptag(sb, snap2))) 
 			goto generate_error;
 		
 		int change_fd;		
@@ -2588,7 +2590,7 @@ static int incoming(struct superblock *sb, struct client *client)
 			goto generate_error;
 		
 		/* should return something, huh? */
-		gen_changelist_tree(sb, snap1, snap2, change_fd);
+		gen_changelist_tree(sb, snapshot1->bit, snapshot2->bit, change_fd);
 		
 		u64 end_of_stream = -1;
       		if (write(change_fd, &end_of_stream, sizeof(end_of_stream)) < 0)
