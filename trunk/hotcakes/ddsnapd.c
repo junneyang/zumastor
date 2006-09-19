@@ -39,7 +39,7 @@
 #define jtrace trace_off
 #define BUSHY
 
-#define SECTORS_PER_BLOCK 4
+#define SECTORS_PER_BLOCK 7
 
 /*
 Todo:
@@ -340,7 +340,7 @@ static void commit_transaction(struct superblock *sb)
 	struct list_head *list;
 
 	list_for_each(list, &dirty_buffers) {
-		struct buffer *buffer = list_entry(list, struct buffer, list);
+		struct buffer *buffer = list_entry(list, struct buffer, dirty_list);
 		unsigned pos = next_journal_block(sb);
 		jtrace(warn("journal data sector = %Lx [%u]", buffer->sector, pos););
 		assert(buffer_dirty(buffer));
@@ -354,7 +354,7 @@ static void commit_transaction(struct superblock *sb)
 
 	while (!list_empty(&dirty_buffers)) {
 		struct list_head *entry = dirty_buffers.next;
-		struct buffer *buffer = list_entry(entry, struct buffer, list);
+		struct buffer *buffer = list_entry(entry, struct buffer, dirty_list);
 		jtrace(warn("write data sector = %Lx", buffer->sector););
 		assert(buffer_dirty(buffer));
 		assert(commit->entries < sb->max_commit_blocks);
@@ -2538,13 +2538,16 @@ static int incoming(struct superblock *sb, struct client *client)
 		u32 snap = ((struct snapinfo *)message.body)->snap;
 		s8 prio  = ((struct snapinfo *)message.body)->prio;
 		struct snapshot * snap_info;
-		
+		if(snap == -1)
+			goto skip_set_prio;
 		if(!(snap_info = valid_snaptag(sb, snap))) {
 			warn("Snapshot id %u is not a valid snapshot\n", snap);
 			goto set_prio_error;
 		}
 		snap_info->prio = prio;	
+	skip_set_prio:
 		outbead(sock, REPLY_SET_PRIORITY, struct { });
+		break;
 	set_prio_error:
 		outbead(sock, REPLY_ERROR, struct {});
 		break;
@@ -2554,14 +2557,17 @@ static int incoming(struct superblock *sb, struct client *client)
 		u32 snap = ((struct snapinfo *)message.body)->snap;
 		s8 usecnt  = ((struct snapinfo *)message.body)->usecnt;
 		struct snapshot * snap_info;
-		
+		if(snap == -1)
+			goto skip_set_usecnt;
 		if(!(snap_info = valid_snaptag(sb, snap))) {
 			warn("Snapshot id %u is not a valid snapshot\n", snap);
 			goto set_usecnt_error;
 		}
 		usecnt += snap_info->usecnt;
 		snap_info->usecnt = usecnt > 0 ? usecnt : 0;
+	skip_set_usecnt:
 		outbead(sock, REPLY_SET_USECOUNT, struct { });
+		break;
 	set_usecnt_error:
 		outbead(sock, REPLY_ERROR, struct {});
 		break;
@@ -2638,10 +2644,8 @@ static int sigpipe;
 
 static void sighandler(int signum)
 {
-	trace_on(printf("caught signal %i\n", signum););
+	trace(printf("caught signal %i\n", signum););
 	write(sigpipe, (char[]){signum}, 1);
-	flush_buffers();
-	evict_buffers();
 }
 
 static int cleanup(struct superblock *sb)
@@ -2790,6 +2794,8 @@ static int snap_server(struct superblock *sb, const char *server_sockname, int l
 			trace_on(warn("Cleaning up before server dies. Caught signal %i", sig););
 			cleanup(sb); // !!! don't do it on segfault
 			if (sig == SIGINT || sig == SIGTERM) {
+				flush_buffers();
+				evict_buffers();
 				signal(SIGINT, SIG_DFL);
 				kill(getpid(), sig); /* commit harikiri */ /* FIXME: use raise()? */
 			}
