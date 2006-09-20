@@ -34,15 +34,18 @@ pid_t daemonize(char const *logfile)
 		if (!logfile)
 		    logfile = "/dev/null";
 
+		setvbuf(stdout, NULL, _IONBF, 0);
+		setvbuf(stderr, NULL, _IONBF, 0);
+
 		if (freopen("/dev/null", "r", stdin) == NULL)
 		    error("could not reopen stdin\n");
-		if (freopen(logfile, "a", stdout) == NULL)
-		    error("could not reopen stdout\n");
 		if (freopen(logfile, "a", stderr) == NULL)
 		    error("could not reopen stderr\n");
 
-		dup2(fileno(stdout), fileno(stderr));
-		setlinebuf(stdout);
+		dup2(fileno(stderr), fileno(stdout));
+
+		setvbuf(stdout, NULL, _IOLBF, 0);
+		setvbuf(stderr, NULL, _IOLBF, 0);
 
 		/* FIXME: technically we should chdir to the fs root
 		 * to avoid making random filesystems busy, but some
