@@ -5,12 +5,12 @@
 #include "trace.h"
 
 /*
- * Find and return the port number of a host:port pair, shortening
- * the original string to include only the hostname.
+ * Find and return the port number of a host:port pair, updating
+ * the length to represent the hostname without the port.
  */
 static inline int parse_port(char const *s, unsigned *len)
 {
-	char *p = memchr(s, ':', *len);
+	char const *p = memchr(s, ':', *len);
 	if (!p || p == s || p - s == *len)
 		return -1;
 	*len = p - s;
