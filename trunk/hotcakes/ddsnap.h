@@ -19,18 +19,31 @@ int diskio(int fd, void *data, size_t count, off_t offset, int write);
 
 static inline int readpipe(int fd, void *buffer, size_t count)
 {
-	// printf("read %u bytes\n", count);
 	int n;
+
 	while (count) {
 		if ((n = read(fd, buffer, count)) < 1)
-			return n? n: -EPIPE;
+			return n == 0 ? -EPIPE : -errno;
 		buffer += n;
 		count -= n;
 	}
+
 	return 0;
 }
 
-#define writepipe write
+static inline int writepipe(int fd, void const *buffer, size_t count)
+{
+	int n;
+
+	while (count) {
+		if ((n = write(fd, buffer, count)) < 0)
+			return -errno;
+		buffer += n;
+		count -= n;
+	}
+
+	return 0;
+}
 
 #define outbead(SOCK, CODE, STRUCT, VALUES...) ({ \
 	struct { struct head head; STRUCT body; } PACKED message = \
