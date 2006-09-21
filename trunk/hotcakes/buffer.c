@@ -227,7 +227,7 @@ void evict_buffer(struct buffer *buffer)
 {
 	if (buffer_dirty(buffer))  
 		write_buffer(buffer);
-	if (buffer->lru_list.next == LIST_POISON1) {
+	if (buffer->lru_list.next != LIST_POISON1) {
 		list_del(&buffer->lru_list);
 		lru_buffer_count--;
 	}
