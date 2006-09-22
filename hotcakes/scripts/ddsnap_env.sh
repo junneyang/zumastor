@@ -4,12 +4,13 @@
 DDSNAP_HOME=/src/2.6.17-rc6-dd/drivers/md/ddraid
 SNAPSTORE_DEV=/dev/test-snapstore
 ORIGIN_DEV=/dev/test-origin
+ORIGIN_PHYS_DEV=/dev/hdb1
 LOGICAL_VOL_NAME=vol
 SNAPSHOT_VOL_NAME=snap
 SERVER_SOCK_NAME=/tmp/server
 AGENT_SOCK_NAME=/tmp/control
-SIZE_LOGICAL_VOL=175799232 # number of sectors
-REMOTE_HOST=golden
+SIZE_LOGICAL_VOL=$(( 2 * $(egrep $(echo $ORIGIN_PHYS_DEV | sed -e 's@^.*/@@') /proc/partitions | awk '{print $3}'))) 
+REMOTE_HOST=blinkin
 MAX_SNAPSHOTS=64 # just for test purposes.. max can be 64 
 
 # command names... it's early in development, so they might change
