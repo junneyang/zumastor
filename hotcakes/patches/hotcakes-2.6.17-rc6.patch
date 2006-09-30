@@ -1,7 +1,7 @@
-diff -urp 2.6.17-rc6/drivers/md/Kconfig 2.6.17-rc6-dd/drivers/md/Kconfig
---- 2.6.17-rc6/drivers/md/Kconfig	2006-06-05 17:57:02.000000000 -0700
-+++ 2.6.17-rc6-dd/drivers/md/Kconfig	2006-07-14 16:17:03.000000000 -0700
-@@ -263,5 +263,21 @@ config DM_MULTIPATH_EMC
+diff -ruN linux-2.6.17-rc6.clean/drivers/md/Kconfig linux-2.6.17-rc6-patched/drivers/md/Kconfig
+--- linux-2.6.17-rc6.clean/drivers/md/Kconfig	2006-06-05 17:57:02.000000000 -0700
++++ linux-2.6.17-rc6-patched/drivers/md/Kconfig	2006-09-01 13:53:08.487043000 -0700
+@@ -263,5 +263,21 @@
  	---help---
  	  Multipath support for EMC CX/AX series hardware.
  
@@ -23,10 +23,10 @@ diff -urp 2.6.17-rc6/drivers/md/Kconfig 2.6.17-rc6-dd/drivers/md/Kconfig
 +
  endmenu
  
-diff -urp 2.6.17-rc6/drivers/md/Makefile 2.6.17-rc6-dd/drivers/md/Makefile
---- 2.6.17-rc6/drivers/md/Makefile	2006-06-05 17:57:02.000000000 -0700
-+++ 2.6.17-rc6-dd/drivers/md/Makefile	2006-07-14 16:17:03.000000000 -0700
-@@ -37,6 +37,8 @@ obj-$(CONFIG_DM_MULTIPATH_EMC)	+= dm-emc
+diff -ruN linux-2.6.17-rc6.clean/drivers/md/Makefile linux-2.6.17-rc6-patched/drivers/md/Makefile
+--- linux-2.6.17-rc6.clean/drivers/md/Makefile	2006-06-05 17:57:02.000000000 -0700
++++ linux-2.6.17-rc6-patched/drivers/md/Makefile	2006-09-01 13:53:08.501035000 -0700
+@@ -37,6 +37,8 @@
  obj-$(CONFIG_DM_SNAPSHOT)	+= dm-snapshot.o
  obj-$(CONFIG_DM_MIRROR)		+= dm-mirror.o
  obj-$(CONFIG_DM_ZERO)		+= dm-zero.o
@@ -35,9 +35,9 @@ diff -urp 2.6.17-rc6/drivers/md/Makefile 2.6.17-rc6-dd/drivers/md/Makefile
  
  quiet_cmd_unroll = UNROLL  $@
        cmd_unroll = $(PERL) $(srctree)/$(src)/unroll.pl $(UNROLL) \
-diff -urp 2.6.17-rc6/drivers/md/dm-ddraid.c 2.6.17-rc6-dd/drivers/md/dm-ddraid.c
---- 2.6.17-rc6/drivers/md/dm-ddraid.c	2006-09-07 14:28:10.000000000 -0700
-+++ 2.6.17-rc6-dd/drivers/md/dm-ddraid.c	2006-07-14 16:17:03.000000000 -0700
+diff -ruN linux-2.6.17-rc6.clean/drivers/md/dm-ddraid.c linux-2.6.17-rc6-patched/drivers/md/dm-ddraid.c
+--- linux-2.6.17-rc6.clean/drivers/md/dm-ddraid.c	1969-12-31 17:00:00.000000000 -0700
++++ linux-2.6.17-rc6-patched/drivers/md/dm-ddraid.c	2006-09-07 17:10:57.230300000 -0700
 @@ -0,0 +1,1619 @@
 +#include <linux/fs.h>
 +#include <linux/slab.h>
@@ -1658,9 +1658,9 @@ diff -urp 2.6.17-rc6/drivers/md/dm-ddraid.c 2.6.17-rc6-dd/drivers/md/dm-ddraid.c
 +
 +module_init(dm_ddraid_init);
 +module_exit(dm_ddraid_exit);
-diff -urp 2.6.17-rc6/drivers/md/dm-ddraid.h 2.6.17-rc6-dd/drivers/md/dm-ddraid.h
---- 2.6.17-rc6/drivers/md/dm-ddraid.h	2006-09-07 14:28:09.000000000 -0700
-+++ 2.6.17-rc6-dd/drivers/md/dm-ddraid.h	2006-07-14 16:17:03.000000000 -0700
+diff -ruN linux-2.6.17-rc6.clean/drivers/md/dm-ddraid.h linux-2.6.17-rc6-patched/drivers/md/dm-ddraid.h
+--- linux-2.6.17-rc6.clean/drivers/md/dm-ddraid.h	1969-12-31 17:00:00.000000000 -0700
++++ linux-2.6.17-rc6-patched/drivers/md/dm-ddraid.h	2006-09-07 17:10:57.236302000 -0700
 @@ -0,0 +1,47 @@
 +#define PACKED __attribute__ ((packed))
 +
@@ -1709,10 +1709,10 @@ diff -urp 2.6.17-rc6/drivers/md/dm-ddraid.h 2.6.17-rc6-dd/drivers/md/dm-ddraid.h
 +
 +// bios submitted before server arrives must be split conservatively (see "bogus")
 +#define MIN_REGION_BITS 12
-diff -urp 2.6.17-rc6/drivers/md/dm-ddsnap.c 2.6.17-rc6-dd/drivers/md/dm-ddsnap.c
---- 2.6.17-rc6/drivers/md/dm-ddsnap.c	2006-09-07 14:28:06.000000000 -0700
-+++ 2.6.17-rc6-dd/drivers/md/dm-ddsnap.c	2006-09-12 18:20:38.000000000 -0700
-@@ -0,0 +1,1204 @@
+diff -ruN linux-2.6.17-rc6.clean/drivers/md/dm-ddsnap.c linux-2.6.17-rc6-patched/drivers/md/dm-ddsnap.c
+--- linux-2.6.17-rc6.clean/drivers/md/dm-ddsnap.c	1969-12-31 17:00:00.000000000 -0700
++++ linux-2.6.17-rc6-patched/drivers/md/dm-ddsnap.c	2006-09-28 15:09:42.149898000 -0700
+@@ -0,0 +1,1184 @@
 +#include <linux/fs.h>
 +#include <linux/slab.h>
 +#include <linux/mm.h>
@@ -2242,29 +2242,19 @@ diff -urp 2.6.17-rc6/drivers/md/dm-ddsnap.c 2.6.17-rc6-dd/drivers/md/dm-ddsnap.c
 +			info->chunksize_bits = chunksize_bits;
 +			info->chunkshift     = chunksize_bits - SECTOR_SHIFT;
 +			/* set usecount */
-+			if (outbead(info->sock, SET_USECOUNT, struct snapinfo, info->snap, 0, 1) < 0) {
++			if (outbead(sock, SET_USECOUNT, struct snapinfo, info->snap, 0, 1) < 0) 
 +				warn("unable to send message to snapshot server");
-+				goto finish_create;
-+			}
-+			if ((err = readpipe(info->sock, &head, sizeof(head))))
-+				goto finish_create;
-+			assert(head.length < maxbuf); // !!! don't die
-+			if ((err = readpipe(info->sock, buf, head.length)))
-+				goto finish_create;
-+			err = (head.code != REPLY_SET_USECOUNT);
-+			if (head.code == REPLY_ERROR || err)
-+				warn("unable to unset usecount for snapshot %d",info->snap);
-+			
-+		finish_create:
 +			up(&info->server_out_sem);
 +			outbead(info->control_socket, REPLY_CONNECT_SERVER, struct { });
 +			continue;
++			warn("should never be here. damn it");
 +		case REPLY_ERROR:	
 +			trace_on(warn("failed i/o"););
 +			failed_io = 1;
 +			break;
 +		default: 
-+			warn("Unknown message %x", message.head.code);
++			warn("Unknown message %x. sending reply error back to server", message.head.code);
++			//outbead(sock, REPLY_ERROR, struct {});	
 +			continue;
 +		}
 +		if (length < sizeof(struct rw_request))
@@ -2350,6 +2340,7 @@ diff -urp 2.6.17-rc6/drivers/md/dm-ddsnap.c 2.6.17-rc6-dd/drivers/md/dm-ddsnap.c
 +		chunk = hook->sector >> info->chunkshift;
 +		outbead(info->sock, UPLOAD_LOCK, struct rw_request1, .count = 1, .ranges[0].chunk = chunk, .ranges[0].chunks = 1);
 +	}
++	warn("I'm sending some crazy stuff!");
 +	outbead(info->sock, FINISH_UPLOAD_LOCK, struct {});
 +	spin_lock_irqsave(&info->end_io_lock, irqflags);
 +	list_for_each_safe(entry, tmp, &info->locked){
@@ -2660,28 +2651,17 @@ diff -urp 2.6.17-rc6/drivers/md/dm-ddsnap.c 2.6.17-rc6-dd/drivers/md/dm-ddsnap.c
 +	trace(warn("%p", target);)
 +	if (!info)
 +		return;
-+
 +	/* unset the usecount for this device */
-+	if (outbead(info->sock, SET_USECOUNT, struct snapinfo, info->snap, 0, -1) < 0) {
++	warn("Unsetting usecount info");
++	if (outbead(info->sock, SET_USECOUNT, struct snapinfo, info->snap, 0, -1) < 0) 
 +		warn("unable to send message to snapshot server");
-+		goto finish_delete;
-+	}
-+	if ((err = readpipe(info->sock, &head, sizeof(head))))
-+		goto finish_delete;
-+	assert(head.length < maxbuf); // !!! don't die
-+	if ((err = readpipe(info->sock, buf, head.length)))
-+		goto finish_delete;
-+	err = (head.code != REPLY_SET_USECOUNT);
-+	if (head.code == REPLY_ERROR || err)
-+		warn("unable to unset usecount for snapshot %d",info->snap);
-+
-+ finish_delete:
 +	/* Unblock helper threads */
 +	info->flags |= FINISH_FLAG;
 +	up(&info->server_in_sem); // unblock incoming thread
 +	up(&info->server_out_sem); // unblock io request threads
 +	up(&info->recover_sem); // unblock worker recovery
-+
++	
++	warn("closing socket connection");
 +	if (info->sock && (err = shutdown_socket(info->sock)))
 +		warn("server socket shutdown error %i", err);
 +	if (info->sock && (err = shutdown_socket(info->control_socket)))
@@ -2917,10 +2897,10 @@ diff -urp 2.6.17-rc6/drivers/md/dm-ddsnap.c 2.6.17-rc6-dd/drivers/md/dm-ddsnap.c
 +module_exit(dm_ddsnap_exit);
 +
 +MODULE_LICENSE("GPL");
-diff -urp 2.6.17-rc6/drivers/md/dm-ddsnap.h 2.6.17-rc6-dd/drivers/md/dm-ddsnap.h
---- 2.6.17-rc6/drivers/md/dm-ddsnap.h	2006-09-07 14:28:05.000000000 -0700
-+++ 2.6.17-rc6-dd/drivers/md/dm-ddsnap.h	2006-09-11 16:38:14.000000000 -0700
-@@ -0,0 +1,83 @@
+diff -ruN linux-2.6.17-rc6.clean/drivers/md/dm-ddsnap.h linux-2.6.17-rc6-patched/drivers/md/dm-ddsnap.h
+--- linux-2.6.17-rc6.clean/drivers/md/dm-ddsnap.h	1969-12-31 17:00:00.000000000 -0700
++++ linux-2.6.17-rc6-patched/drivers/md/dm-ddsnap.h	2006-09-28 15:51:38.536389000 -0700
+@@ -0,0 +1,99 @@
 +#define PACKED __attribute__ ((packed))
 +#define MAGIC  0xadbe
 +
@@ -2966,10 +2946,22 @@ diff -urp 2.6.17-rc6/drivers/md/dm-ddsnap.h 2.6.17-rc6-dd/drivers/md/dm-ddsnap.h
 +	REPLY_SET_PRIORITY,
 +	SET_USECOUNT,
 +	REPLY_SET_USECOUNT,
++	STREAM_CHANGE_LIST,
++	REPLY_STREAM_CHANGE_LIST,
++	SEND_DELTA,
++	SEND_DELTA_PROCEED,
++	SEND_DELTA_DONE,
++};
++
++enum csnap_error_codes
++{
++	REPLY_ERROR_REFUSED = 0x01,
++	REPLY_ERROR_OTHER,
 +};
 +
 +#define ID_BITS 16
 +
++struct reply_error { uint32_t err; uint32_t trackno; } PACKED;
 +struct match_id { uint64_t id; uint64_t mask; } PACKED;
 +struct set_id { uint64_t id; } PACKED;
 +struct identify { uint64_t id; int32_t snap; uint32_t chunksize_bits; } PACKED;
@@ -2977,6 +2969,10 @@ diff -urp 2.6.17-rc6/drivers/md/dm-ddsnap.h 2.6.17-rc6-dd/drivers/md/dm-ddsnap.h
 +struct generate_changelist { uint32_t snap1; uint32_t snap2; } PACKED;
 +struct snapinfo { uint64_t snap; int8_t prio; uint8_t usecnt; char zero[3]; uint64_t ctime; } PACKED;
 +struct snaplist { uint32_t count; struct snapinfo snapshots[]; } PACKED;
++struct stream_changelist { uint32_t snap1; uint32_t snap2; } PACKED;
++struct changelist_stream { uint64_t chunk_count; uint32_t chunksize_bits; } PACKED;
++struct send_delta { int32_t snapid; uint64_t chunk_count; uint32_t chunk_size; uint32_t delta_mode; } PACKED;
++
 +
 +typedef uint16_t shortcount; /* !!! what is this all about */
 +
@@ -3004,10 +3000,10 @@ diff -urp 2.6.17-rc6/drivers/md/dm-ddsnap.h 2.6.17-rc6-dd/drivers/md/dm-ddsnap.h
 +struct rwmessage { struct head head; struct rw_request body; };
 +struct messagebuf { struct head head; char body[maxbody]; };
 +/* ...decruft me */
-diff -urp 2.6.17-rc6/drivers/md/dm-table.c 2.6.17-rc6-dd/drivers/md/dm-table.c
---- 2.6.17-rc6/drivers/md/dm-table.c	2006-06-05 17:57:02.000000000 -0700
-+++ 2.6.17-rc6-dd/drivers/md/dm-table.c	2006-07-14 16:17:03.000000000 -0700
-@@ -441,8 +441,10 @@ static int __table_get_device(struct dm_
+diff -ruN linux-2.6.17-rc6.clean/drivers/md/dm-table.c linux-2.6.17-rc6-patched/drivers/md/dm-table.c
+--- linux-2.6.17-rc6.clean/drivers/md/dm-table.c	2006-06-05 17:57:02.000000000 -0700
++++ linux-2.6.17-rc6-patched/drivers/md/dm-table.c	2006-09-01 13:53:11.379991000 -0700
+@@ -441,8 +441,10 @@
  			return -EOVERFLOW;
  	} else {
  		/* convert the path to a device */
@@ -3019,7 +3015,7 @@ diff -urp 2.6.17-rc6/drivers/md/dm-table.c 2.6.17-rc6-dd/drivers/md/dm-table.c
  	}
  
  	dd = find_device(&t->devices, dev);
-@@ -466,8 +468,10 @@ static int __table_get_device(struct dm_
+@@ -466,8 +468,10 @@
  
  	} else if (dd->mode != (mode | dd->mode)) {
  		r = upgrade_mode(dd, mode, t->md);
@@ -3031,7 +3027,7 @@ diff -urp 2.6.17-rc6/drivers/md/dm-table.c 2.6.17-rc6-dd/drivers/md/dm-table.c
  	}
  	atomic_inc(&dd->count);
  
-@@ -488,7 +492,11 @@ int dm_get_device(struct dm_target *ti, 
+@@ -488,7 +492,11 @@
  {
  	int r = __table_get_device(ti->table, ti, path,
  				   start, len, mode, result);
@@ -3043,10 +3039,9 @@ diff -urp 2.6.17-rc6/drivers/md/dm-table.c 2.6.17-rc6-dd/drivers/md/dm-table.c
  		request_queue_t *q = bdev_get_queue((*result)->bdev);
  		struct io_restrictions *rs = &ti->limits;
  
-diff -urp 2.6.17-rc6/net/socket.c 2.6.17-rc6-dd/net/socket.c
---- 2.6.17-rc6/net/socket.c	2006-06-05 17:57:02.000000000 -0700
-+++ 2.6.17-rc6-dd/net/socket.c	2006-07-14 16:17:23.000000000 -0700
-@@ -2160,6 +2160,12 @@ static long compat_sock_ioctl(struct fil
+--- linux-2.6.17-rc6.clean/net/socket.c	2006-06-05 17:57:02.000000000 -0700
++++ linux-2.6.17-rc6-patched/net/socket.c	2006-09-01 13:53:08.743037000 -0700
+@@ -2160,6 +2160,12 @@
  }
  #endif
  
