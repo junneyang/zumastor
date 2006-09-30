@@ -48,11 +48,10 @@ void set_buffer_dirty(struct buffer *buffer)
 		list_add_tail(&buffer->dirty_list, &dirty_buffers);
 		dirty_buffer_count++;
 	}
-	if (buffer_uptodate(buffer)) {
+	if (buffer->lru_list.next != LIST_POISON1) {
 		list_del(&buffer->lru_list);
 		lru_buffer_count--;
 	}
-
 	buffer->flags = BUFFER_STATE_DIRTY; //| (buffer->flags & ~BUFFER_STATE_MASK);
 }
 
