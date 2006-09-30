@@ -51,7 +51,8 @@ int append_change_list(struct change_list *cl, u64 chunkaddr)
 
 void free_change_list(struct change_list *cl)
 {
-	free(cl->chunks);
+	if (cl->chunks)
+		free(cl->chunks);
 	free(cl);
 }
 
