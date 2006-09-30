@@ -15,7 +15,7 @@ int delta_chunk_helper(int (*func) (xd3_stream *),
 
 	xd3_stream stream;
 	xd3_config config;
-	char *err_msg;
+	char const *err_msg;
 	int ret = UNKNOWN_ERROR;
 
 	*output_size = 0;
