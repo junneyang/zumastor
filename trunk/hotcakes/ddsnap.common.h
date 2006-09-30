@@ -1,8 +1,8 @@
 
 struct change_list
 {
-	unsigned count;
-	unsigned length;
+	u64 count;
+	u64 length;
 	u32 chunksize_bits;
 	u64 *chunks;
 };
