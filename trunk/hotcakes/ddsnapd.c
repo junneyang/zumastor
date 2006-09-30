@@ -31,6 +31,7 @@
 #include "list.h"
 #include "buffer.h"
 #include "ddsnap.h"
+#include "ddsnap.common.h"
 #include "dm-ddsnap.h"
 #include "trace.h"
 #include "daemonize.h"
@@ -156,8 +157,6 @@ static void hexdump(void const *data, unsigned length)
 /* BTree Operations */
 
 /* Directory at the base of the leaf block */
-
-#define MAX_SNAPSHOTS 64
 
 struct enode
 {
@@ -377,7 +376,7 @@ static int recover_journal(struct superblock *sb)
 	int scribbled = -1, last_block = -1, newest_block = -1;
 	int data_from_start = 0, data_from_last = 0;
 	int size = sb->image.journal_size;
-	char *why = "";
+	char const *why = "";
 	unsigned i;
 
 	/* Scan full journal, find newest commit */
@@ -542,14 +541,14 @@ static void _show_journal(struct superblock *sb)
  *   - enforce 32 bit address range within leaf
  */
 
-static struct buffer *snapread(struct superblock *sb, sector_t sector)
+static struct buffer *snapread(struct superblock const *sb, sector_t sector)
 {
 	return bread(sb->metadev, sector, sb->blocksize);
 }
 
 static void show_leaf(struct eleaf *leaf)
 {
-	struct exception *p;
+	struct exception const *p;
 	int i;
 	
 	printf("%i chunks: ", leaf->count);
@@ -572,7 +571,7 @@ static int origin_chunk_unique(struct eleaf *leaf, u64 chunk, u64 snapmask)
 {
 	u64 using = 0;
 	unsigned i, target = chunk - leaf->base_chunk;
-	struct exception *p;
+	struct exception const *p;
 
 	for (i = 0; i < leaf->count; i++)
 		if (leaf->map[i].rchunk == target)
@@ -595,7 +594,7 @@ static int snapshot_chunk_unique(struct eleaf *leaf, u64 chunk, int snapshot, u6
 {
 	u64 mask = 1LL << snapshot;
 	unsigned i, target = chunk - leaf->base_chunk;
-	struct exception *p;
+	struct exception const *p;
 
 	for (i = 0; i < leaf->count; i++)
 		if (leaf->map[i].rchunk == target)
@@ -815,13 +814,13 @@ static void init_allocation(struct superblock *sb)
 	int meta_flag = (sb->metadata != sb->snapdata);
 
 	/* gnarly stuff... must be a better way */
-	u64 meta_chunks = sb->metadata->chunks, snap_chunks = sb->snapdata->chunks;	
+	u64 meta_chunks = sb->metadata->chunks, snap_chunks = sb->snapdata->chunks;
 	u64 meta_bitmaps = calc_bitmap_blocks(sb, meta_chunks), snap_bitmaps = calc_bitmap_blocks(sb, snap_chunks);
 	unsigned meta_bitmap_base_chunk = (SB_SECTOR + sb->sectors_per_block + sb->sectors_per_chunk  - 1) >> sb->sectors_per_chunk_bits;
 	u64 meta_bitmap_chunks = sb->metadata->bitmap_blocks = meta_bitmaps; // !!! chunksize same as blocksize
 	u64 snap_bitmap_base_chunk = meta_bitmap_base_chunk + meta_bitmap_chunks;
 	u64 snap_bitmap_chunks = sb->snapdata->bitmap_blocks = snap_bitmaps;
-		
+
 	/* generic variable for initialization */
 	unsigned reserved = meta_bitmap_base_chunk + meta_bitmap_chunks + sb->image.journal_size 
 		            + (meta_flag ? snap_bitmap_chunks : 0); // !!! chunksize same as blocksize
@@ -954,7 +953,7 @@ static const struct snapshot * find_snapshot_to_delete(const struct snapshot * s
 static chunk_t alloc_chunk(struct superblock *sb)
 {
 	chunk_t last = sb->current_alloc->last_alloc, total = sb->current_alloc->chunks, found;
-	const char * err_msg;
+	const char *err_msg;
 	do {
 		if ((found = alloc_chunk_range(sb, last, total - last)) != -1 ||
 		    (found = alloc_chunk_range(sb, 0, last)) != -1) {
@@ -965,7 +964,7 @@ static chunk_t alloc_chunk(struct superblock *sb)
 		const struct snapshot * cand_delete = find_snapshot_to_delete(sb->image.snaplist, sb->image.snapshots);
 		err_msg = "unable to find a snapshot candidate to remove. Failing I/O.";
 		if(!cand_delete)
-			goto unable_to_delete; /* no snapshot to delete */ 
+			goto unable_to_delete; /* no snapshot to delete */
 		warn("snapshot store full, releasing snapshot %i", cand_delete->tag);
 		err_msg = "unable to release snapshot";
 		if (delete_snapshot(sb, cand_delete->tag))
@@ -981,7 +980,7 @@ static chunk_t alloc_chunk(struct superblock *sb)
 
 static sector_t alloc_block(struct superblock *sb)
 {
-	sb->current_alloc = sb->metadata; 
+	sb->current_alloc = sb->metadata;
 	return alloc_chunk(sb) << sb->sectors_per_chunk_bits; // !!! assume blocksize = chunksize
 }
 
@@ -1052,29 +1051,34 @@ struct etree_path { struct buffer *buffer; struct index_entry *pnext; };
    gen_changelist, delete_snapshot and show_tree can be
    refactor to use a wrapper. - rob
 */
-static void gen_changelist_leaf(struct eleaf *leaf, int snapshot1, int snapshot2, int change_fd) {
-	struct exception *p;
+static void gen_changelist_leaf(struct eleaf *leaf, int snapshot1, int snapshot2, struct change_list *cl)
+{
+	struct exception const *p;
 	int i;
 	u64 newchunk, tag1 = 1LL << snapshot1, tag2 = 1LL << snapshot2;
-	
-	for (i = 0; i < leaf->count; i++) 
-		for (p = emap(leaf, i); p < emap(leaf, i+1); p++) { 
+
+	for (i = 0; i < leaf->count; i++)
+		for (p = emap(leaf, i); p < emap(leaf, i+1); p++) {
 			if ( ((p->share & tag2) == tag2) != ((p->share & tag1) == tag1) ) {
 				newchunk = leaf->base_chunk + leaf->map[i].rchunk;
-				if (write(change_fd, &newchunk, sizeof(newchunk)) < 0)
+				if (append_change_list(cl, newchunk) < 0)
 					warn("unable to write chunk %Lu to changelist\n", newchunk);
 				break;
-			}	
-		}	       
+			}
+		}
 }
 
-static void gen_changelist_tree(struct superblock *sb, int snapshot1, int snapshot2, int change_fd)
+static struct change_list *gen_changelist_tree(struct superblock const *sb, int snapshot1, int snapshot2)
 {
 	int levels = sb->image.etree_levels, level = -1;
 	struct etree_path path[levels];
 	struct buffer *nodebuf;
 	struct enode *node;
-	
+	struct change_list *cl;
+
+	if ((cl = init_change_list(sb->image.chunksize_bits)) == NULL)
+	    return NULL;
+
 	while (1) {
 		do {
 			level++;
@@ -1089,14 +1093,14 @@ static void gen_changelist_tree(struct superblock *sb, int snapshot1, int snapsh
 		while (path[level].pnext  < node->entries + node->count) {
 			struct buffer *leafbuf = snapread(sb, path[level].pnext++->sector);
 			trace(printf("process leaf %Lx\n", leafbuf->sector););
-			gen_changelist_leaf(buffer2leaf(leafbuf), snapshot1, snapshot2, change_fd);
+			gen_changelist_leaf(buffer2leaf(leafbuf), snapshot1, snapshot2, cl);
 			brelse(leafbuf);
 		}
 		
 		do {
 			brelse(nodebuf);
 			if (!level)
-				return;
+				return cl;
 			nodebuf = path[--level].buffer;
 			node = buffer2node(nodebuf);
 			trace(printf("pop to level %i, %i of %i nodes\n", level, path[level].pnext - node->entries, node->count););
@@ -1172,7 +1176,7 @@ static void show_tree_range(struct superblock *sb, chunk_t start, unsigned leave
 #endif
 
 	while (1) {
- 		do {
+		do {
 			level++;
 			nodebuf = snapread(sb, level? path[level - 1].pnext++->sector: sb->image.etree_root);
 			node = buffer2node(nodebuf);
@@ -1434,10 +1438,10 @@ create:
 
 static void check_leaf(struct eleaf *leaf, u64 snapmask)
 {
-       struct exception *p;
-       int i;
+	struct exception *p;
+	int i;
 
-       for (i = 0; i < leaf->count; i++) {
+	for (i = 0; i < leaf->count; i++) {
                trace(printf("%x=", leaf->map[i].rchunk););
                // printf("@%i ", leaf->map[i].offset);
                for (p = emap(leaf, i); p < emap(leaf, i+1); p++) {
@@ -1445,9 +1449,8 @@ static void check_leaf(struct eleaf *leaf, u64 snapmask)
                        if(p->share & snapmask)
                          printf("Leaf bitmap contains %016llx some snapshots in snapmask %016llx\n", p->share, snapmask);
                }
-       }
-       // printf("top@%i", leaf->map[i].offset);
-       printf("\n");
+	}
+	// printf("top@%i", leaf->map[i].offset);
 }
 
 /*
@@ -1513,7 +1516,7 @@ static void delete_snapshots_from_tree(struct superblock *sb, u64 snapmask)
 			struct buffer *leafbuf = snapread(sb, path[level].pnext++->sector);
 			trace_off(printf("process leaf %Lx\n", leafbuf->sector););
 			delete_snapshots_from_leaf(sb, buffer2leaf(leafbuf), snapmask, -1);
-			brelse(leafbuf);
+			brelse_dirty(leafbuf);
 		}
 
 		do {
@@ -1902,8 +1905,8 @@ static struct snaplock *release_lock(struct superblock *sb, struct snaplock *loc
 	free_snaplock_hold(sb, *holdp);
 	*holdp = next;
 
-	if (lock->holdlist) 
-	  return ret;
+	if (lock->holdlist)
+		return ret;
 
 	/* Release and delete waiters, delete lock */
 	struct snaplock_wait *list = lock->waitlist;
@@ -1945,7 +1948,7 @@ static int release_chunk(struct superblock *sb, chunk_t chunk, struct client *cl
 
 	next = release_lock(sb, lock, client);
 	*lockp = next;
-	if (!next) 
+	if (!next)
 		return -2;
 	
 	trace(printf("release_chunk returning 0\n next lock %p\n",next););
@@ -1955,9 +1958,9 @@ static int release_chunk(struct superblock *sb, chunk_t chunk, struct client *cl
 /* Build up a response as a list of chunk ranges */
 
 struct addto
-{ 
+{
 	unsigned count;
-	chunk_t firstchunk; 
+	chunk_t firstchunk;
 	chunk_t nextchunk;
 	struct rwmessage *reply;
 	shortcount *countp;
@@ -2306,8 +2309,8 @@ static struct snapshot * valid_snaptag(struct superblock *sb, int tag) {
 	int i, n = sb->image.snapshots;
 	struct snapshot *snap = sb->image.snaplist;
 	
-	for (i=0; i<n; i++) 
-		if(snap[i].tag == tag) 
+	for (i=0; i<n; i++)
+		if (snap[i].tag == tag)
 			return &(snap[i]);
 	
 	return (struct snapshot *)0;
@@ -2369,7 +2372,7 @@ static int incoming(struct superblock *sb, struct client *client)
 				goto message_too_short;
 			
 			trace(printf("origin write query, %u ranges\n", body->count););
-			message.head.code = REPLY_ORIGIN_WRITE;	
+			message.head.code = REPLY_ORIGIN_WRITE;
 			for (i = 0; i < body->count; i++, p++)
 				for (j = 0, chunk = p->chunk; j < p->chunks; j++, chunk++) {
 					chunk_t exception = make_unique(sb, chunk, -1);
@@ -2377,7 +2380,7 @@ static int incoming(struct superblock *sb, struct client *client)
 						warn("ERROR: I/O Failure -- unable to perform copyout during origin write.");
 						message.head.code = REPLY_ERROR;
 					}
-					if (exception) 
+					if (exception)
 						waitfor_chunk(sb, chunk, &pending);
 				}
 			finish_copyout(sb);
@@ -2404,7 +2407,7 @@ static int incoming(struct superblock *sb, struct client *client)
 				chunk_t chunk = body->ranges[i].chunk + j;
 				chunk_t exception = make_unique(sb, chunk, client->snap);
 				if (exception == -1) {
-					warn("ERROR: I/O failure -- unable to perform copyout during snapshot write."); 
+					warn("ERROR: I/O failure -- unable to perform copyout during snapshot write.");
 					ret_msgcode = REPLY_ERROR;
 				}
 				trace(printf("exception = %Lx\n", exception););
@@ -2460,10 +2463,11 @@ static int incoming(struct superblock *sb, struct client *client)
 	}
 	case IDENTIFY:
 	{
-		int tag = ((struct identify *)message.body)->snap; 
+		int tag = ((struct identify *)message.body)->snap;
 		
 		client->snap =  (tag == -1) ? tag : tag_snapnum(sb, tag);
 		client->id = ((struct identify *)message.body)->id;
+		trace(fprintf(stderr, "got identify request, setting id="U64FMT" snap=%i, sending chunksize_bits=%u\n", client->id, client->snap, sb->image.chunksize_bits););
 		warn("client id %Li, snapshot %i (snapnum %i)", client->id, tag, client->snap);
 		outbead(sock, REPLY_IDENTIFY, struct identify, 0, 0, sb->image.chunksize_bits); // return another structure?
 		break;
@@ -2474,7 +2478,7 @@ static int incoming(struct superblock *sb, struct client *client)
 	case FINISH_UPLOAD_LOCK:
 		break;
 		
-	case CREATE_SNAPSHOT: 
+	case CREATE_SNAPSHOT:
 	{
 		if(create_snapshot(sb, ((struct create_snapshot *)message.body)->snap) < 0)
 			goto reply_error;
@@ -2535,7 +2539,7 @@ static int incoming(struct superblock *sb, struct client *client)
 	}
 	case SET_PRIORITY:
 	{
-		u32 snap = ((struct snapinfo *)message.body)->snap;
+		u32 snap = ((struct snapinfo *)message.body)->snap; /* FIXME: u64 in struct, s32 elsewhere */
 		s8 prio  = ((struct snapinfo *)message.body)->prio;
 		struct snapshot * snap_info;
 		if(snap == -1)
@@ -2544,7 +2548,7 @@ static int incoming(struct superblock *sb, struct client *client)
 			warn("Snapshot id %u is not a valid snapshot\n", snap);
 			goto set_prio_error;
 		}
-		snap_info->prio = prio;	
+		snap_info->prio = prio;
 	skip_set_prio:
 		outbead(sock, REPLY_SET_PRIORITY, struct { });
 		break;
@@ -2552,9 +2556,9 @@ static int incoming(struct superblock *sb, struct client *client)
 		outbead(sock, REPLY_ERROR, struct {});
 		break;
 	}
-	case SET_USECOUNT: 
+	case SET_USECOUNT:
 	{
-		u32 snap = ((struct snapinfo *)message.body)->snap;
+		u32 snap = ((struct snapinfo *)message.body)->snap; /* FIXME: u64 in struct, s32 elsewhere */
 		s8 usecnt  = ((struct snapinfo *)message.body)->usecnt;
 		struct snapshot * snap_info;
 		if(snap == -1)
@@ -2566,55 +2570,110 @@ static int incoming(struct superblock *sb, struct client *client)
 		usecnt += snap_info->usecnt;
 		snap_info->usecnt = usecnt > 0 ? usecnt : 0;
 	skip_set_usecnt:
+		warn("sending set use count msg for snapshot %u", snap);
 		outbead(sock, REPLY_SET_USECOUNT, struct { });
 		break;
 	set_usecnt_error:
+		warn("sending reply error for snapshot %u", snap);
 		outbead(sock, REPLY_ERROR, struct {});
 		break;
 	}
 	case GENERATE_CHANGE_LIST:
 	{
 		int snap1 = ((struct generate_changelist *)message.body)->snap1,
-			snap2 = ((struct generate_changelist *)message.body)->snap2;	
-		char * err_msg = "invalid snapshot tag";
-		
+			snap2 = ((struct generate_changelist *)message.body)->snap2;
+		char const *err_msg;
+
 		/* check that each snapshot is a valid tag */
 		struct snapshot *snapshot1, *snapshot2;
-		if (!( snapshot1 = valid_snaptag(sb, snap1)) 
-		    || !(snapshot2 = valid_snaptag(sb, snap2))) 
+		err_msg = "invalid snapshot tag";
+		if (!(snapshot1 = valid_snaptag(sb, snap1))
+		    || !(snapshot2 = valid_snaptag(sb, snap2)))
 			goto generate_error;
-		
-		int change_fd;		
-		
+
+		int change_fd;
+
 		err_msg = "unable to get file descriptor for changelist";
-		if ((change_fd = recv_fd(sock)) < 0) 
+		if ((change_fd = recv_fd(sock)) < 0)
 			goto generate_error;
-		
-		trace_on(printf("creating changelist from snap1 %d and snap2 %d\n", snap1, snap2););
+
+		struct change_list *cl;
+
+		trace_on(printf("generating changelist from snapshots %d and %d\n", snap1, snap2););
+		err_msg = "unable to generate changelist";
+		if ((cl = gen_changelist_tree(sb, snapshot1->bit, snapshot2->bit)) == NULL)
+			goto generate_error_close;
+
 		err_msg = "unable to write to changelist file";
 		if (write(change_fd, &(sb->image.chunksize_bits), sizeof(sb->image.chunksize_bits)) < 0)
-			goto generate_error;
-		
-		/* should return something, huh? */
-		gen_changelist_tree(sb, snapshot1->bit, snapshot2->bit, change_fd);
-		
+			goto generate_error_free;
+
+		trace_on(printf("writing "U64FMT" chunk addresses\n", cl->count););
+		err_msg = "unable to write changelist";
+		if (write(change_fd, cl->chunks, cl->count * sizeof(cl->chunks[0])) < 0) /* FIXME: need to use something like diskio */
+			goto generate_error_free;
+
+		free_change_list(cl);
+
 		u64 end_of_stream = -1;
-      		if (write(change_fd, &end_of_stream, sizeof(end_of_stream)) < 0)
+		if (write(change_fd, &end_of_stream, sizeof(end_of_stream)) < 0)
 			goto generate_error;
 
 		close(change_fd);
+
 		outbead(sock, REPLY_GENERATE_CHANGE_LIST, struct { });
 		break;
+
+	generate_error_free:
+		free_change_list(cl);
+
+	generate_error_close:
+		close(change_fd);
 
 	generate_error:
 		trace(printf(err_msg);); /* can't use warn macro */
 		outbead(sock, REPLY_ERROR, struct { });
 		break;
 	}
+	case STREAM_CHANGE_LIST:
+	{
+		int snap1 = ((struct stream_changelist *)message.body)->snap1,
+			snap2 = ((struct stream_changelist *)message.body)->snap2;
+		char const *err_msg;
+
+		/* check that each snapshot is a valid tag */
+		struct snapshot *snapshot1, *snapshot2;
+		err_msg = "invalid snapshot tag";
+		if (!(snapshot1 = valid_snaptag(sb, snap1))
+		    || !(snapshot2 = valid_snaptag(sb, snap2)))
+			goto stream_error;
+
+		struct change_list *cl;
+
+		trace_on(printf("generating changelist from snapshots %d and %d\n", snap1, snap2););
+		err_msg = "unable to generate changelist";
+		if ((cl = gen_changelist_tree(sb, snapshot1->bit, snapshot2->bit)) == NULL)
+			goto stream_error;
+
+		trace_on(printf("sending stream header\n"););
+		outbead(sock, REPLY_STREAM_CHANGE_LIST, struct changelist_stream, cl->count, sb->image.chunksize_bits);
+
+		trace_on(printf("streaming "U64FMT" chunk addresses\n", cl->count););
+		writepipe(sock, cl->chunks, cl->count * sizeof(cl->chunks[0]));
+
+		free_change_list(cl);
+
+		break;
+
+	stream_error:
+		trace(printf(err_msg);); /* can't use warn macro */
+		outbead(sock, REPLY_ERROR, struct { });
+		break;
+	}
 	case SHUTDOWN_SERVER:
 		return -2;
-		
-	default: 
+
+	default:
 	reply_error:
 		outbead(sock, REPLY_ERROR, struct { }); // wrong!!!
 	}
@@ -2629,10 +2688,19 @@ static int incoming(struct superblock *sb, struct client *client)
 	return 0;
 	
  message_too_long:
-	warn("message %x too long (%u bytes)\n", message.head.code, message.head.length);
+	warn("message %x too long (%u bytes) (disconnecting client)\n", message.head.code, message.head.length);
+#ifdef DEBUG_BAD_MESSAGES
+	for (;;) {
+		unsigned int byte;
+
+		if ((err = readpipe(sock, &byte, 1)))
+			return -1;
+		warn("%02x", byte);
+	}
+#endif
 	return -1;
  message_too_short:
-	warn("message %x too short (%u bytes)\n", message.head.code, message.head.length);
+	warn("message %x too short (%u bytes) (disconnecting client)\n", message.head.code, message.head.length);
 	return -1;
  pipe_error:
 	return -1; /* we quietly drop the client if the connect breaks */
