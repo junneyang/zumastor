@@ -13,14 +13,19 @@ binaries =  $(ddraid_binaries) $(ddsnap_binaries) devspam
 
 includes = $(kernel)
 flags = -g -Wall -D_FILE_OFFSET_BITS=64
+#flags = -g -Wall -Wno-parentheses -Wbad-function-cast -Wcast-align -Wwrite-strings -Wstrict-prototypes -Wnested-externs -Wredundant-decls -Wendif-labels -Wcast-qual -D_FILE_OFFSET_BITS=64
 
 all: $(binaries)
+.PHONY: all
 
 xdelta/xdelta3.o:
 	cd xdelta && cc xdelta3.c -c $(flags)
 
 delta.o: delta.c
 	cc delta.c -c $(flags)
+
+ddsnap.common.o: ddsnap.common.c $(deps)
+	cc ddsnap.common.c -c $(flags)
 
 diskio.o: diskio.c $(deps)
 	cc diskio.c -c $(flags)
@@ -40,27 +45,29 @@ ddraidd: ddraid.c diskio.o buffer.o $(ddraid_deps)
 ddraid-agent: ddraid.agent.c $(ddraid_deps)
 	cc ddraid.agent.c $(flags) -I$(includes) -lpthread -o ddraid-agent -lpopt
 
-mkddsnap: ddsnapd.c diskio.o buffer.o $(ddsnap_deps)
-	cc -DCREATE ddsnapd.c $(flags) -I$(includes) diskio.o buffer.o -o mkddsnap -lpopt
+mkddsnap: ddsnapd.c ddsnap.common.o diskio.o buffer.o $(ddsnap_deps)
+	cc -DCREATE ddsnapd.c $(flags) -I$(includes) ddsnap.common.o diskio.o buffer.o -o mkddsnap -lpopt
 
-ddsnapd: ddsnapd.c diskio.o buffer.o daemonize.o $(ddsnap_deps)
-	cc -DSERVER ddsnapd.c $(flags) -I$(includes) diskio.o buffer.o daemonize.o -o ddsnapd -lpopt
+ddsnapd: ddsnapd.c ddsnap.common.o diskio.o buffer.o daemonize.o $(ddsnap_deps)
+	cc -DSERVER ddsnapd.c $(flags) -I$(includes) ddsnap.common.o diskio.o buffer.o daemonize.o -o ddsnapd -lpopt
 
 ddsnap-agent: ddsnap.agent.c daemonize.o $(ddsnap_deps)
 	cc ddsnap.agent.c $(flags) -I$(includes) daemonize.o -o ddsnap-agent -lpopt
 
-ddsnap: ddsnap.c xdelta/xdelta3.o delta.o diskio.o daemonize.o $(ddsnap_deps)
-	cc ddsnap.c $(flags) -I$(includes) xdelta/xdelta3.o delta.o diskio.o daemonize.o -o ddsnap -lpopt -lz
+ddsnap: ddsnap.c ddsnap.common.o xdelta/xdelta3.o delta.o diskio.o daemonize.o $(ddsnap_deps)
+	cc ddsnap.c $(flags) -I$(includes) ddsnap.common.o xdelta/xdelta3.o delta.o diskio.o daemonize.o -o ddsnap -lpopt -lz
 
 devspam: tests/devspam.c trace.h
 	cd tests && cc devspam.c $(flags) -I$(includes) -o ../devspam
 
 clean:
 	rm -f $(binaries) *.o xdelta/*.o a.out
+.PHONY: clean
 
 install: $(binaries)
 	mkdir -p $(instdir) || true
 	cp $(binaries) $(instdir)
+.PHONY: install
 
 kernel:
 	cd ../../.. && make bzImage
@@ -97,6 +104,8 @@ data=/dev/$(data0) /dev/$(data1) /dev/$(data2) /dev/$(data3) /dev/$(data4)
 # README test values
 origindev=/dev/hdb1
 snapstoredev=/dev/hdb2
+#origindev=/dev/sda3
+#snapstoredev=/dev/sda4
 
 ddraid-test: ddraid-test1 ddraid-test2
 
@@ -156,28 +165,58 @@ dd-create:
  
 dd-delete:
 	./ddsnap delete-snap /tmp/server 0
+
  
 origin: 
 	echo 0 $$((2 * $$(egrep $$(echo $(origindev) | sed -e 's@^.*/@@')'$$' /proc/partitions | awk '{print $$3}'))) ddsnap /dev/test-snapstore /dev/test-origin /tmp/control -1 | sudo /sbin/dmsetup create vol
+.PHONY: origin
 
 snap0:
 	sudo ./ddsnap create-snap /tmp/server 0
 	echo 0 $$((2 * $$(egrep $$(echo $(origindev) | sed -e 's@^.*/@@')'$$' /proc/partitions | awk '{print $$3}'))) ddsnap /dev/test-snapstore /dev/test-origin /tmp/control 0 | sudo /sbin/dmsetup create snapshot0
+.PHONY: snap0
 
 snap1:
 	sudo ./ddsnap create-snap /tmp/server 1
 	echo 0 $$((2 * $$(egrep $$(echo $(origindev) | sed -e 's@^.*/@@')'$$' /proc/partitions | awk '{print $$3}'))) ddsnap /dev/test-snapstore /dev/test-origin /tmp/control 1 | sudo /sbin/dmsetup create snapshot1
+.PHONY: snap1
 
 snap2:
 	sudo ./ddsnap create-snap /tmp/server 2
 	echo 0 $$((2 * $$(egrep $$(echo $(origindev) | sed -e 's@^.*/@@')'$$' /proc/partitions | awk '{print $$3}'))) ddsnap /dev/test-snapstore /dev/test-origin /tmp/control 2 | sudo /sbin/dmsetup create snapshot2
+.PHONY: snap2
 
-changelist:
+
+list:
 	sudo ./ddsnap list /tmp/server
-	sudo ./ddsnap create-cl /tmp/server changelist0-1 0 1
+.PHONY: list
 
-delta:
-	sudo ./ddsnap create-delta -r changelist0-1 deltafile0-1 /dev/mapper/snapshot0 /dev/mapper/snapshot1
+
+changelist:	changelist0-1
+.PHONY: changelist
+
+changelist0-1:
+	sudo ./ddsnap create-cl /tmp/server $@ 0 1
+
+changelist0-2:
+	sudo ./ddsnap create-cl /tmp/server $@ 0 2
+
+changelist1-2:
+	sudo ./ddsnap create-cl /tmp/server $@ 1 2
+
+
+delta:	deltafile0-1
+.PHONY: delta
+
+deltafile0-1: changelist0-1
+	sudo ./ddsnap create-delta -r changelist0-1 $@ /dev/mapper/snapshot0 /dev/mapper/snapshot1
+
+deltafile0-2: changelist0-2
+	sudo ./ddsnap create-delta -r changelist0-2 $@ /dev/mapper/snapshot0 /dev/mapper/snapshot2
+
+deltafile1-2: changelist1-2
+	sudo ./ddsnap create-delta -r changelist1-2 $@ /dev/mapper/snapshot1 /dev/mapper/snapshot2
+
 
 ddsnap-test3: 
 #	sudo ./devpoke /dev/mapper/torigin write 2
