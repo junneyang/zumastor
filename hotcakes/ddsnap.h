@@ -8,6 +8,8 @@
 #define u32 unsigned
 #define u64 unsigned long long
 
+#define U64FMT "%llu"
+
 #define le_u32 u32
 #define le_u16 u16
 #define le_u64 u64
@@ -61,4 +63,6 @@ struct server { u16 port; u8 type; u8 address_len; char address[MAX_ADDRESS]; } 
 #ifndef HOST_NAME_MAX
 #define HOST_NAME_MAX 256
 #endif
+
+#define MAX_SNAPSHOTS 64
 
