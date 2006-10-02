@@ -10,7 +10,8 @@ killall ddsnapd
 killall ddsnap-agent
 
 echo "Initializing devices locally and remotely"
-./mkddsnap $SNAPSTORE_DEV $ORIGIN_DEV
+./mkddsnap $SNAPSTORE_DEV $ORIGIN_DEV $META_DEV
 
-./ddsnap-agent ${AGENT_SOCK_NAME}
-./ddsnapd ${SNAPSTORE_DEV} ${ORIGIN_DEV} ${AGENT_SOCK_NAME} ${SERVER_SOCK_NAME}
+ulimit -c unlimited
+./ddsnap-agent $AGENT_SOCK_NAME
+./ddsnapd $SNAPSTORE_DEV $ORIGIN_DEV $META_DEV $AGENT_SOCK_NAME $SERVER_SOCK_NAME 

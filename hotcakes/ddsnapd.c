@@ -1515,8 +1515,9 @@ static void delete_snapshots_from_tree(struct superblock *sb, u64 snapmask)
 		while (path[level].pnext  < node->entries + node->count) {
 			struct buffer *leafbuf = snapread(sb, path[level].pnext++->sector);
 			trace_off(printf("process leaf %Lx\n", leafbuf->sector););
-			delete_snapshots_from_leaf(sb, buffer2leaf(leafbuf), snapmask, -1);
-			brelse_dirty(leafbuf);
+			if(delete_snapshots_from_leaf(sb, buffer2leaf(leafbuf), snapmask, -1))
+				set_buffer_dirty(leafbuf);	
+			brelse(leafbuf);
 		}
 
 		do {
@@ -2569,13 +2570,7 @@ static int incoming(struct superblock *sb, struct client *client)
 		}
 		usecnt += snap_info->usecnt;
 		snap_info->usecnt = usecnt > 0 ? usecnt : 0;
-	skip_set_usecnt:
-		warn("sending set use count msg for snapshot %u", snap);
-		outbead(sock, REPLY_SET_USECOUNT, struct { });
-		break;
 	set_usecnt_error:
-		warn("sending reply error for snapshot %u", snap);
-		outbead(sock, REPLY_ERROR, struct {});
 		break;
 	}
 	case GENERATE_CHANGE_LIST:

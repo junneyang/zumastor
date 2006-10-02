@@ -22,13 +22,18 @@ if [[ $num_snapshots -ge $MAX_SNAPSHOTS ]]
 then
 	# FIXME: check for return code for each command
 	# need to delete a snapshot... oldest one for now?
-	oldest_snapshot=`./${LIST_SNAPSHOT} | grep tag | awk '{printf "%s %s %s %s %s %s\n", $10, $11, $12, $13, $14, $2}' | sort | head -n 1 | awk '{print $6}'`
+	oldest_snapshot=`${DDSNAP_HOME}/${LIST_SNAPSHOT} | grep tag | awk '{printf "%s %s %s %s %s %s\n", $10, $11, $12, $13, $14, $2}' | sort | head -n 1 | awk '{print $6}'`
 	./dd_delete_snap.sh $oldest_snapshot
 	./dd_delete_rsnap.sh $oldest_snapshot
 	new_snapshot=$oldest_snapshot
 fi
 	# check to make sure there are no holes within the number of snapshots
 	# FIXME: just assume no one will be removing snapshots... only this script will do it	
+
+echo "syncing mount drive" 
+cd /homevol
+sync
+cd -
 
 # now we have a new_snapshot to create and then replicate it 
 echo "creating snapshot" 
@@ -39,11 +44,6 @@ if [[ $prev_snapshot -eq -1 ]]
 then
 	prev_snapshot=$(( $MAX_SNAPSHOTS - 1))
 fi
-
-echo "syncing mount drive" 
-cd /homevol
-sync
-cd -
 
 # replicate
 # FIXME: need to check if we can create the damn files... no space left problems will exist :)
