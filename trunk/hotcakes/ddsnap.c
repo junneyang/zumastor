@@ -907,21 +907,6 @@ static int set_usecount(int sock, uint32_t tag_val, const char * op) {
 	if (outbead(sock, SET_USECOUNT, struct snapinfo, tag_val, 0, usecnt) < 0)
 		return eek();
 
-	struct head head;
-	unsigned maxbuf = 500;
-	char buf[maxbuf];
-
-	if (readpipe(sock, &head, sizeof(head)))
-		return eek();
-	assert(head.length < maxbuf); // !!! don't die
-	if (readpipe(sock, buf, head.length))
-		return eek();
-
-	trace_on(printf("reply = %x\n", head.code););
-
-	if (head.code != REPLY_SET_USECOUNT)
-		error("received unexpected code: %.*s", head.length - 4, buf + 4);
-
 	return 0;
 }
 
