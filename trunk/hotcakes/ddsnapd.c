@@ -2563,7 +2563,7 @@ static int incoming(struct superblock *sb, struct client *client)
 		s8 usecnt  = ((struct snapinfo *)message.body)->usecnt;
 		struct snapshot * snap_info;
 		if(snap == -1)
-			goto skip_set_usecnt;
+			goto set_usecnt_error; /* not really an error though */
 		if(!(snap_info = valid_snaptag(sb, snap))) {
 			warn("Snapshot id %u is not a valid snapshot\n", snap);
 			goto set_usecnt_error;
