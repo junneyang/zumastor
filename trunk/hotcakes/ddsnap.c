@@ -55,7 +55,7 @@ struct delta_header {
 struct delta_section_header {
 	u32 magic_num;
 	u64 data_length;
-	u64 start_chunk_addr;
+	u64 section_addr;
 	u64 check_sum;
 	u32 compress;
 	u64 num_of_chunks;
@@ -174,6 +174,18 @@ static int write_changelist(int change_fd, struct change_list const *cl)
 	return 0;
 }
 
+int chunks_in_section(struct change_list *cl, u64 pos, u32 chunk_size) {
+	u64 start_chunkaddr, cur_chunkaddr, num_of_chunks = 1;
+	start_chunkaddr = cl->chunks[pos];
+	cur_chunkaddr = cl->chunks[pos+1];
+
+	while (cur_chunkaddr == start_chunkaddr + num_of_chunks && num_of_chunks <= (MAX_MEM_SIZE / chunk_size)) {
+		num_of_chunks++;
+		cur_chunkaddr = cl->chunks[pos + num_of_chunks];
+	}
+	return num_of_chunks;
+}
+
 static int generate_delta_extents(u32 mode, int level, struct change_list *cl, int deltafile, char const *dev1name, char const *dev2name, int progress) {
 	int snapdev1, snapdev2;
 	unsigned char *section_data1, *section_data2, *delta_data, *comp_delta;
@@ -213,46 +225,43 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 	trace_on(printf("allocating memory\n"););
 
 	struct delta_section_header dsh = { .magic_num = MAGIC_NUM };
-	u64 start_chunkaddr, cur_chunkaddr, chunk_num, num_of_chunks = 0;
+	u64 section_addr, chunk_num, num_of_chunks = 0;
 	u64 delta_size;
         int ret = 0;
 
 	/* Chunk address followed by CHUNK_SIZE bytes of chunk data */
-	for (chunk_num = 0; chunk_num < cl->count; chunk_num++) {
+	for (chunk_num = 0; chunk_num < cl->count;) {
 		if (progress) {
 			printf("\rgenerating chunk "U64FMT"/"U64FMT" ("U64FMT"%%)", chunk_num + 1, cl->count, (chunk_num * 100) / (cl->count - 1));
 			fflush(stdout);
 		}
-		cur_chunkaddr = cl->chunks[chunk_num];
-		
-		if (num_of_chunks == 0) 
-			start_chunkaddr = cur_chunkaddr;
 
-		if (cur_chunkaddr == start_chunkaddr + num_of_chunks && num_of_chunks <= (MAX_MEM_SIZE / chunk_size)) {
-			num_of_chunks++;	
-			if (chunk_num < (cl->count - 1))
-				continue;
-		}
+		section_addr = cl->chunks[chunk_num];
+		section_addr = section_addr << cl->chunksize_bits;
 
-		start_chunkaddr = start_chunkaddr << cl->chunksize_bits;
+		if (chunk_num == (cl->count - 1) ) 
+			num_of_chunks = 1;
+		else
+			num_of_chunks = chunks_in_section(cl, chunk_num, chunk_size);
+
 		section_size = chunk_size * num_of_chunks;
 		delta_size = section_size;
 		comp_size = section_size + 12 + (section_size >> 9);
 
 		section_data1 = (unsigned char *)malloc(section_size);
 		section_data2 = (unsigned char *)malloc(section_size);
-		delta_data  = (unsigned char *)malloc(section_size);
-		comp_delta  = (unsigned char *)malloc(comp_size);
+		delta_data    = (unsigned char *)malloc(section_size);
+		comp_delta    = (unsigned char *)malloc(comp_size);
 
-		trace_off(printf("reading data to calculate "U64FMT"th chunk starting at "U64FMT" to delta\n", num_of_chunks, start_chunkaddr););
+		trace_off(printf("reading data to calculate "U64FMT"th chunk starting at "U64FMT" to delta\n", num_of_chunks, section_addr););
 
 		/* read in and generate the necessary chunk information */
-		if (diskio(snapdev1, section_data1, section_size, start_chunkaddr, 0) < 0) {
-			printf("section_data1 for "U64FMT"th chunk starting at "U64FMT" not read properly from snapdev1.\n", num_of_chunks, start_chunkaddr);
+		if (diskio(snapdev1, section_data1, section_size, section_addr, 0) < 0) {
+			printf("section_data1 for "U64FMT"th chunk starting at "U64FMT" not read properly from snapdev1.\n", num_of_chunks, section_addr);
 			goto out_error;
 		}
-		if (diskio(snapdev2, section_data2, section_size, start_chunkaddr, 0) < 0) {
-			printf("section_data2 for "U64FMT"th chunk starting at "U64FMT" not read properly from snapdev2.\n", num_of_chunks, start_chunkaddr);
+		if (diskio(snapdev2, section_data2, section_size, section_addr, 0) < 0) {
+			printf("section_data2 for "U64FMT"th chunk starting at "U64FMT" not read properly from snapdev2.\n", num_of_chunks, section_addr);
 			goto out_error;
 		}
 
@@ -266,7 +275,7 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 			if (ret == BUFFER_SIZE_ERROR) 
 				memcpy(delta_data, section_data2, section_size);
 			else if (ret < 0) {
-				printf("Delta for "U64FMT"th chunk starting at "U64FMT" was not generated properly.\n", num_of_chunks, start_chunkaddr);
+				printf("Delta for "U64FMT"th chunk starting at "U64FMT" was not generated properly.\n", num_of_chunks, section_addr);
 				goto out_error;
 			}
 			if (mode == TEST && ret != BUFFER_SIZE_ERROR && ret > 0) {
@@ -310,7 +319,7 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 		}
 		
 		dsh.check_sum = checksum((const unsigned char *) section_data2, section_size);
-		dsh.start_chunk_addr = start_chunkaddr;
+		dsh.section_addr = section_addr;
 		dsh.num_of_chunks = num_of_chunks;
 
 		if (comp_size < delta_size) {
@@ -322,7 +331,7 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 		}
 		
 		/* write the chunk header and chunk delta data to the delta file*/
-		trace_off(printf("writing chunk "U64FMT" at "U64FMT" to delta\n", chunk_num, start_chunkaddr););
+		trace_off(printf("writing chunk "U64FMT" at "U64FMT" to delta\n", chunk_num, section_addr););
 		if (write(deltafile, &dsh, sizeof(dsh)) != sizeof(dsh)) { /* FIXME: need something like diskio */
 			printf("delta_section_header was not written properly to deltafile.\n");
 			goto out_error;
@@ -345,8 +354,7 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 			write(deltafile, section_data2, section_size);
                 }
 
-		start_chunkaddr = cur_chunkaddr;
-		num_of_chunks = 1;
+		chunk_num = chunk_num + num_of_chunks;
 
 		/* free memory */
 		free(section_data1);
@@ -578,7 +586,7 @@ static int apply_delta_extents(int deltafile, u32 mode, u32 chunk_size, u64 chun
 
 	struct delta_section_header dsh = { };
 	u64 uncomp_size, section_size;
-	u64 start_chunkaddr, chunk_num;
+	u64 section_addr, chunk_num;
         int c1_chk_sum = 0;
 	int ret = 0;
 
@@ -600,13 +608,13 @@ static int apply_delta_extents(int deltafile, u32 mode, u32 chunk_size, u64 chun
 		section_size = (dsh.num_of_chunks) * chunk_size;
 		uncomp_size = section_size;
 		section_data = (unsigned char *)malloc (section_size);
-		delta_data = (unsigned char *)malloc (section_size + 12 + (section_size >> 9));
-		updated    = (unsigned char *)malloc (section_size);
-		comp_delta = (unsigned char *)malloc (section_size);
+		delta_data   = (unsigned char *)malloc (section_size + 12 + (section_size >> 9));
+		updated      = (unsigned char *)malloc (section_size);
+		comp_delta   = (unsigned char *)malloc (section_size);
 		up_section1  = (char *)malloc (section_size);
 		up_section2  = (char *)malloc (section_size);
 		
-		start_chunkaddr = dsh.start_chunk_addr;
+		section_addr = dsh.section_addr;
 
 		trace_on(printf("data length is %Lu (buffer is %Lu)\n", dsh.data_length, section_size);); errno = 0;
 
@@ -624,8 +632,8 @@ static int apply_delta_extents(int deltafile, u32 mode, u32 chunk_size, u64 chun
 			}
 		}
 
-		trace_on(printf("reading section "U64FMT" data at "U64FMT"\n", chunk_num, start_chunkaddr););
-		if (diskio(snapdev, section_data, section_size, start_chunkaddr, 0) < 0) {
+		trace_on(printf("reading section "U64FMT" data at "U64FMT"\n", chunk_num, section_addr););
+		if (diskio(snapdev, section_data, section_size, section_addr, 0) < 0) {
 			fprintf(stderr, "Snapdev reading of downstream section has failed.\n");
 			close(snapdev);
 			return -1;
@@ -666,7 +674,7 @@ static int apply_delta_extents(int deltafile, u32 mode, u32 chunk_size, u64 chun
 			printf("ret %d\n", ret);
 			
 			if (ret < 0) {
-				printf("Delta for section with start address of "U64FMT" was not applied properly.\n", start_chunkaddr);
+				printf("Delta for section with start address of "U64FMT" was not applied properly.\n", section_addr);
 				close(snapdev);
 				return -1;
 			}
@@ -682,25 +690,25 @@ static int apply_delta_extents(int deltafile, u32 mode, u32 chunk_size, u64 chun
 				c1_chk_sum = checksum((const unsigned char *) section_data, section_size);
 			}
 			if (dsh.check_sum != checksum((const unsigned char *) updated, section_size)) {
-				printf("Check_sum failed for chunk address "U64FMT"\n", start_chunkaddr);
+				printf("Check_sum failed for chunk address "U64FMT"\n", section_addr);
 				if (mode == TEST) {
 					/* sanity check: does the checksum of upstream section1 = checksum of downstream section1? */
-					if (c1_chk_sum != checksum((const unsigned char *)up_section1, section_size)) {
-						printf("check_sum of section1 doesn't match for address "U64FMT"\n", start_chunkaddr);
+					if (c1_chk_sum != checksum((const unsigned char *) up_section1, section_size)) {
+						printf("check_sum of section1 doesn't match for address "U64FMT"\n", section_addr);
 						if (dsh.data_length == section_size)
 							memcpy(updated, delta_data, section_size);
 						else
 							ret = apply_delta_chunk(up_section1, updated, delta_data, section_size, dsh.data_length);
 						
 						if (ret < 0)
-							printf("Delta for chunk address "U64FMT" with upstream section1 was not applied properly.\n", start_chunkaddr);
+							printf("Delta for chunk address "U64FMT" with upstream section1 was not applied properly.\n", section_addr);
 						
 						if (dsh.check_sum != checksum((const unsigned char *) updated, section_size)) {
-							printf("Check_sum of apply delta onto upstream section1 failed for chunk address "U64FMT"\n", start_chunkaddr);
+							printf("Check_sum of apply delta onto upstream section1 failed for chunk address "U64FMT"\n", section_addr);
 							memcpy(updated, up_section2, section_size);
 						}
 					} else {
-						printf("apply delta doesn't work; check_sum of section1 matches for address "U64FMT"\n", start_chunkaddr);
+						printf("apply delta doesn't work; check_sum of section1 matches for address "U64FMT"\n", section_addr);
 						if (memcmp(section_data, up_section1, section_size) != 0)
 							printf("section_data for section1 does not match. \n");
 						else
@@ -714,8 +722,8 @@ static int apply_delta_extents(int deltafile, u32 mode, u32 chunk_size, u64 chun
 			}
                 }
 		
-		if (diskio(snapdev, updated, section_size, start_chunkaddr, 1) < 0) {
-			printf("updated was not written properly at "U64FMT" in snapdev.\n", start_chunkaddr);
+		if (diskio(snapdev, updated, section_size, section_addr, 1) < 0) {
+			printf("updated was not written properly at "U64FMT" in snapdev.\n", section_addr);
 			return -1;
 		}
 
