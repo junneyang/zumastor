@@ -94,6 +94,30 @@ static int create_socket(char const *sockname) {
 	return sock;
 }
 
+static int parse_snapid(char const *snapstr, int *snapid)
+{
+	if (snapstr[0] == '\0')
+		return -1;
+
+	if (strcmp(snapstr, "-1") == 0) {
+		*snapid = -1;
+		return 0;
+	}
+
+	unsigned long num;
+	char *endptr;
+
+	num = strtoul(snapstr, &endptr, 10);
+
+	if (*endptr != '\0')
+		return -1;
+
+	if (num >= MAX_SNAPSHOTS)
+		return -1;
+
+	*snapid = num;
+	return 0;
+}
 
 static struct change_list *read_changelist(int cl_fd)
 {
@@ -1130,6 +1154,7 @@ int main(int argc, char *argv[]) {
 
 	if (argc < 2) {
 		poptPrintHelp(mainCon, stdout, 0);
+		poptFreeContext(mainCon);
 		exit(1);
 	}
 
@@ -1137,23 +1162,33 @@ int main(int argc, char *argv[]) {
 
 	if (strcmp(command, "--help") == 0 || strcmp(command, "-?") == 0) {
 		poptPrintHelp(mainCon, stdout, 0);
+		poptFreeContext(mainCon);
 		exit(1);
 	}
+
+	poptFreeContext(mainCon);
+
 	if (strcmp(command, "--usage") == 0) {
 		mainUsage();
 		exit(1);
 	}
-
-	//poptResetContext(mainCon);
-	poptFreeContext(mainCon);
 
 	if (strcmp(command, "create-snap") == 0) {
 		if (argc != 4) {
 			printf("Usage: %s create-snap <sockname> <snapshot>\n", argv[0]);
 			return 1;
 		}
+
+		int snapid;
+
+		if (parse_snapid(argv[3], &snapid) < 0) {
+			fprintf(stderr, "%s: invalid snapshot id %s\n", argv[0], argv[3]);
+			return 1;
+		}
+
 		int sock = create_socket(argv[2]);
-		int ret = create_snapshot(sock, atoi(argv[3]));
+
+		int ret = create_snapshot(sock, snapid);
 		close(sock);
 		return ret;
 	}
@@ -1162,8 +1197,17 @@ int main(int argc, char *argv[]) {
 			printf("Usage: %s delete-snap <sockname> <snapshot>\n", argv[0]);
 			return 1;
 		}
+
+		int snapid;
+
+		if (parse_snapid(argv[3], &snapid) < 0) {
+			fprintf(stderr, "%s: invalid snapshot id %s\n", argv[0], argv[3]);
+			return 1;
+		}
+
 		int sock = create_socket(argv[2]);
-		int ret = delete_snapshot(sock, atoi(argv[3]));
+
+		int ret = delete_snapshot(sock, snapid);
 		close(sock);
 		return ret;
 	}
@@ -1172,7 +1216,9 @@ int main(int argc, char *argv[]) {
 			printf("Usage: %s list <sockname>\n", argv[0]);
 			return 1;
 		}
+
 		int sock = create_socket(argv[2]);
+
 		int ret = list_snapshots(sock);
 		close(sock);
 		return ret;
@@ -1182,8 +1228,17 @@ int main(int argc, char *argv[]) {
 			printf("usage: %s set-priority <sockname> <snap_tag> <new_priority_value>\n", argv[0]);
 			return 1;
 		}
+
+		int snapid;
+
+		if (parse_snapid(argv[3], &snapid) < 0) {
+			fprintf(stderr, "%s: invalid snapshot id %s\n", argv[0], argv[3]);
+			return 1;
+		}
+
 		int sock = create_socket(argv[2]);
-		int ret = set_priority(sock, atoi(argv[3]), atoi(argv[4]));
+
+		int ret = set_priority(sock, snapid, atoi(argv[4]));
 		close(sock);
 		return ret;
 	}
@@ -1192,8 +1247,17 @@ int main(int argc, char *argv[]) {
 			printf("usage: %s set-usecount <sockname> <snap_tag> <inc|dec>\n", argv[0]);
 			return 1;
 		}
+
+		int snapid;
+
+		if (parse_snapid(argv[3], &snapid) < 0) {
+			fprintf(stderr, "%s: invalid snapshot id %s\n", argv[0], argv[3]);
+			return 1;
+		}
+
 		int sock = create_socket(argv[2]);
-		int ret = set_usecount(sock, atoi(argv[3]), argv[4]);
+
+		int ret = set_usecount(sock, snapid, argv[4]);
 		close(sock);
 		return ret;
 	}
@@ -1202,8 +1266,22 @@ int main(int argc, char *argv[]) {
 			printf("usage: %s create-cl <sockname> <changelist> <snapshot1> <snapshot2>\n", argv[0]);
 			return 1;
 		}
+
+		int snapid1, snapid2;
+
+		if (parse_snapid(argv[4], &snapid1) < 0) {
+			fprintf(stderr, "%s: invalid snapshot id %s\n", argv[0], argv[4]);
+			return 1;
+		}
+
+		if (parse_snapid(argv[5], &snapid2) < 0) {
+			fprintf(stderr, "%s: invalid snapshot id %s\n", argv[0], argv[5]);
+			return 1;
+		}
+
 		int sock = create_socket(argv[2]);
-		int ret = ddsnap_generate_changelist(sock, argv[3], atoi(argv[4]), atoi(argv[5]));
+
+		int ret = ddsnap_generate_changelist(sock, argv[3], snapid1, snapid2);
 		close(sock);
 		return ret;
 	}
@@ -1292,18 +1370,35 @@ int main(int argc, char *argv[]) {
 			port = DEFAULT_REPLICATION_PORT;
 		}
 
+		int snapid1, snapid2, remsnapid;
+
+		if (parse_snapid(argv[3], &snapid1) < 0) {
+			fprintf(stderr, "%s: invalid snapshot id %s\n", argv[0], argv[3]);
+			return 1;
+		}
+
+		if (parse_snapid(argv[4], &snapid2) < 0) {
+			fprintf(stderr, "%s: invalid snapshot id %s\n", argv[0], argv[4]);
+			return 1;
+		}
+
+		if (parse_snapid(argv[7], &remsnapid) < 0) {
+			fprintf(stderr, "%s: invalid snapshot id %s\n", argv[0], argv[7]);
+			return 1;
+		}
+
 		int sock = create_socket(argv[2]);
 
 		int ds_fd = open_socket(hostname, port);
 		if (ds_fd < 0) {
-			printf("Error: unable to connect to downstream server %s port %u\n", hostname, port);
+			fprintf(stderr, "%s: unable to connect to downstream server %s port %u\n", argv[0], hostname, port);
 			return 1;
 		}
 
 		u32 mode = RAW;
 		int level = 0;
 
-		int ret = ddsnap_send_delta(sock, atoi(argv[3]), atoi(argv[4]), argv[5], argv[6], atoi(argv[7]), mode, level, ds_fd);
+		int ret = ddsnap_send_delta(sock, snapid1, snapid2, argv[5], argv[6], remsnapid, mode, level, ds_fd);
 		close(ds_fd);
 		close(sock);
 
@@ -1335,7 +1430,7 @@ int main(int argc, char *argv[]) {
 
 		int sock = bind_socket(hostname, port);
 		if (sock < 0) {
-			printf("Error: unable to bind to %s port %u\n", hostname, port);
+			fprintf(stderr, "%s: unable to bind to %s port %u\n", argv[0], hostname, port);
 			return 1;
 		}
 
