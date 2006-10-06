@@ -203,7 +203,7 @@ int chunks_in_section(struct change_list *cl, u64 pos, u32 chunk_size) {
 	start_chunkaddr = cl->chunks[pos];
 	cur_chunkaddr = cl->chunks[pos+1];
 
-	while (cur_chunkaddr == start_chunkaddr + num_of_chunks && num_of_chunks <= (MAX_MEM_SIZE / chunk_size)) {
+	while (cur_chunkaddr == start_chunkaddr + num_of_chunks && (num_of_chunks < (MAX_MEM_SIZE / chunk_size))) {
 		num_of_chunks++;
 		cur_chunkaddr = cl->chunks[pos + num_of_chunks];
 	}
@@ -243,7 +243,6 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 	printf("level: %d\n", level);
 	printf("chunksize bits: %u\t", cl->chunksize_bits);
 	printf("chunksize: %u\n", chunk_size);
-	printf("comp_size: %Lu\n", comp_size);
 	printf("chunk_count: "U64FMT"\n", cl->count);
 
 	trace_on(printf("allocating memory\n"););
@@ -252,14 +251,10 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 	u64 section_addr, chunk_num, num_of_chunks = 0;
 	u64 delta_size;
         int ret = 0;
+	u64 checksum_delta, checksum_section2;
 
 	/* Chunk address followed by CHUNK_SIZE bytes of chunk data */
 	for (chunk_num = 0; chunk_num < cl->count;) {
-		if (progress) {
-			printf("\rgenerating chunk "U64FMT"/"U64FMT" ("U64FMT"%%)", chunk_num + 1, cl->count, (chunk_num * 100) / (cl->count - 1));
-			fflush(stdout);
-		}
-
 		section_addr = cl->chunks[chunk_num];
 		section_addr = section_addr << cl->chunksize_bits;
 
@@ -268,6 +263,8 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 		else
 			num_of_chunks = chunks_in_section(cl, chunk_num, chunk_size);
 
+
+		printf("num_of_chunks is %Lu \n", num_of_chunks);
 		section_size = chunk_size * num_of_chunks;
 		delta_size = section_size;
 		comp_size = section_size + 12 + (section_size >> 9);
@@ -296,13 +293,17 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 			ret = create_delta_chunk(section_data1, section_data2, delta_data, section_size, (int *)&delta_size);
 
 			/* If delta is larger than chunk_size, we want to just copy over the raw chunk */
-			if (ret == BUFFER_SIZE_ERROR) 
+			if (ret == BUFFER_SIZE_ERROR) {
 				memcpy(delta_data, section_data2, section_size);
+				delta_size = section_size;	
+			}
 			else if (ret < 0) {
 				printf("Delta for "U64FMT"th chunk starting at "U64FMT" was not generated properly.\n", num_of_chunks, section_addr);
 				goto out_error;
 			}
-			if (mode == TEST && ret != BUFFER_SIZE_ERROR && ret > 0) {
+
+			if (mode == TEST && ret != BUFFER_SIZE_ERROR && ret >= 0) {
+		   
 				/* sanity test for delta creation */
 				unsigned char *delta_test = (unsigned char *)malloc (section_size);
 				ret = apply_delta_chunk(section_data1, delta_test, delta_data, section_size, delta_size);
@@ -313,16 +314,27 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 					goto out_error;
 				}
 				
-				if (checksum((const unsigned char *) delta_test, section_size) 
-				    != checksum((const unsigned char *) section_data2, section_size))
-					printf("checksum of delta_test does not match check_sum of section_data2");
+				checksum_delta = checksum((const unsigned char *) delta_test, section_size);
+				checksum_section2 = checksum((const unsigned char *) section_data2, section_size);
+
+				if (chunk_num == 399) {
+					printf("ret of apply_delta is %d \n", ret);
+				}
+
+				if (chunk_num == 2713) {
+					printf("ret of apply_delta is %d \n", ret);
+					printf("checksum_delta is %Lu and checksum_section2 is %Lu \n", checksum_delta, checksum_section2);
+				}
+
+				if (checksum_delta != checksum_section2)
+					printf("checksum of delta_test does not match check_sum of section_data2. \n");
 				
 				if (memcmp(delta_test, section_data2, section_size) != 0) {
-					free(delta_test);
+					/* free(delta_test); */
 					printf("Generated delta does not match section of chunks on disk. \n");
-					goto out_error;
+					/* goto out_error; */
 				}
-				printf("Able to generate delta\n");
+				printf("Able to generate delta");
 				free(delta_test);
 			}
 		}
@@ -379,6 +391,11 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
                 }
 
 		chunk_num = chunk_num + num_of_chunks;
+
+		if (progress) {
+			printf("\rgenerating chunk "U64FMT"/"U64FMT" ("U64FMT"%%)", chunk_num, cl->count, (chunk_num * 100) / cl->count);
+			fflush(stdout);
+		}
 
 		/* free memory */
 		free(section_data1);
@@ -593,6 +610,7 @@ static int ddsnap_send_delta(int serv_fd, int snap1, int snap2, char const *snap
 
 static int apply_delta_extents(int deltafile, u32 mode, u32 chunk_size, u64 chunk_count, char const *devname) {
 	int snapdev;
+	u64 local_check_sum = 0;
 
 	snapdev = open(devname, O_RDWR); /* FIXME: why not O_WRONLY? */
 	if (snapdev < 0) {
@@ -629,8 +647,15 @@ static int apply_delta_extents(int deltafile, u32 mode, u32 chunk_size, u64 chun
 			return -1;
 		}
 
+		if (chunk_num + dsh.num_of_chunks == chunk_count - 1) {
+			printf("last section in file\n");
+		}
+		if (chunk_num + dsh.num_of_chunks == chunk_count) {
+			printf("something is wrong\n");
+		}
+
 		section_size = (dsh.num_of_chunks) * chunk_size;
-		uncomp_size = section_size;
+
 		section_data = (unsigned char *)malloc (section_size);
 		delta_data   = (unsigned char *)malloc (section_size + 12 + (section_size >> 9));
 		updated      = (unsigned char *)malloc (section_size);
@@ -665,7 +690,9 @@ static int apply_delta_extents(int deltafile, u32 mode, u32 chunk_size, u64 chun
 
 		if (dsh.compress == TRUE) {
 			printf("data was compressed \n");
+
 			/* zlib decompression */
+			uncomp_size = section_size + 12 + (section_size >> 9);
 			int comp_ret = uncompress(delta_data, (unsigned long *) &uncomp_size, comp_delta, dsh.data_length);
 			if (comp_ret == Z_MEM_ERROR) {
 				fprintf(stderr, "Not enough buffer memory for decompression.\n");
@@ -688,13 +715,15 @@ static int apply_delta_extents(int deltafile, u32 mode, u32 chunk_size, u64 chun
                 if (mode == RAW) {
 			memcpy(updated, delta_data, section_size);
 		} else {
-			if (uncomp_size == section_size)
+			if (uncomp_size == section_size) {
 				memcpy(updated, delta_data, section_size);
+				printf("uncomp = section size ");
+			}
 			else {
 				ret = apply_delta_chunk(section_data, updated, delta_data, section_size, uncomp_size);
 			}
 			
-			printf("uncomp_size %Lu & dsh.data_length %Lu\n", uncomp_size, dsh.data_length);
+			printf("uncomp_size %Lu, dsh.data_length %Lu & ", uncomp_size, dsh.data_length);
 			printf("ret %d\n", ret);
 			
 			if (ret < 0) {
@@ -713,7 +742,10 @@ static int apply_delta_extents(int deltafile, u32 mode, u32 chunk_size, u64 chun
 				}
 				c1_chk_sum = checksum((const unsigned char *) section_data, section_size);
 			}
-			if (dsh.check_sum != checksum((const unsigned char *) updated, section_size)) {
+			
+			local_check_sum = checksum((const unsigned char *) updated, section_size);
+			if (dsh.check_sum != local_check_sum) {
+				printf("dsh.check_sum = %Lu and local check_sum = %Lu \n", dsh.check_sum, local_check_sum);
 				printf("Check_sum failed for chunk address "U64FMT"\n", section_addr);
 				if (mode == TEST) {
 					/* sanity check: does the checksum of upstream section1 = checksum of downstream section1? */
@@ -733,10 +765,14 @@ static int apply_delta_extents(int deltafile, u32 mode, u32 chunk_size, u64 chun
 						}
 					} else {
 						printf("apply delta doesn't work; check_sum of section1 matches for address "U64FMT"\n", section_addr);
-						if (memcmp(section_data, up_section1, section_size) != 0)
+						if (memcmp(section_data, up_section1, section_size) != 0) {
 							printf("section_data for section1 does not match. \n");
-						else
-							printf("chunk_data for section1 does matche up. \n");
+						}
+						else {
+							printf("chunk_data for section1 does match up. \n");
+							if (memcmp(updated, up_section2, section_size) != 0) 
+								printf("up_section2 != updated. \n");
+						}
 						memcpy(updated, up_section2, section_size);
 					}
 				} else {
