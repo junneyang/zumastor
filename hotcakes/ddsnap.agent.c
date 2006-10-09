@@ -254,6 +254,7 @@ int main(int argc, char *argv[])
 	while ((c = poptGetNextOpt(optCon)) >= 0);
 	if (c < -1) {
 		fprintf(stderr, "%s: %s: %s\n", argv[0], poptBadOption(optCon, POPT_BADOPTION_NOALIAS), poptStrerror(c));
+		poptFreeContext(optCon);
 		return 1;
 	}
 
@@ -261,11 +262,13 @@ int main(int argc, char *argv[])
 	if (sockname == NULL) {
 		fprintf(stderr, "%s: socket name for ddsnap agent must be specified\n", argv[0]);
 		poptPrintUsage(optCon, stderr, 0);
+		poptFreeContext(optCon);
 		return 1;
 	}
 	if (poptPeekArg(optCon) != NULL) {
 		fprintf(stderr, "%s: only one socket name may be specified\n", argv[0]);
 		poptPrintUsage(optCon, stderr, 0);
+		poptFreeContext(optCon);
 		return 1;
 	}
 

@@ -15,16 +15,16 @@ void *malloc_aligned(size_t size, unsigned binalign)
 	return (void *)(p + (-p & (binalign - 1)));
 }
 
-void spam(char *buf, unsigned len, unsigned tag, unsigned block)
+static void spam(char *buf, unsigned len, unsigned tag, unsigned block)
 {
 	int i, j, k, n = len / 16;
 	char *p = buf;
 
-	for(i = 0; i < n; i++) {
+	for (i = 0; i < n; i++) {
 		int spams[3] = { tag, block, i };
 		memcpy(p, "SPAM", 4);
 		p += 4;
-		for(j = 0; j < 3; j++) {
+		for (j = 0; j < 3; j++) {
 			int v = spams[j];
 			for (k = 0; k < 4; k++,v <<= 4) {
 				int d = (v >> 12) & 0xf;
@@ -37,7 +37,7 @@ void spam(char *buf, unsigned len, unsigned tag, unsigned block)
 
 int main(int argc, char *argv[])
 {
-	char *command[] = {
+	char const *command[] = {
 		"read", "write", "randread", "randwrite",
 		"readspam", "writespam", "randreadspam", "randwritespam" };
 	int commands = sizeof(command) / sizeof(command[0]);
