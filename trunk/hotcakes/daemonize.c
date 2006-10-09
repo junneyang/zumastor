@@ -32,15 +32,15 @@ pid_t daemonize(char const *logfile)
 		 * open at this point and they are replaced by freopen */
 
 		if (!logfile)
-		    logfile = "/dev/null";
+			logfile = "/dev/null";
 
 		setvbuf(stdout, NULL, _IONBF, 0);
 		setvbuf(stderr, NULL, _IONBF, 0);
 
 		if (freopen("/dev/null", "r", stdin) == NULL)
-		    error("could not reopen stdin\n");
+			error("could not reopen stdin\n");
 		if (freopen(logfile, "a", stderr) == NULL)
-		    error("could not reopen stderr\n");
+			error("could not reopen stderr\n");
 
 		dup2(fileno(stderr), fileno(stdout));
 
