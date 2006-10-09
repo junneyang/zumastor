@@ -39,7 +39,7 @@
 #define RAW (1 << 1)
 #define TEST (1 << 2)
 
-#define MAX_MEM_SIZE (1 << 20)
+#define MAX_MEM_SIZE (1 << 17)
 
 struct cl_header {
 	char magic[MAGIC_SIZE];
@@ -263,8 +263,6 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 		else
 			num_of_chunks = chunks_in_section(cl, chunk_num, chunk_size);
 
-
-		printf("num_of_chunks is %Lu \n", num_of_chunks);
 		section_size = chunk_size * num_of_chunks;
 		delta_size = section_size;
 		comp_size = section_size + 12 + (section_size >> 9);
@@ -317,22 +315,17 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 				checksum_delta = checksum((const unsigned char *) delta_test, section_size);
 				checksum_section2 = checksum((const unsigned char *) section_data2, section_size);
 
-				if (chunk_num == 399) {
-					printf("ret of apply_delta is %d \n", ret);
-				}
-
-				if (chunk_num == 2713) {
+				if (checksum_delta != checksum_section2) {
+					printf("section_size is %Lu \n", section_size);
+					printf("checksum of delta_test does not match check_sum of section_data2. \n");
 					printf("ret of apply_delta is %d \n", ret);
 					printf("checksum_delta is %Lu and checksum_section2 is %Lu \n", checksum_delta, checksum_section2);
 				}
-
-				if (checksum_delta != checksum_section2)
-					printf("checksum of delta_test does not match check_sum of section_data2. \n");
 				
 				if (memcmp(delta_test, section_data2, section_size) != 0) {
-					/* free(delta_test); */
+					free(delta_test);
 					printf("Generated delta does not match section of chunks on disk. \n");
-					/* goto out_error; */
+					goto out_error; 
 				}
 				printf("Able to generate delta");
 				free(delta_test);
@@ -393,7 +386,7 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 		chunk_num = chunk_num + num_of_chunks;
 
 		if (progress) {
-			printf("\rgenerating chunk "U64FMT"/"U64FMT" ("U64FMT"%%)", chunk_num, cl->count, (chunk_num * 100) / cl->count);
+			printf("\rgenerating chunk "U64FMT"/"U64FMT" ("U64FMT"%%) \n", chunk_num, cl->count, (chunk_num * 100) / cl->count);
 			fflush(stdout);
 		}
 
