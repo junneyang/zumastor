@@ -41,6 +41,7 @@
 #define BUSHY
 
 #define SECTORS_PER_BLOCK 7
+#define JOURNAL_SIZE 100
 
 /*
 Todo:
@@ -834,7 +835,7 @@ static void init_allocation(struct superblock *sb)
 	sb->metadata->last_alloc = sb->snapdata->last_alloc = 0;
 	sb->image.journal_base = (meta_bitmap_base_chunk + meta_bitmap_chunks + (meta_flag ? snap_bitmap_chunks : 0)) << sb->sectors_per_chunk_bits;
 
-	if(meta_flag) 
+	if (meta_flag) 
 		warn("metadata store size: %Lu chunks (%Lu sectors)", meta_chunks, meta_chunks << sb->sectors_per_chunk_bits);
 	warn("snapshot store size: %Lu chunks (%Lu sectors)", chunks, chunks << sb->sectors_per_chunk_bits);
 	printf("Initializing %u bitmap blocks... ", bitmaps);
@@ -942,8 +943,8 @@ static const struct snapshot * find_snapshot_to_delete(const struct snapshot * s
 	const struct snapshot * snap_cand = NULL;
 	int i, min_priority = 128; /* that's max prio plus one */
 
-	for(i = snapshots - 1; i >= 0; i--)
-		if(!snaplist[i].usecnt && snaplist[i].prio <= min_priority) {
+	for (i = snapshots - 1; i >= 0; i--)
+		if (!snaplist[i].usecnt && snaplist[i].prio <= min_priority) {
 			min_priority = snaplist[i].prio;
 			snap_cand = &(snaplist[i]);
 		}
@@ -963,7 +964,7 @@ static chunk_t alloc_chunk(struct superblock *sb)
 		}
 		const struct snapshot * cand_delete = find_snapshot_to_delete(sb->image.snaplist, sb->image.snapshots);
 		err_msg = "unable to find a snapshot candidate to remove. Failing I/O.";
-		if(!cand_delete)
+		if (!cand_delete)
 			goto unable_to_delete; /* no snapshot to delete */
 		warn("snapshot store full, releasing snapshot %i", cand_delete->tag);
 		err_msg = "unable to release snapshot";
@@ -1446,7 +1447,7 @@ static void check_leaf(struct eleaf *leaf, u64 snapmask)
                // printf("@%i ", leaf->map[i].offset);
                for (p = emap(leaf, i); p < emap(leaf, i+1); p++) {
                  trace(printf("%Lx/%08llx%s", p->chunk, p->share, p+1 < emap(leaf, i+1)? ",": " "););
-                       if(p->share & snapmask)
+                       if (p->share & snapmask)
                          printf("Leaf bitmap contains %016llx some snapshots in snapmask %016llx\n", p->share, snapmask);
                }
 	}
@@ -1515,9 +1516,13 @@ static void delete_snapshots_from_tree(struct superblock *sb, u64 snapmask)
 		while (path[level].pnext  < node->entries + node->count) {
 			struct buffer *leafbuf = snapread(sb, path[level].pnext++->sector);
 			trace_off(printf("process leaf %Lx\n", leafbuf->sector););
-			if(delete_snapshots_from_leaf(sb, buffer2leaf(leafbuf), snapmask, -1))
+			if (delete_snapshots_from_leaf(sb, buffer2leaf(leafbuf), snapmask, -1))
 				set_buffer_dirty(leafbuf);	
 			brelse(leafbuf);
+			if (dirty_buffer_count >= (JOURNAL_SIZE - 1)) { 
+				commit_transaction(sb);
+				set_sb_dirty(sb);
+			}
 		}
 
 		do {
@@ -2121,10 +2126,7 @@ static int init_snapstore(struct superblock *sb)
 		error("Error %i: %s determining origin volume size", errno, strerror(-errno));
 	sb->image.orgchunks = size >> sb->image.chunksize_bits;
 	
-	sb->image.journal_size = 100;
-#ifdef TEST_JOURNAL
-	sb->image.journal_size = 5;
-#endif
+	sb->image.journal_size = JOURNAL_SIZE;
 	sb->image.journal_next = 0;
 	sb->image.sequence = sb->image.journal_size;
 	init_allocation(sb);
@@ -2135,7 +2137,7 @@ static int init_snapstore(struct superblock *sb)
 		struct commit_block *commit = (struct commit_block *)buffer->data;
 		*commit = (struct commit_block){ .magic = JMAGIC, .sequence = i };
 #ifdef TEST_JOURNAL
-		commit->sequence = (i + 3) % 5;
+		commit->sequence = (i + 3) % JOURNAL_SIZE;
 #endif
 		commit->checksum = -checksum_block(sb, (void *)commit);
 		brelse_dirty(buffer);
@@ -2481,7 +2483,7 @@ static int incoming(struct superblock *sb, struct client *client)
 		
 	case CREATE_SNAPSHOT:
 	{
-		if(create_snapshot(sb, ((struct create_snapshot *)message.body)->snap) < 0)
+		if (create_snapshot(sb, ((struct create_snapshot *)message.body)->snap) < 0)
 			goto reply_error;
 		save_state(sb);
 		outbead(sock, REPLY_CREATE_SNAPSHOT, struct { });
@@ -2489,7 +2491,7 @@ static int incoming(struct superblock *sb, struct client *client)
 	}
 	case DELETE_SNAPSHOT:
 	{
-		if(delete_snapshot(sb, ((struct create_snapshot *)message.body)->snap) < 0)
+		if (delete_snapshot(sb, ((struct create_snapshot *)message.body)->snap) < 0)
 			goto reply_error;
 		save_state(sb);
 		outbead(sock, REPLY_DELETE_SNAPSHOT, struct { });
@@ -2543,9 +2545,9 @@ static int incoming(struct superblock *sb, struct client *client)
 		u32 snap = ((struct snapinfo *)message.body)->snap; /* FIXME: u64 in struct, s32 elsewhere */
 		s8 prio  = ((struct snapinfo *)message.body)->prio;
 		struct snapshot * snap_info;
-		if(snap == -1)
+		if (snap == -1)
 			goto skip_set_prio;
-		if(!(snap_info = valid_snaptag(sb, snap))) {
+		if (!(snap_info = valid_snaptag(sb, snap))) {
 			warn("Snapshot id %u is not a valid snapshot\n", snap);
 			goto set_prio_error;
 		}
@@ -2562,9 +2564,9 @@ static int incoming(struct superblock *sb, struct client *client)
 		u32 snap = ((struct snapinfo *)message.body)->snap; /* FIXME: u64 in struct, s32 elsewhere */
 		s8 usecnt  = ((struct snapinfo *)message.body)->usecnt;
 		struct snapshot * snap_info;
-		if(snap == -1)
+		if (snap == -1)
 			goto set_usecnt_error; /* not really an error though */
-		if(!(snap_info = valid_snaptag(sb, snap))) {
+		if (!(snap_info = valid_snaptag(sb, snap))) {
 			warn("Snapshot id %u is not a valid snapshot\n", snap);
 			goto set_usecnt_error;
 		}
