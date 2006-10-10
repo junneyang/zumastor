@@ -12,7 +12,7 @@ struct buffer
 {
 	struct buffer *hashlist;
 	struct list_head dirty_list;
-	struct list_head lru_list;
+	struct list_head list; /* used for LRU list and the free list */
 	unsigned count; // should be atomic_t
 	unsigned flags;
 	unsigned size;
@@ -23,9 +23,6 @@ struct buffer
 
 struct list_head dirty_buffers;
 extern unsigned dirty_buffer_count;
-
-struct list_head lru_buffers;
-extern unsigned buffer_count;
 
 void show_dirty_buffers(void);
 void set_buffer_dirty(struct buffer *buffer);

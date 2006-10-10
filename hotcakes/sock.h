@@ -81,7 +81,7 @@ static inline int open_socket(char const *name, unsigned port)
  */
 static inline int send_fd(int sock, int fd)
 {
-	char bogus[]="fark";
+	char bogus[]="far";
 	char payload[CMSG_SPACE(sizeof(int))];
 	struct msghdr msg = {
 		.msg_control = payload,
