@@ -39,7 +39,7 @@
 #define RAW (1 << 1)
 #define TEST (1 << 2)
 
-#define MAX_MEM_SIZE (1 << 16)
+#define MAX_MEM_SIZE (1 << 20)
 
 struct cl_header {
 	char magic[MAGIC_SIZE];
@@ -52,10 +52,10 @@ struct delta_header {
 	u32 mode;
 };
 
-struct delta_section_header {
+struct delta_extent_header {
 	u32 magic_num;
 	u64 data_length;
-	u64 section_addr;
+	u64 extent_addr;
 	u64 check_sum;
 	u32 compress;
 	u64 num_of_chunks;
@@ -198,7 +198,7 @@ static int write_changelist(int change_fd, struct change_list const *cl)
 	return 0;
 }
 
-int chunks_in_section(struct change_list *cl, u64 pos, u32 chunk_size) {
+int chunks_in_extent(struct change_list *cl, u64 pos, u32 chunk_size) {
 	u64 start_chunkaddr, cur_chunkaddr, num_of_chunks = 1;
 	start_chunkaddr = cl->chunks[pos];
 	cur_chunkaddr = cl->chunks[pos+1];
@@ -212,8 +212,8 @@ int chunks_in_section(struct change_list *cl, u64 pos, u32 chunk_size) {
 
 static int generate_delta_extents(u32 mode, int level, struct change_list *cl, int deltafile, char const *dev1name, char const *dev2name, int progress) {
 	int snapdev1, snapdev2;
-	unsigned char *section_data1, *section_data2, *delta_data, *comp_delta;
-	u64 comp_size, section_size;
+	unsigned char *extent_data1, *extent_data2, *delta_data, *comp_delta;
+	u64 comp_size, extent_size;
 
 	snapdev1 = open(dev1name, O_RDONLY);
 	if (snapdev1 < 0) {
@@ -247,90 +247,78 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 
 	trace_on(printf("allocating memory\n"););
 
-	struct delta_section_header dsh = { .magic_num = MAGIC_NUM };
-	u64 section_addr, chunk_num, num_of_chunks = 0;
+	struct delta_extent_header deh = { .magic_num = MAGIC_NUM };
+	u64 extent_addr, chunk_num, num_of_chunks = 0;
 	u64 delta_size;
         int ret = 0;
 
 	/* Chunk address followed by CHUNK_SIZE bytes of chunk data */
 	for (chunk_num = 0; chunk_num < cl->count;) {
-		section_addr = cl->chunks[chunk_num];
-		section_addr = section_addr << cl->chunksize_bits;
+
+		extent_addr = cl->chunks[chunk_num];
+		extent_addr = extent_addr << cl->chunksize_bits;
 
 		if (chunk_num == (cl->count - 1) ) 
 			num_of_chunks = 1;
 		else
-			num_of_chunks = chunks_in_section(cl, chunk_num, chunk_size);
+			num_of_chunks = chunks_in_extent(cl, chunk_num, chunk_size);
 
-		section_size = chunk_size * num_of_chunks;
-		delta_size = section_size;
-		comp_size = section_size + 12 + (section_size >> 9);
+		extent_size = chunk_size * num_of_chunks;
+		delta_size = extent_size;
+		comp_size = extent_size + 12 + (extent_size >> 9);
 
-		section_data1 = (unsigned char *)malloc(section_size);
-		section_data2 = (unsigned char *)malloc(section_size);
-		delta_data    = (unsigned char *)malloc(section_size);
+		extent_data1 = (unsigned char *)malloc(extent_size);
+		extent_data2 = (unsigned char *)malloc(extent_size);
+		delta_data    = (unsigned char *)malloc(extent_size);
 		comp_delta    = (unsigned char *)malloc(comp_size);
 
-		trace_off(printf("reading data to calculate "U64FMT"th chunk starting at "U64FMT" to delta\n", num_of_chunks, section_addr););
+		trace_off(printf("\nReading data to calculate "U64FMT"th chunk starting at "U64FMT" to delta\n", num_of_chunks, extent_addr););
 
 		/* read in and generate the necessary chunk information */
-		if (diskio(snapdev1, section_data1, section_size, section_addr, 0) < 0) {
-			printf("section_data1 for "U64FMT"th chunk starting at "U64FMT" not read properly from snapdev1.\n", num_of_chunks, section_addr);
+		if (diskio(snapdev1, extent_data1, extent_size, extent_addr, 0) < 0) {
+			printf("\nExtent_data1 for "U64FMT"th chunk starting at "U64FMT" not read properly from snapdev1.\n", num_of_chunks, extent_addr);
 			goto out_error;
 		}
-		if (diskio(snapdev2, section_data2, section_size, section_addr, 0) < 0) {
-			printf("section_data2 for "U64FMT"th chunk starting at "U64FMT" not read properly from snapdev2.\n", num_of_chunks, section_addr);
+		if (diskio(snapdev2, extent_data2, extent_size, extent_addr, 0) < 0) {
+			printf("\nExtent_data2 for "U64FMT"th chunk starting at "U64FMT" not read properly from snapdev2.\n", num_of_chunks, extent_addr);
 			goto out_error;
 		}
 
 		/* 3 different modes, raw (raw snapshot2 chunk), xdelta (xdelta), test (xdelta, raw snapshot1 chunk & raw snapshot2 chunk) */
 		if (mode == RAW) 
-			memcpy(delta_data, section_data2, section_size);
+			memcpy(delta_data, extent_data2, extent_size);		
 		else {
-			ret = create_delta_chunk(section_data1, section_data2, delta_data, section_size, (int *)&delta_size);
+			ret = create_delta_chunk(extent_data1, extent_data2, delta_data, extent_size, (int *)&delta_size);
 
 			/* If delta is larger than chunk_size, we want to just copy over the raw chunk */
 			if (ret == BUFFER_SIZE_ERROR) {
-				memcpy(delta_data, section_data2, section_size);
-				delta_size = section_size;	
-			}
-			else if (ret < 0) {
-				printf("Delta for "U64FMT"th chunk starting at "U64FMT" was not generated properly.\n", num_of_chunks, section_addr);
+				memcpy(delta_data, extent_data2, extent_size);
+				delta_size = extent_size;	
+			} else if (ret < 0) {
+				printf("\nDelta for "U64FMT"th chunk starting at "U64FMT" was not generated properly.\n", num_of_chunks, extent_addr);
 				goto out_error;
 			}
-
 			if (ret >= 0) {
-		   
 				/* sanity test for delta creation */
-				unsigned char *delta_test = (unsigned char *)malloc (section_size);
-				ret = apply_delta_chunk(section_data1, delta_test, delta_data, section_size, delta_size);
+				unsigned char *delta_test = (unsigned char *)malloc (extent_size);
+				ret = apply_delta_chunk(extent_data1, delta_test, delta_data, extent_size, delta_size);
 
-				if (ret != section_size) {
+				if (ret != extent_size) {
 					free(delta_test);
-					printf("Unable to create delta.\n");
+					printf("\nUnable to create delta.\n");
 					goto out_error;
 				}
-
-				u64 checksum_delta, checksum_section2;				
-				checksum_delta = checksum((const unsigned char *) delta_test, section_size);
-				checksum_section2 = checksum((const unsigned char *) section_data2, section_size);
 				
-				if (chunk_num == 258) 
-					printf("\nchecksum_delta is %Lu and checksum_section2 is %Lu \n", checksum_delta, checksum_section2);	
-
-//				if (checksum_delta != checksum_section2) {
-//					printf("\nsection_size is %Lu \n", section_size);
-//					printf("checksum of delta_test does not match check_sum of section_data2. \n");
-//					printf("ret of apply_delta is %d \n", ret);
-//					printf("checksum_delta is %Lu and checksum_section2 is %Lu \n", checksum_delta, checksum_section2);
-//				}
+//				if (checksum((const unsigned char *) delta_test, extent_size) 
+//				    != checksum((const unsigned char *) extent_data2, extent_size))
+//					printf("checksum of delta_test does not match check_sum of extent_data2");
 				
-				if (memcmp(delta_test, section_data2, section_size) != 0) {
-					free(delta_test);
-					printf("\nGenerated delta does not match section of chunks on disk. \n");
-					goto out_error; 
+				if (memcmp(delta_test, extent_data2, extent_size) != 0) {
+					trace_off(printf("\nGenerated delta does not match extent on disk. \n"););
+					memcpy(delta_data, extent_data2, extent_size);
+					delta_size = extent_size;
 				}
-//				printf("Able to generate delta");
+				trace_off(printf("\nAble to generate delta\n"););
 				free(delta_test);
 			}
 		}
@@ -338,52 +326,52 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 		/* zlib compression */
 		int comp_ret = compress2(comp_delta, (unsigned long *) &comp_size, delta_data, delta_size, level);
 		if (comp_ret == Z_MEM_ERROR) {
-			printf("Not enough buffer memory for compression.\n");
+			printf("\nNot enough buffer memory for compression.\n");
 			goto out_error;
 		}
 		if (comp_ret == Z_BUF_ERROR) {
-			printf("Not enough room in the output buffer for compression.\n");
+			printf("\nNot enough room in the output buffer for compression.\n");
 			goto out_error;
 		}
 		if (comp_ret == Z_STREAM_ERROR) {
-			printf("Parameter is invalid: level=%d delta_size=%Lu\n", level, delta_size);
+			printf("\nParameter is invalid: level=%d delta_size=%Lu\n", level, delta_size);
 			goto out_error;
 		}
 		
-		dsh.check_sum = checksum((const unsigned char *) section_data2, section_size);
-		dsh.section_addr = section_addr;
-		dsh.num_of_chunks = num_of_chunks;
+		deh.check_sum = checksum((const unsigned char *) extent_data2, extent_size);
+		deh.extent_addr = extent_addr;
+		deh.num_of_chunks = num_of_chunks;
 
 		if (comp_size < delta_size) {
-			dsh.compress = TRUE;
-			dsh.data_length = comp_size;
+			deh.compress = TRUE;
+			deh.data_length = comp_size;
 		} else {
-			dsh.compress = FALSE;
-			dsh.data_length = delta_size;
+			deh.compress = FALSE;
+			deh.data_length = delta_size;
 		}
 		
 		/* write the chunk header and chunk delta data to the delta file*/
-		trace_off(printf("writing chunk "U64FMT" at "U64FMT" to delta\n", chunk_num, section_addr););
-		if (write(deltafile, &dsh, sizeof(dsh)) != sizeof(dsh)) { /* FIXME: need something like diskio */
-			printf("delta_section_header was not written properly to deltafile.\n");
+		trace_off(printf("Writing chunk "U64FMT" at "U64FMT" to delta\n", chunk_num, extent_addr););
+		if (write(deltafile, &deh, sizeof(deh)) != sizeof(deh)) { /* FIXME: need something like diskio */
+			printf("\nDelta_extent_header was not written properly to deltafile.\n");
 			goto out_error;
 		}
 		
-		if (dsh.compress == TRUE) {
+		if (deh.compress == TRUE) {
 			if (write(deltafile, comp_delta, comp_size) != comp_size) {
-				printf("comp_delta was not written properly to deltafile.\n");
+				printf("\nComp_delta was not written properly to deltafile.\n");
 				goto out_error;
 			}
 		} else {
 			if (write(deltafile, delta_data, delta_size) != delta_size) {
-				printf("delta_data was not written properly to deltafile.\n");
+				printf("\nDelta_data was not written properly to deltafile.\n");
 				goto out_error;
 			}
 		}
 		
                 if (mode == TEST) {
-			write(deltafile, section_data1, section_size);
-			write(deltafile, section_data2, section_size);
+			write(deltafile, extent_data1, extent_size);
+			write(deltafile, extent_data2, extent_size);
                 }
 
 		chunk_num = chunk_num + num_of_chunks;
@@ -394,8 +382,8 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 		}
 
 		/* free memory */
-		free(section_data1);
-		free(section_data2);
+		free(extent_data1);
+		free(extent_data2);
 		free(delta_data);
 		free(comp_delta);
 
@@ -604,9 +592,8 @@ static int ddsnap_send_delta(int serv_fd, int snap1, int snap2, char const *snap
 	return 0;
 }
 
-static int apply_delta_extents(int deltafile, u32 mode, u32 chunk_size, u64 chunk_count, char const *devname) {
+static int apply_delta_extents(int deltafile, u32 mode, u32 chunk_size, u64 chunk_count, char const *devname, int progress) {
 	int snapdev;
-	u64 local_check_sum = 0;
 
 	snapdev = open(devname, O_RDWR); /* FIXME: why not O_WRONLY? */
 	if (snapdev < 0) {
@@ -615,156 +602,143 @@ static int apply_delta_extents(int deltafile, u32 mode, u32 chunk_size, u64 chun
 		return err;
 	}
 
-	unsigned char *section_data, *delta_data, *updated, *comp_delta;
-        char *up_section1, *up_section2;
+	unsigned char *extent_data, *delta_data, *updated, *comp_delta;
+        char *up_extent1, *up_extent2;
 
         printf("device: %s\n", devname);
         printf("mode: %u\n", mode);
         printf("chunk_count: "U64FMT"\n", chunk_count);
 
-	struct delta_section_header dsh = { };
-	u64 uncomp_size, section_size;
-	u64 section_addr, chunk_num;
+	struct delta_extent_header deh = { };
+	u64 uncomp_size, extent_size;
+	u64 extent_addr, chunk_num;
         int c1_chk_sum = 0;
 	int ret = 0;
 
 	for (chunk_num = 0; chunk_num < chunk_count;) {
 
 		trace_off(printf("reading chunk "U64FMT" header\n", chunk_num););
-		if (read(deltafile, &dsh, sizeof(dsh)) != sizeof(dsh)) { /* FIXME: need something like diskio */
-			fprintf(stderr, "Error reading section "U64FMT", expected "U64FMT" chunks.\n", chunk_num, chunk_count);
+		if (read(deltafile, &deh, sizeof(deh)) != sizeof(deh)) { /* FIXME: need something like diskio */
+			fprintf(stderr, "Error reading extent "U64FMT", expected "U64FMT" chunks.\n", chunk_num, chunk_count);
 			close(snapdev);
 			return -2; /* FIXME: use named error */
 		}
 
-		if (dsh.magic_num != MAGIC_NUM) {
-			fprintf(stderr, "Not a proper delta file (magic_num doesn't match).\n");
+		if (deh.magic_num != MAGIC_NUM) {
+			fprintf(stderr, "\nNot a proper delta file (magic_num doesn't match).\n");
 			close(snapdev);
 			return -1;
-		}		
+		}
 
-		section_size = (dsh.num_of_chunks) * chunk_size;
-
-		section_data = (unsigned char *)malloc (section_size);
-		delta_data   = (unsigned char *)malloc (section_size + 12 + (section_size >> 9));
-		updated      = (unsigned char *)malloc (section_size);
-		comp_delta   = (unsigned char *)malloc (section_size);
-		up_section1  = (char *)malloc (section_size);
-		up_section2  = (char *)malloc (section_size);
+		extent_size = (deh.num_of_chunks) * chunk_size;
+		uncomp_size = extent_size;
+		extent_data = (unsigned char *)malloc (extent_size);
+		delta_data   = (unsigned char *)malloc (extent_size + 12 + (extent_size >> 9));
+		updated      = (unsigned char *)malloc (extent_size);
+		comp_delta   = (unsigned char *)malloc (extent_size);
+		up_extent1  = (char *)malloc (extent_size);
+		up_extent2  = (char *)malloc (extent_size);
 		
-		section_addr = dsh.section_addr;
+		extent_addr = deh.extent_addr;
 
-		trace_off(printf("data length is %Lu (buffer is %Lu)\n", dsh.data_length, section_size);); errno = 0;
+		trace_off(printf("data length is %Lu (buffer is %Lu)\n", deh.data_length, extent_size);); errno = 0;
 
-		if (dsh.compress == TRUE) {
-			if (read(deltafile, comp_delta, dsh.data_length) != dsh.data_length) { /* FIXME: need something like diskio */
-				fprintf(stderr, "Could not properly read comp_delta from deltafile: %s.\n", strerror(errno));
+		if (deh.compress == TRUE) {
+			if (read(deltafile, comp_delta, deh.data_length) != deh.data_length) { /* FIXME: need something like diskio */
+				fprintf(stderr, "\nCould not properly read comp_delta from deltafile: %s.\n", strerror(errno));
 				close(snapdev);
 				return -1;
 			}
 		} else {
-			if (read(deltafile, delta_data, dsh.data_length) != dsh.data_length) { /* FIXME: need something like diskio */
-				fprintf(stderr, "Could not properly read delta_data from deltafile: %s.\n", strerror(errno));
+			if (read(deltafile, delta_data, deh.data_length) != deh.data_length) { /* FIXME: need something like diskio */
+				fprintf(stderr, "\nCould not properly read delta_data from deltafile: %s.\n", strerror(errno));
 				close(snapdev);
 				return -1;
 			}
 		}
 
-		trace_off(printf("reading section "U64FMT" data at "U64FMT"\n", chunk_num, section_addr););
-		if (diskio(snapdev, section_data, section_size, section_addr, 0) < 0) {
-			fprintf(stderr, "Snapdev reading of downstream section has failed.\n");
+		trace_off(printf("reading extent "U64FMT" data at "U64FMT"\n", chunk_num, extent_addr););
+		if (diskio(snapdev, extent_data, extent_size, extent_addr, 0) < 0) {
+			fprintf(stderr, "\nSnapdev reading of downstream extent has failed.\n");
 			close(snapdev);
 			return -1;
 		}
 
-		if (dsh.compress == TRUE) {
+		if (deh.compress == TRUE) {
 			trace_off(printf("data was compressed \n"););
-
 			/* zlib decompression */
-			uncomp_size = section_size + 12 + (section_size >> 9);
-			int comp_ret = uncompress(delta_data, (unsigned long *) &uncomp_size, comp_delta, dsh.data_length);
+			int comp_ret = uncompress(delta_data, (unsigned long *) &uncomp_size, comp_delta, deh.data_length);
 			if (comp_ret == Z_MEM_ERROR) {
-				fprintf(stderr, "Not enough buffer memory for decompression.\n");
+				fprintf(stderr, "\nNot enough buffer memory for decompression.\n");
 				close(snapdev);
 				return -1;
 			}
 			if (comp_ret == Z_BUF_ERROR) {
-				fprintf(stderr, "Not enough room in the output buffer for decompression.\n");
+				fprintf(stderr, "\nNot enough room in the output buffer for decompression.\n");
 				close(snapdev);
 				return -1;
 			}
 			if (comp_ret == Z_DATA_ERROR) {
-				fprintf(stderr, "The input data was corrupted for decompression.\n");
+				fprintf(stderr, "\nThe input data was corrupted for decompression.\n");
 				close(snapdev);
 				return -1;
 			}
 		} else
-			uncomp_size = dsh.data_length;
+			uncomp_size = deh.data_length;
 
-                if (mode == RAW) {
-			memcpy(updated, delta_data, section_size);
-		} else {
-			if (uncomp_size == section_size) 
-				memcpy(updated, delta_data, section_size);
-
+                if (mode == RAW) 
+			memcpy(updated, delta_data, extent_size);
+		else {
+			if (uncomp_size == extent_size)
+				memcpy(updated, delta_data, extent_size);
 			else 
-				ret = apply_delta_chunk(section_data, updated, delta_data, section_size, uncomp_size);
+				ret = apply_delta_chunk(extent_data, updated, delta_data, extent_size, uncomp_size);
 			
-			
-			trace_off(printf("uncomp_size %Lu, dsh.data_length %Lu & ", uncomp_size, dsh.data_length););
+			trace_off(printf("uncomp_size %Lu & deh.data_length %Lu\n", uncomp_size, deh.data_length););
 			trace_off(printf("ret %d\n", ret););
 			
 			if (ret < 0) {
-				printf("Delta for section with start address of "U64FMT" was not applied properly.\n", section_addr);
+				printf("\nDelta for extent with start address of "U64FMT" was not applied properly.\n", extent_addr);
 				close(snapdev);
 				return -1;
 			}
 			if (mode == TEST) {
-				if (read(deltafile, up_section1, section_size) != section_size) {
-					printf("up_section1 not read properly from deltafile. \n");
+				if (read(deltafile, up_extent1, extent_size) != extent_size) {
+					printf("\nUp_extent1 not read properly from deltafile. \n");
 					return -1;
 				}
-				if (read(deltafile, up_section2, section_size) != section_size) {
-					printf("up_section2 not read properly from deltafile. \n");
+				if (read(deltafile, up_extent2, extent_size) != extent_size) {
+					printf("\nUp_extent2 not read properly from deltafile. \n");
 					return -1;
 				}
-				c1_chk_sum = checksum((const unsigned char *) section_data, section_size);
+				c1_chk_sum = checksum((const unsigned char *) extent_data, extent_size);
 			}
-			
-			local_check_sum = checksum((const unsigned char *) updated, section_size);
-			if (dsh.check_sum != local_check_sum) {
-				printf("dsh.check_sum = %Lu and local check_sum = %Lu \n", dsh.check_sum, local_check_sum);
-				printf("Check_sum failed for chunk address "U64FMT"\n", section_addr);
+			if (deh.check_sum != checksum((const unsigned char *) updated, extent_size)) {
+				printf("Check_sum failed for chunk address "U64FMT"\n", extent_addr);
 				if (mode == TEST) {
-					/* sanity check: does the checksum of upstream section1 = checksum of downstream section1? */
-					if (c1_chk_sum != checksum((const unsigned char *) up_section1, section_size)) {
-						printf("check_sum of section1 doesn't match for address "U64FMT"\n", section_addr);
-						if (dsh.data_length == section_size)
-							memcpy(updated, delta_data, section_size);
+					/* sanity check: does the checksum of upstream extent1 = checksum of downstream extent1? */
+					if (c1_chk_sum != checksum((const unsigned char *) up_extent1, extent_size)) {
+						printf("check_sum of extent1 doesn't match for address "U64FMT"\n", extent_addr);
+						if (deh.data_length == extent_size)
+							memcpy(updated, delta_data, extent_size);
 						else
-							ret = apply_delta_chunk(up_section1, updated, delta_data, section_size, dsh.data_length);
+							ret = apply_delta_chunk(up_extent1, updated, delta_data, extent_size, deh.data_length);
 						
 						if (ret < 0)
-							printf("Delta for chunk address "U64FMT" with upstream section1 was not applied properly.\n", section_addr);
+							printf("Delta for extent address "U64FMT" with upstream extent1 was not applied properly.\n", extent_addr);
 						
-						if (dsh.check_sum != checksum((const unsigned char *) updated, section_size)) {
-							printf("Check_sum of apply delta onto upstream section1 failed for chunk address "U64FMT"\n", section_addr);
-							memcpy(updated, up_section2, section_size);
+						if (deh.check_sum != checksum((const unsigned char *) updated, extent_size)) {
+							printf("Check_sum of apply delta onto upstream extent1 failed for chunk address "U64FMT"\n", extent_addr);
+							memcpy(updated, up_extent2, extent_size);
 						}
 					} else {
-						printf("apply delta doesn't work; check_sum of section1 matches for address "U64FMT"\n", section_addr);
-						if (memcmp(section_data, up_section1, section_size) != 0) {
-							printf("section_data for section1 does not match. \n");
-						}
-						else {
-							printf("chunk_data for section1 does match up. \n");
-							if (memcmp(updated, up_section2, section_size) != 0) 
-								printf("up_section2 != updated. \n");
-						}
-						memcpy(updated, up_section2, section_size);
+						printf("apply delta doesn't work; check_sum of extent1 matches for address "U64FMT"\n", extent_addr);
+						if (memcmp(extent_data, up_extent1, extent_size) != 0)
+							printf("extent_data for extent1 does not match. \n");
+						else
+							printf("chunk_data for extent1 does matche up. \n");
+						memcpy(updated, up_extent2, extent_size);
 					}
-					if (chunk_num == 258) 
-						return -1;
 				} else {
 					close(snapdev);
 					return -1;
@@ -772,29 +746,30 @@ static int apply_delta_extents(int deltafile, u32 mode, u32 chunk_size, u64 chun
 			}
                 }
 		
-		if (diskio(snapdev, updated, section_size, section_addr, 1) < 0) {
-			printf("updated was not written properly at "U64FMT" in snapdev.\n", section_addr);
+		if (diskio(snapdev, updated, extent_size, extent_addr, 1) < 0) {
+			printf("\nUpdated was not written properly at "U64FMT" in snapdev.\n", extent_addr);
 			return -1;
 		}
 
-		free(section_data);
-		free(delta_data);
-		free(updated);
-		free(comp_delta);
-		free(up_section1);
-		free(up_section2);
+		chunk_num = chunk_num + deh.num_of_chunks;
 
-		chunk_num = chunk_num + dsh.num_of_chunks;
-
-		if (TRUE) {
-			printf("\rApplied chunk "U64FMT"/"U64FMT" ("U64FMT"%%)", chunk_num, chunk_count, (chunk_num * 100) / chunk_count);
+		if (progress) {
+			printf("\rApplying chunk "U64FMT"/"U64FMT" ("U64FMT"%%)", chunk_num, chunk_count, (chunk_num * 100) / chunk_count);
 			fflush(stdout);
 		}
 
+		/* free memory */
+		free(extent_data);
+		free(delta_data);
+		free(updated);
+		free(comp_delta);
+		free(up_extent1);
+		free(up_extent2);
 	}
 
-	trace_on(printf("\nAll chunks applied to %s\n", devname););
 	close(snapdev);
+
+	trace_on(printf("\nAll extents applied to %s\n", devname););
 	return 0;
 }
 
@@ -820,7 +795,7 @@ static int apply_delta(int deltafile, char const *devname)
 
 	int err;
        
-	if ((err = apply_delta_extents(deltafile, dh.mode, dh.chunk_size, dh.chunk_num, devname)) < 0)
+	if ((err = apply_delta_extents(deltafile, dh.mode, dh.chunk_size, dh.chunk_num, devname, TRUE)) < 0)
 		return err;
 
 	return 0;
@@ -1093,7 +1068,7 @@ static int ddsnap_daemon(int lsock, char const *snapdevstem)
 
 			/* retrieve it */
 
-			if (apply_delta_extents(csock, body.delta_mode, body.chunk_size, body.chunk_count, remotedev) < 0) {
+			if (apply_delta_extents(csock, body.delta_mode, body.chunk_size, body.chunk_count, remotedev, TRUE) < 0) {
 				fprintf(stderr, "unable to apply upstream delta to device %s\n", remotedev);
 				outbead(csock, REPLY_ERROR, struct reply_error, REPLY_ERROR_OTHER, 0);
 				goto cleanup_connection;
