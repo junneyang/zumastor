@@ -39,12 +39,11 @@ static struct buffer *buffer_table[BUFFER_BUCKETS];
 LIST_HEAD(dirty_buffers);
 unsigned dirty_buffer_count;
 LIST_HEAD(lru_buffers);
-unsigned lru_buffer_count;
+unsigned buffer_count;
 LIST_HEAD(free_buffers);
-unsigned free_buffer_count;
 
-#define MAX_BUFFERS_IN_LRU 10000 /* 2*chunksize*MAX_BUFFERS_IN_LRU is the maximum memory used */
-#define MAX_FREE_BUFFERS   (MAX_BUFFERS_IN_LRU/10) /* free 10 percent of the buffers */
+#define MAX_BUFFERS 10000 /* 2*chunksize*MAX_BUFFERS is the maximum memory used */
+#define MAX_FREE_BUFFERS   (MAX_BUFFERS/10) /* free 10 percent of the buffers */
 
 void set_buffer_dirty(struct buffer *buffer)
 {
@@ -109,26 +108,19 @@ unsigned buffer_hash(sector_t sector)
 	return (((sector >> 32) ^ (sector_t)sector) * 978317583) % BUFFER_BUCKETS;
 }
 
-static void lru_add(struct buffer *buffer) 
+static void add_buffer_lru(struct buffer *buffer) 
 {	
-	lru_buffer_count++;
+	buffer_count++;
 	list_add_tail(&buffer->list, &lru_buffers);
 }
 
-static void lru_remove(struct buffer *buffer) 
+static void remove_buffer_lru(struct buffer *buffer) 
 {
-	lru_buffer_count--;
+	buffer_count--;
 	list_del(&buffer->list);
 }
 
-static void lru_update(struct buffer * buffer) {
-	/* now place it on the lru list */
-	buftrace(printf("moving buffer to be most recently used!\n"););
-	list_del(&buffer->list);
-	list_add_tail(&buffer->list, &lru_buffers);	
-}
-
-static struct buffer *remove_buffer(struct buffer *buffer) 
+static struct buffer *remove_buffer_hash(struct buffer *buffer) 
 {
 	struct buffer **pbuffer = &buffer_table[buffer_hash(buffer->sector)], **prev = pbuffer;
        	
@@ -154,71 +146,63 @@ static struct buffer *remove_buffer(struct buffer *buffer)
 	return buffer;
 }
 
-static void add_free_buffer(struct buffer *buffer) { 
-	free_buffer_count++;
-	list_add_tail(&buffer->list, &free_buffers);
-}
-static struct buffer *get_free_buffer(void) 
+static struct buffer *remove_buffer_free(void) 
 {
 	struct buffer *buffer = NULL;
-	if (free_buffer_count > 0) {
-		free_buffer_count--;
+	if (!list_empty(&free_buffers)) {
 		buffer = list_entry(free_buffers.next, struct buffer, list);
 		list_del(&buffer->list);
 	}
 	return buffer;
 }
 
-static struct buffer *check_lru_list(void) 
-{	
-	struct buffer *cand_buffer = (struct buffer *)NULL;
-	if ( ((cand_buffer = get_free_buffer()) != NULL) || lru_buffer_count < MAX_BUFFERS_IN_LRU)
-		return cand_buffer;
-
-	buftrace(printf("need to purge a buffer from the lru list\n"););
-	struct list_head *list, *safe;	
-	int count = 0;
-	
-	list_for_each_safe(list, safe, &lru_buffers) {
-		struct buffer *buffer = list_entry(list, struct buffer, list);
-		if (buffer->count == 0 && !buffer_dirty(buffer) && buffer_uptodate(buffer)) {
-			lru_remove(buffer);
-			remove_buffer(buffer); /* remove from hashlist */
-			add_free_buffer(buffer);
-			if(++count == MAX_FREE_BUFFERS)
-				break;			
-		}
-	}
-
-       	return get_free_buffer();
-}
-	
 struct buffer *new_buffer(sector_t sector, unsigned size)
 {
 	buftrace(printf("Allocate buffer for %llx\n", sector););
-	struct buffer *buffer;
+	struct buffer *buffer = NULL;
 
-	if (!(buffer = check_lru_list())) {
+	/* check if we hit the MAX_BUFFER limit and if there are any free buffers avail */
+	if ( ((buffer = remove_buffer_free()) != NULL) || buffer_count < MAX_BUFFERS)
+		goto cont_buffer;
+
+        buftrace(printf("need to purge a buffer from the lru list\n"););
+        struct list_head *list, *safe;
+        int count = 0;
+
+        list_for_each_safe(list, safe, &lru_buffers) {
+                struct buffer *buffer_evict = list_entry(list, struct buffer, list);	
+                if (buffer_evict->count == 0 && !buffer_dirty(buffer_evict)) {
+                        remove_buffer_lru(buffer_evict);
+                        remove_buffer_hash(buffer_evict); /* remove from hashlist */
+			list_add_tail(&buffer_evict->list, &free_buffers);
+                        if(++count == MAX_FREE_BUFFERS)
+                                break;
+                }
+        }
+	buffer = remove_buffer_free();
+		
+cont_buffer:	
+	if (!buffer) {
 		buftrace(warn("allocating a new buffer"););
-		if (lru_buffer_count == MAX_BUFFERS_IN_LRU) {
+		if (buffer_count == MAX_BUFFERS) {
 			warn("Number of dirty buffers: %d", dirty_buffer_count);
 			error("Out of Memory"); /* need to handle this properly */
 		}
 		buffer = (struct buffer *)malloc(sizeof(struct buffer));
 		posix_memalign((void **)&(buffer->data), size, size); // what if malloc fails?
 	}
-	else if (buffer->size != size) { /* reusing buffer, make sure data is the right size */
+	else if (buffer->size != size) { /* FIXME: there should only be one size */
 		buftrace(warn("reusing buffer with a different size"););
 		free(buffer->data);
 		posix_memalign((void **)&(buffer->data), size, size); 
 	}
  	
 	buffer->count = 1;
-	buffer->flags = 0;
+	buffer->flags = 0; 
 	buffer->size = size;
 	buffer->sector = sector;
 	/* insert into LRU list */
-	lru_add(buffer);
+	add_buffer_lru(buffer);
 
 	return buffer;
 }
@@ -231,7 +215,8 @@ struct buffer *getblk(unsigned fd, sector_t sector, unsigned size)
 		if (buffer->sector == sector) {
 			buftrace(printf("Found buffer for %llx\n", sector););
  			buffer->count++;
-			lru_update(buffer); 
+			list_del(&buffer->list);
+			list_add_tail(&buffer->list, &lru_buffers);	
 			return buffer;
 		}
 	buffer = new_buffer(sector, size);
@@ -260,8 +245,8 @@ void evict_buffer(struct buffer *buffer)
 {
 	if (buffer_dirty(buffer))  
 		write_buffer(buffer);
-	lru_remove(buffer);
-        if (remove_buffer(buffer)) 
+	remove_buffer_lru(buffer);
+        if (remove_buffer_hash(buffer)) 
 		warn("buffer not found in hashlist");
 	buftrace(printf("Evicted buffer for %llx\n", buffer->sector););
 	free(buffer->data); // using posix_memalign though !!! malloc_aligned means pointer is wrong
@@ -357,7 +342,6 @@ void init_buffers(void)
 	INIT_LIST_HEAD(&dirty_buffers);
 	dirty_buffer_count = 0;
 	INIT_LIST_HEAD(&lru_buffers);
-	lru_buffer_count = 0;
+	buffer_count = 0;
 	INIT_LIST_HEAD(&free_buffers);
-	free_buffer_count = 0;
 }
