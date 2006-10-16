@@ -22,16 +22,16 @@ Check out our sources (if you haven't already!):
 
   - The rest of this document will be from the root ./hotcakes/hotcakes/
 
-Set up Linux 2.6:
+Set up Linux 2.6.17:
 
-  - Get a 2.6.7 or older kernel.org tree, it already has device mapper
+  - Get a 2.6.17 or older kernel.org tree, it already has device mapper
 
   - Apply the ddsnap-2.6.XX patch. From the root of the 2.6 tree:
 
-      patch -p1 < /path/to/hotcakes/patches/ddsnap-2.6.XX
+      patch -p1 < /path/to/hotcakes/patches/hotcakes-2.6.XX
 
   - Make sure that device mapper and the dm_dd* are selected to be installed 
-    as modules.
+    as modules. In addition, device-mapper should be enabled too.
 
       CONFIG_DM_DDRAID=m
       CONFIG_DM_DDSNAP=m
@@ -121,14 +121,14 @@ Creating a snapshot, changelist, and delta:
 
   - Create another snapshot!
 
-       sudo ./ddsnap create-snapshot /tmp/server 1
+       sudo ./ddsnap create-snap /tmp/server 1
 
        echo 0 29302496 ddsnap /dev/test-snapstore /dev/test-origin \
           /tmp/control 1 | sudo dmsetup create snapshot1
 
   - To create a delta, we will first create a changelist for the snapshots.
 
-       sudo ./ddsnap generate-changelist /tmp/server changelist0-1 0 1
+       sudo ./ddsnap create-cl /tmp/server changelist0-1 0 1
 
     There should now be a file called changelist0-1 in your working directory.
 
