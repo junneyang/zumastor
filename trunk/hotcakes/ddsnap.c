@@ -38,6 +38,7 @@
 #define XDELTA 1
 #define RAW (1 << 1)
 #define TEST (1 << 2)
+#define OPT_COMP (1 << 3)
 
 #define MAX_MEM_SIZE (1 << 20)
 
@@ -54,6 +55,7 @@ struct delta_header {
 
 struct delta_extent_header {
 	u32 magic_num;
+	u32 setting;
 	u64 data_length;
 	u64 extent_addr;
 	u64 check_sum;
@@ -198,7 +200,8 @@ static int write_changelist(int change_fd, struct change_list const *cl)
 	return 0;
 }
 
-int chunks_in_extent(struct change_list *cl, u64 pos, u32 chunk_size) {
+u64 chunks_in_extent(struct change_list *cl, u64 pos, u32 chunk_size)
+{
 	u64 start_chunkaddr, cur_chunkaddr, num_of_chunks = 1;
 	start_chunkaddr = cl->chunks[pos];
 	cur_chunkaddr = cl->chunks[pos+1];
@@ -210,11 +213,12 @@ int chunks_in_extent(struct change_list *cl, u64 pos, u32 chunk_size) {
 	return num_of_chunks;
 }
 
-static int generate_delta_extents(u32 mode, int level, struct change_list *cl, int deltafile, char const *dev1name, char const *dev2name, int progress) {
+static int generate_delta_extents(u32 mode, int level, struct change_list *cl, int deltafile, char const *dev1name, char const *dev2name, int progress) 
+{
 	int snapdev1, snapdev2;
-	unsigned char *extent_data1, *extent_data2, *delta_data, *comp_delta;
-	u64 comp_size, extent_size;
-
+	unsigned char *extent_data1, *extent_data2, *delta_data, *comp_delta, *ext2_comp_delta;
+	u64 comp_size, extent_size, ext2_comp_size;
+	
 	snapdev1 = open(dev1name, O_RDONLY);
 	if (snapdev1 < 0) {
 		int err = -errno;
@@ -251,7 +255,9 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 	u64 extent_addr, chunk_num, num_of_chunks = 0;
 	u64 delta_size;
         int ret = 0;
-
+	
+	trace_off(printf("memory allocated\n"););
+								
 	/* Chunk address followed by CHUNK_SIZE bytes of chunk data */
 	for (chunk_num = 0; chunk_num < cl->count;) {
 
@@ -266,12 +272,14 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 		extent_size = chunk_size * num_of_chunks;
 		delta_size = extent_size;
 		comp_size = extent_size + 12 + (extent_size >> 9);
+		ext2_comp_size = comp_size;
 
-		extent_data1 = (unsigned char *)malloc(extent_size);
-		extent_data2 = (unsigned char *)malloc(extent_size);
-		delta_data    = (unsigned char *)malloc(extent_size);
-		comp_delta    = (unsigned char *)malloc(comp_size);
-
+		extent_data1    = malloc(extent_size);
+		extent_data2    = malloc(extent_size);
+		delta_data      = malloc(extent_size);
+		comp_delta      = malloc(comp_size);
+		ext2_comp_delta = malloc(ext2_comp_size);
+		
 		trace_off(printf("\nReading data to calculate "U64FMT"th chunk starting at "U64FMT" to delta\n", num_of_chunks, extent_addr););
 
 		/* read in and generate the necessary chunk information */
@@ -292,6 +300,7 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 
 			/* If delta is larger than chunk_size, we want to just copy over the raw chunk */
 			if (ret == BUFFER_SIZE_ERROR) {
+				trace_off(printf("Buffer size error\n"););
 				memcpy(delta_data, extent_data2, extent_size);
 				delta_size = extent_size;	
 			} else if (ret < 0) {
@@ -325,6 +334,7 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 		
 		/* zlib compression */
 		int comp_ret = compress2(comp_delta, (unsigned long *) &comp_size, delta_data, delta_size, level);
+
 		if (comp_ret == Z_MEM_ERROR) {
 			printf("\nNot enough buffer memory for compression.\n");
 			goto out_error;
@@ -338,16 +348,42 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 			goto out_error;
 		}
 		
+		trace_off(printf("Set up delta extent header\n"););
 		deh.check_sum = checksum((const unsigned char *) extent_data2, extent_size);
 		deh.extent_addr = extent_addr;
 		deh.num_of_chunks = num_of_chunks;
+		deh.setting = mode;
+		deh.compress = FALSE;
+		deh.data_length = delta_size;
 
+		if (mode == OPT_COMP) {
+			trace_off(printf("Within opt_comp mode\n"););
+
+			int ext2_comp_ret = compress2(ext2_comp_delta, (unsigned long *) &ext2_comp_size, extent_data2, extent_size, level);
+
+	                if (ext2_comp_ret == Z_MEM_ERROR) {
+	                        printf("\nNot enough buffer memory for compression.\n");
+				goto out_error;
+	                }
+	                if (ext2_comp_ret == Z_BUF_ERROR) {
+	                        printf("\nNot enough room in the output buffer for compression.\n");
+	                        goto out_error;
+	                }
+	                if (ext2_comp_ret == Z_STREAM_ERROR) {
+        	                printf("\nParameter is invalid: level=%d delta_size=%Lu\n", level, delta_size);
+                	        goto out_error;
+			}
+		}
+		
 		if (comp_size < delta_size) {
 			deh.compress = TRUE;
-			deh.data_length = comp_size;
-		} else {
-			deh.compress = FALSE;
-			deh.data_length = delta_size;
+			if (ext2_comp_size < comp_size) {
+				deh.data_length = ext2_comp_size;
+				deh.setting = RAW;
+			} else { 			
+				deh.data_length = comp_size;
+				deh.setting = XDELTA;
+			}
 		}
 		
 		/* write the chunk header and chunk delta data to the delta file*/
@@ -358,9 +394,16 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 		}
 		
 		if (deh.compress == TRUE) {
-			if (write(deltafile, comp_delta, comp_size) != comp_size) {
-				printf("\nComp_delta was not written properly to deltafile.\n");
-				goto out_error;
+			if (deh.setting == XDELTA) {
+				if (write(deltafile, comp_delta, comp_size) != comp_size) {
+					printf("\nComp_delta was not written properly to deltafile.\n");
+					goto out_error;
+				}
+			} else {
+				if (write(deltafile, ext2_comp_delta, ext2_comp_size) != ext2_comp_size) {
+					printf("\nExt2_comp_delta was not written properly to deltafile.\n");
+					goto out_error;
+				}
 			}
 		} else {
 			if (write(deltafile, delta_data, delta_size) != delta_size) {
@@ -386,6 +429,7 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 		free(extent_data2);
 		free(delta_data);
 		free(comp_delta);
+		free(ext2_comp_delta);
 
 	}
 	printf("\n");
@@ -686,7 +730,7 @@ static int apply_delta_extents(int deltafile, u32 mode, u32 chunk_size, u64 chun
 		} else
 			uncomp_size = deh.data_length;
 
-                if (mode == RAW) 
+                if (deh.setting == RAW) 
 			memcpy(updated, delta_data, extent_size);
 		else {
 			if (uncomp_size == extent_size)
@@ -1119,7 +1163,7 @@ static void cdUsage(poptContext optCon, int exitcode, char const *error, char co
 
 int main(int argc, char *argv[]) {
 	char const *command;
-	int xd = FALSE, raw = FALSE, test = FALSE, gzip_level = 0;
+	int xd = FALSE, raw = FALSE, test = FALSE, gzip_level = 0, opt_comp = FALSE;
 
 	struct poptOption noOptions[] = {
 		POPT_TABLEEND
@@ -1129,6 +1173,7 @@ int main(int argc, char *argv[]) {
 		{ "raw", 'r', POPT_ARG_NONE, &raw, 0, "Delta file format: raw chunk from later snapshot", NULL },
 		{ "test", 't', POPT_ARG_NONE, &test, 0, "Delta file format: xdelta chunk, raw chunk from earlier snapshot and raw chunk from later snapshot", NULL },
 		{ "gzip", 'g', POPT_ARG_INT, &gzip_level, 0, "Compression via gzip (default level: 6)", "compression_level"},
+		{ "optcomp", 'o', POPT_ARG_NONE, &opt_comp, 0, "Optimal compression (slowest)", NULL},
 		POPT_TABLEEND
 	};
 
@@ -1326,8 +1371,10 @@ int main(int argc, char *argv[]) {
 		if (xd+raw+test > 1)
 			cdUsage(cdCon, 1, "Too many chunk options were selected. \nPlease select only one", "-x, -r, -t\n");
 
-		u32 mode = (test ? TEST : (raw ? RAW : XDELTA));
-
+		u32 mode = (test ? TEST : (raw ? RAW : (xd? XDELTA : OPT_COMP)));
+		if (opt_comp)
+			gzip_level = 9;
+		
 		trace_on(fprintf(stderr, "xd=%d raw=%d test=%d mode=%d\n", xd, raw, test, mode););
 
 		changelist = poptGetArg(cdCon);
