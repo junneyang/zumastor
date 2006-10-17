@@ -647,7 +647,7 @@ static int apply_delta_extents(int deltafile, u32 mode, u32 chunk_size, u64 chun
 	snapdev = open(devname, O_RDWR); /* FIXME: why not O_WRONLY? */
 	if (snapdev < 0) {
 		int err = -errno;
-		fprintf(stderr, "could not open snapdev file \"%s\" for writing.\n", devname);
+		fprintf(stderr, "could not open snapdev file \"%s\" for writing: %s.\n", devname, strerror(-err));
 		return err;
 	}
 
