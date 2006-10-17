@@ -64,7 +64,8 @@ struct delta_extent_header {
 	u64 num_of_chunks;
 };
 
-static int eek(void) {
+static int eek(void)
+{
 	error("%s (%i)", strerror(errno), errno);
 	return 1;
 }
