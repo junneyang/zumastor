@@ -41,6 +41,9 @@
 #define TEST (1 << 2)
 #define OPT_COMP (1 << 3)
 
+#define DEF_GZIP_COMP 0
+#define MAX_GZIP_COMP 9
+
 #define MAX_MEM_SIZE (1 << 20)
 
 struct cl_header {
@@ -1174,7 +1177,7 @@ static void cdUsage(poptContext optCon, int exitcode, char const *error, char co
 int main(int argc, char *argv[])
 {
 	char const *command;
-	int xd = FALSE, raw = FALSE, test = FALSE, gzip_level = 0, opt_comp = FALSE;
+	int xd = FALSE, raw = FALSE, test = FALSE, gzip_level = DEF_GZIP_COMP, opt_comp = FALSE;
 
 	struct poptOption noOptions[] = {
 		POPT_TABLEEND
@@ -1183,7 +1186,7 @@ int main(int argc, char *argv[])
 		{ "xdelta", 'x', POPT_ARG_NONE, &xd, 0, "Delta file format: xdelta chunk", NULL },
 		{ "raw", 'r', POPT_ARG_NONE, &raw, 0, "Delta file format: raw chunk from later snapshot", NULL },
 		{ "test", 't', POPT_ARG_NONE, &test, 0, "Delta file format: xdelta chunk, raw chunk from earlier snapshot and raw chunk from later snapshot", NULL },
-		{ "gzip", 'g', POPT_ARG_INT, &gzip_level, 0, "Compression via gzip (default level: 6)", "compression_level"},
+		{ "gzip", 'g', POPT_ARG_INT, &gzip_level, 0, "Compression via gzip", "compression_level"},
 		{ "optcomp", 'o', POPT_ARG_NONE, &opt_comp, 0, "Optimal compression (slowest)", NULL},
 		POPT_TABLEEND
 	};
@@ -1206,8 +1209,8 @@ int main(int argc, char *argv[])
 		  "Create delta\n\t Function: Creates a delta file given a changelist and 2 snapshots\n\t Usage: create-delta [OPTION...] <changelist> <deltafile> <snapshot1> <snapshot2>\n" , NULL },
 		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &noOptions, 0,
 		  "Apply delta\n\t Function: Applies a delta file to the given device\n\t Usage: apply-delta <deltafile> <dev>" , NULL },
-		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &noOptions, 0,
-		  "Send delta\n\t Function: Sends a delta file downstream\n\t Usage: send-delta <sockname> <snapshot1> <snapshot2> <snapdev1> <snapdev2> <remsnapshot> <host>[:<port>]" , NULL },
+		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &cdOptions, 0,
+		  "Send delta\n\t Function: Sends a delta file downstream\n\t Usage: send-delta [OPTION...] <sockname> <snapshot1> <snapshot2> <snapdev1> <snapdev2> <remsnapshot> <host>[:<port>]\n" , NULL },
 		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &noOptions, 0,
 		  "Daemon\n\t Function: Listens for upstream deltas\n\t Usage: daemon <snapdevstem> [<host>[:<port>]]" , NULL },
 		POPT_AUTOHELP
@@ -1350,7 +1353,6 @@ int main(int argc, char *argv[])
 	}
 	if (strcmp(command, "create-delta") == 0) {
 		char cdOpt;
-		char const *changelist, *deltafile, *snapdev1, *snapdev2;
 
 		poptContext cdCon;
 
@@ -1384,9 +1386,11 @@ int main(int argc, char *argv[])
 
 		u32 mode = (test ? TEST : (raw ? RAW : (xd? XDELTA : OPT_COMP)));
 		if (opt_comp)
-			gzip_level = 9;
+			gzip_level = MAX_GZIP_COMP;
 		
-		trace_on(fprintf(stderr, "xd=%d raw=%d test=%d mode=%d\n", xd, raw, test, mode););
+		trace_on(fprintf(stderr, "xd=%d raw=%d test=%d opt_comp=%d mode=%u gzip_level=%d\n", xd, raw, test, opt_comp, mode, gzip_level););
+
+		char const *changelist, *deltafile, *snapdev1, *snapdev2;
 
 		changelist = poptGetArg(cdCon);
 		deltafile  = poptGetArg(cdCon);
@@ -1417,15 +1421,61 @@ int main(int argc, char *argv[])
 		return ddsnap_apply_delta(argv[2], argv[3]);
 	}
 	if (strcmp(command, "send-delta") == 0) {
-		char *hostname;
-		unsigned port;
+		poptContext cdCon;
 
-		if (argc != 9) {
-			printf("usage: %s send-delta <sockname> <snapshot1> <snapshot2> <snapdev1> <snapdev2> <remsnapshot> <host>[:<port>]\n", argv[0]);
+		struct poptOption options[] = {
+			{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &cdOptions, 0, NULL, NULL },
+			POPT_AUTOHELP
+			POPT_TABLEEND
+		};
+
+		cdCon = poptGetContext(NULL, argc-1, (const char **)&(argv[1]), options, 0);
+		poptSetOtherOptionHelp(cdCon, "<sockname> <snapshot1> <snapshot2> <snapdev1> <snapdev2> <remsnapshot> <host>[:<port>]");
+
+		char c;
+
+		while ((c = poptGetNextOpt(cdCon)) >= 0);
+		if (c < -1) {
+			fprintf(stderr, "%s: %s: %s\n", argv[0], poptBadOption(cdCon, POPT_BADOPTION_NOALIAS), poptStrerror(c));
+			poptFreeContext(cdCon);
 			return 1;
 		}
 
-		hostname = strdup(argv[8]);
+		/* Make sure the options are mutually exclusive */
+		if (xd+raw+test+opt_comp > 1) {
+			fprintf(stderr, "%s: Too many chunk options were selected.\nPlease select only one: -x, -r, -t, -o\n", argv[0]);
+			poptPrintUsage(cdCon, stderr, 0);
+			poptFreeContext(cdCon);
+			return 1;
+		}
+
+		u32 mode = (test ? TEST : (raw ? RAW : (xd ? XDELTA : OPT_COMP)));
+		if (opt_comp)
+			gzip_level = MAX_GZIP_COMP;
+
+		trace_on(fprintf(stderr, "xd=%d raw=%d test=%d opt_comp=%d mode=%u gzip_level=%d\n", xd, raw, test, opt_comp, mode, gzip_level););
+
+		char const *sockname, *snapid1str, *snapid2str, *snapdev1, *snapdev2, *snapidremstr, *hoststr;
+
+		sockname  = poptGetArg(cdCon);
+		snapid1str = poptGetArg(cdCon);
+		snapid2str = poptGetArg(cdCon);
+		snapdev1 = poptGetArg(cdCon);
+		snapdev2 = poptGetArg(cdCon);
+		snapidremstr = poptGetArg(cdCon);
+		hoststr = poptGetArg(cdCon);
+
+		if (hoststr == NULL)
+			cdUsage(cdCon, 1, argv[0], "Not enough arguments to send-delta\n");
+		if (!(poptPeekArg(cdCon) == NULL))
+			cdUsage(cdCon, 1, argv[0], "Too many arguments to send-delta\n");
+
+		poptFreeContext(cdCon);
+
+		char *hostname;
+		unsigned port;
+
+		hostname = strdup(hoststr);
 
 		if (strchr(hostname, ':')) {
 			unsigned int len = strlen(hostname);
@@ -1437,22 +1487,22 @@ int main(int argc, char *argv[])
 
 		int snapid1, snapid2, remsnapid;
 
-		if (parse_snapid(argv[3], &snapid1) < 0) {
-			fprintf(stderr, "%s: invalid snapshot id %s\n", argv[0], argv[3]);
+		if (parse_snapid(snapid1str, &snapid1) < 0) {
+			fprintf(stderr, "%s: invalid snapshot id %s\n", argv[0], snapid1str);
 			return 1;
 		}
 
-		if (parse_snapid(argv[4], &snapid2) < 0) {
-			fprintf(stderr, "%s: invalid snapshot id %s\n", argv[0], argv[4]);
+		if (parse_snapid(snapid2str, &snapid2) < 0) {
+			fprintf(stderr, "%s: invalid snapshot id %s\n", argv[0], snapid2str);
 			return 1;
 		}
 
-		if (parse_snapid(argv[7], &remsnapid) < 0) {
-			fprintf(stderr, "%s: invalid snapshot id %s\n", argv[0], argv[7]);
+		if (parse_snapid(snapidremstr, &remsnapid) < 0) {
+			fprintf(stderr, "%s: invalid snapshot id %s\n", argv[0], snapidremstr);
 			return 1;
 		}
 
-		int sock = create_socket(argv[2]);
+		int sock = create_socket(sockname);
 
 		int ds_fd = open_socket(hostname, port);
 		if (ds_fd < 0) {
@@ -1460,10 +1510,7 @@ int main(int argc, char *argv[])
 			return 1;
 		}
 
-		u32 mode = RAW;
-		int level = 0;
-
-		int ret = ddsnap_send_delta(sock, snapid1, snapid2, argv[5], argv[6], remsnapid, mode, level, ds_fd);
+		int ret = ddsnap_send_delta(sock, snapid1, snapid2, snapdev1, snapdev2, remsnapid, mode, gzip_level, ds_fd);
 		close(ds_fd);
 		close(sock);
 
