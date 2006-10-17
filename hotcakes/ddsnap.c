@@ -24,6 +24,7 @@
 #include "sock.h"
 #include "delta.h"
 #include "daemonize.h"
+#include "diskio.h"
 
 /* changelist and delta file header info */
 #define MAGIC_SIZE 8
@@ -68,7 +69,8 @@ static int eek(void) {
 	return 1;
 }
 
-static u64 checksum(const unsigned char *data, u32 data_length) {
+static u64 checksum(const unsigned char *data, u32 data_length)
+{
 	u64 result = 0;
 	u32 i;
 
@@ -78,7 +80,8 @@ static u64 checksum(const unsigned char *data, u32 data_length) {
 	return result;
 }
 
-static int create_socket(char const *sockname) {
+static int create_socket(char const *sockname)
+{
 
 	struct sockaddr_un addr = { .sun_family = AF_UNIX };
 	int addr_len = sizeof(addr) - sizeof(addr.sun_path) + strlen(sockname);
@@ -222,14 +225,14 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 	snapdev1 = open(dev1name, O_RDONLY);
 	if (snapdev1 < 0) {
 		int err = -errno;
-		printf("Could not open snap device \"%s\" for reading: %s\n", dev1name, strerror(errno));
+		printf("Could not open snap device \"%s\" for reading: %s\n", dev1name, strerror(-err));
 		return err;
 	}
 
 	snapdev2 = open(dev2name, O_RDONLY);
 	if (snapdev2 < 0) {
 		int err = -errno;
-		printf("Could not open snap device \"%s\" for reading: %s\n", dev2name, strerror(errno));
+		printf("Could not open snap device \"%s\" for reading: %s\n", dev2name, strerror(-err));
 		close(snapdev1);
 		return err;
 	}
@@ -254,7 +257,7 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 	struct delta_extent_header deh = { .magic_num = MAGIC_NUM };
 	u64 extent_addr, chunk_num, num_of_chunks = 0;
 	u64 delta_size;
-        int ret = 0;
+	int ret = 0;
 	
 	trace_off(printf("memory allocated\n"););
 								
@@ -525,8 +528,8 @@ static struct change_list *stream_changelist(int serv_fd, int snap1, int snap2)
 
 	struct head head;
 
-	if (readpipe(serv_fd, &head, sizeof(head)))
-		error("%s (%i)", strerror(errno), errno);
+	if ((err = readpipe(serv_fd, &head, sizeof(head))) < 0)
+		error("%s (%i)", strerror(-err), -err);
 
 	trace_on(printf("reply = %x\n", head.code););
 
@@ -538,8 +541,8 @@ static struct change_list *stream_changelist(int serv_fd, int snap1, int snap2)
 	if (head.length != sizeof(cl_head))
 		error("reply length mismatch: expected %u, actual %u", sizeof(cl_head), head.length);
 
-	if (readpipe(serv_fd, &cl_head, sizeof(cl_head)))
-		error("%s (%i)", strerror(errno), errno);
+	if ((err = readpipe(serv_fd, &cl_head, sizeof(cl_head))) < 0)
+		error("%s (%i)", strerror(-err), -err);
 
 	struct change_list *cl;
 
@@ -570,8 +573,8 @@ static struct change_list *stream_changelist(int serv_fd, int snap1, int snap2)
 	}
 
 	trace_on(printf("reading "U64FMT" chunk addresses (%u bits) from ddsnapd\n", cl->count, cl->chunksize_bits););
-	if (readpipe(serv_fd, cl->chunks, cl->count * sizeof(cl->chunks[0])))
-		error("%s (%i)", strerror(errno), errno);
+	if ((err = readpipe(serv_fd, cl->chunks, cl->count * sizeof(cl->chunks[0]))) < 0)
+		error("%s (%i)", strerror(-err), -err);
 
 	return cl;
 }
@@ -602,7 +605,7 @@ static int ddsnap_send_delta(int serv_fd, int snap1, int snap2, char const *snap
 
 	trace_on(fprintf(stderr, "waiting for response\n"););
 
-	if (readpipe(ds_fd, &head, sizeof(head)))
+	if (readpipe(ds_fd, &head, sizeof(head)) < 0)
 		return eek();
 
 	trace_on(printf("reply = %x\n", head.code););
@@ -621,7 +624,7 @@ static int ddsnap_send_delta(int serv_fd, int snap1, int snap2, char const *snap
 
 	trace_on(fprintf(stderr, "waiting for response\n"););
 
-	if (readpipe(ds_fd, &head, sizeof(head)))
+	if (readpipe(ds_fd, &head, sizeof(head)) < 0)
 		return eek();
 
 	trace_on(printf("reply = %x\n", head.code););
@@ -636,7 +639,8 @@ static int ddsnap_send_delta(int serv_fd, int snap1, int snap2, char const *snap
 	return 0;
 }
 
-static int apply_delta_extents(int deltafile, u32 mode, u32 chunk_size, u64 chunk_count, char const *devname, int progress) {
+static int apply_delta_extents(int deltafile, u32 mode, u32 chunk_size, u64 chunk_count, char const *devname, int progress)
+{
 	int snapdev;
 
 	snapdev = open(devname, O_RDWR); /* FIXME: why not O_WRONLY? */
@@ -883,7 +887,7 @@ static int list_snapshots(int serv_fd)
 
 	struct head head;
 
-	if (readpipe(serv_fd, &head, sizeof(head)))
+	if (readpipe(serv_fd, &head, sizeof(head)) < 0)
 		return eek();
 
 	trace_on(printf("reply = %x\n", head.code););
@@ -896,7 +900,7 @@ static int list_snapshots(int serv_fd)
 
 	int count;
 
-	if (readpipe(serv_fd, &count, sizeof(int)))
+	if (readpipe(serv_fd, &count, sizeof(int)) < 0)
 		return eek();
 
 	if (head.length != sizeof(int32_t) + count * sizeof(struct snapinfo))
@@ -904,7 +908,7 @@ static int list_snapshots(int serv_fd)
 
 	struct snapinfo * buffer = (struct snapinfo *)malloc(count * sizeof(struct snapinfo));
 
-	if (readpipe(serv_fd, buffer, count * sizeof(struct snapinfo)))
+	if (readpipe(serv_fd, buffer, count * sizeof(struct snapinfo)) < 0)
 		return eek();
 
 	printf("Snapshot list:\n");
@@ -943,12 +947,13 @@ static int ddsnap_generate_changelist(int serv_fd, char const *changelist_filena
 	close(change_fd);
 
 	if (err < 0)
-	    return 1;
+		return 1;
 
 	return 0;
 }
 
-static int delete_snapshot(int sock, int snap) {
+static int delete_snapshot(int sock, int snap)
+{
 	if (outbead(sock, DELETE_SNAPSHOT, struct create_snapshot, snap) < 0)
 		return eek();
 
@@ -956,11 +961,11 @@ static int delete_snapshot(int sock, int snap) {
 	unsigned maxbuf = 500;
 	char buf[maxbuf];
 
-	if (readpipe(sock, &head, sizeof(head)))
+	if (readpipe(sock, &head, sizeof(head)) < 0)
 		return eek();
 	assert(head.length < maxbuf); // !!! don't die
 	trace_on(printf("reply head.length = %x\n", head.length););
-	if (readpipe(sock, buf, head.length))
+	if (readpipe(sock, buf, head.length) < 0)
 		return eek();
 
 	trace_on(printf("reply = %x\n", head.code););
@@ -971,7 +976,8 @@ static int delete_snapshot(int sock, int snap) {
 	return 0;
 }
 
-static int create_snapshot(int sock, int snap) {
+static int create_snapshot(int sock, int snap)
+{
 	if (outbead(sock, CREATE_SNAPSHOT, struct create_snapshot, snap) < 0)
 		return eek();
 
@@ -979,10 +985,10 @@ static int create_snapshot(int sock, int snap) {
 	unsigned maxbuf = 500;
 	char buf[maxbuf];
 
-	if (readpipe(sock, &head, sizeof(head)))
+	if (readpipe(sock, &head, sizeof(head)) < 0)
 		return eek();
 	assert(head.length < maxbuf); // !!! don't die
-	if (readpipe(sock, buf, head.length))
+	if (readpipe(sock, buf, head.length) < 0)
 		return eek();
 
 	trace_on(printf("reply = %x\n", head.code););
@@ -993,7 +999,8 @@ static int create_snapshot(int sock, int snap) {
 	return 0;
 }
 
-static int set_priority(int sock, uint32_t tag_val, int8_t pri_val) {
+static int set_priority(int sock, uint32_t tag_val, int8_t pri_val)
+{
 	if (outbead(sock, SET_PRIORITY, struct snapinfo, tag_val, pri_val) < 0)
 		return eek();
 
@@ -1001,10 +1008,10 @@ static int set_priority(int sock, uint32_t tag_val, int8_t pri_val) {
 	unsigned maxbuf = 500;
 	char buf[maxbuf];
 
-	if (readpipe(sock, &head, sizeof(head)))
+	if (readpipe(sock, &head, sizeof(head)) < 0)
 		return eek();
 	assert(head.length < maxbuf); // !!! don't die
-	if (readpipe(sock, buf, head.length))
+	if (readpipe(sock, buf, head.length) < 0)
 		return eek();
 
 	trace_on(printf("reply = %x\n", head.code););
@@ -1015,7 +1022,8 @@ static int set_priority(int sock, uint32_t tag_val, int8_t pri_val) {
 	return 0;
 }
 
-static int set_usecount(int sock, uint32_t tag_val, const char * op) {
+static int set_usecount(int sock, uint32_t tag_val, const char * op)
+{
 	int usecnt = (strcmp(op, "inc") == 0) ? 1 : ((strcmp(op, "dec") == 0) ? -1 : 0);
 
 	if (outbead(sock, SET_USECOUNT, struct snapinfo, tag_val, 0, usecnt) < 0)
@@ -1030,7 +1038,7 @@ static int ddsnap_daemon(int lsock, char const *snapdevstem)
 		int csock;
 
 		if ((csock = accept_socket(lsock)) < 0) {
-			fprintf(stderr, "unable to accept connection: %s\n", strerror(errno));
+			fprintf(stderr, "unable to accept connection: %s\n", strerror(-csock));
 			continue;
 		}
 
@@ -1056,7 +1064,7 @@ static int ddsnap_daemon(int lsock, char const *snapdevstem)
 		struct messagebuf message;
 		int err;
 
-		if ((err = readpipe(csock, &message.head, sizeof(message.head)))) {
+		if ((err = readpipe(csock, &message.head, sizeof(message.head))) < 0) {
 			fprintf(stderr, "error reading upstream message header: %s\n", strerror(-err));
 			goto cleanup_connection;
 		}
@@ -1064,7 +1072,7 @@ static int ddsnap_daemon(int lsock, char const *snapdevstem)
 			fprintf(stderr, "message body too long %d\n", message.head.length);
 			goto cleanup_connection;
 		}
-		if ((err = readpipe(csock, &message.body, message.head.length))) {
+		if ((err = readpipe(csock, &message.body, message.head.length)) < 0) {
 			fprintf(stderr, "error reading upstream message body: %s\n", strerror(-err));
 			goto cleanup_connection;
 		}
@@ -1155,13 +1163,15 @@ static void mainUsage(void)
 		"	daemon            Listens for upstream deltas\n");
 }
 
-static void cdUsage(poptContext optCon, int exitcode, char const *error, char const *addl) {
+static void cdUsage(poptContext optCon, int exitcode, char const *error, char const *addl)
+{
 	poptPrintUsage(optCon, stderr, 0);
 	if (error) fprintf(stderr, "%s: %s", error, addl);
 	exit(exitcode);
 }
 
-int main(int argc, char *argv[]) {
+int main(int argc, char *argv[])
+{
 	char const *command;
 	int xd = FALSE, raw = FALSE, test = FALSE, gzip_level = 0, opt_comp = FALSE;
 
