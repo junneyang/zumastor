@@ -2958,7 +2958,6 @@ int main(int argc, const char *argv[])
 	poptContext optCon;
 #ifdef SERVER
 	int nobg=0;
-	unsigned volsize; /* FIXME: unused */
 #endif
 	char const *snapdev, *origdev, *metadev;
 #ifdef SERVER
@@ -2968,7 +2967,6 @@ int main(int argc, const char *argv[])
 	struct poptOption optionsTable[] = {
 #ifdef SERVER
 	     { "foreground", 'f', POPT_ARG_NONE, &nobg, 0, "do not daemonize server", NULL },
-	     { "size", 's', POPT_ARG_INT, &volsize, 0, "volume size", "size" },
 #endif
 	     POPT_AUTOHELP
 	     POPT_TABLEEND
