@@ -874,9 +874,9 @@ int incoming_message(struct superblock *sb, struct client *client)
 			int i;
 
 			trace(warn("sync region %Lx", (long long)body->regnum););
-			diskio(sb->member[0], sb->copybuf, sb->regionsize, pos, 0);
+			diskread(sb->member[0], sb->copybuf, sb->regionsize, pos);
 			for (i = 1; i < sb->members; i++)
-				diskio(sb->member[i], sb->copybuf, sb->regionsize, pos, 1);
+				diskwrite(sb->member[i], sb->copybuf, sb->regionsize, pos);
 			outbead(sock, REGION_SYNCED, struct region_message, .regnum = body->regnum);
 			break;
 		}

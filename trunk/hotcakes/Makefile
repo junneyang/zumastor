@@ -104,6 +104,7 @@ data=/dev/$(data0) /dev/$(data1) /dev/$(data2) /dev/$(data3) /dev/$(data4)
 # README test values
 origindev=/dev/hdb1
 snapstoredev=/dev/hdb2
+# Ross
 #origindev=/dev/sda3
 #snapstoredev=/dev/sda4
 

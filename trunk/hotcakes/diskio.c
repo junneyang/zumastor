@@ -4,78 +4,102 @@
 #include "trace.h"
 #include "diskio.h"
 
-/* Sane pread/pwrite wrapper */
+#undef DEBUG_FDIO_FAIL
+#undef DEBUG_FDIO_SHORT
 
-int diskio(int fd, void *data, size_t count, off_t offset, int write)
+
+/* Sane [p]read/[p]write wrapper */
+
+static int fdio(int fd, void *data, size_t count, int use_offset, off_t offset, int do_write)
 {
 	while (count) {
 		ssize_t ret;
 
-		if (write)
-			ret = pwrite(fd, data, count, offset);
+		if (use_offset)
+			if (do_write)
+				ret = pwrite(fd, data, count, offset);
+			else
+				ret = pread(fd, data, count, offset);
 		else
-			ret = pread(fd, data, count, offset);
+			if (do_write)
+				ret = write(fd, data, count);
+			else
+				ret = read(fd, data, count);
 
-		if (ret == -1)
+
+		if (ret == -1) {
+#ifdef DEBUG_FDIO_FAIL
+			char const *op;
+
+			if (use_offset)
+				if (do_write)
+					op = "pwrite";
+				else
+					op = "pread";
+			else
+				if (do_write)
+					op = "write";
+				else
+					op = "read";
+
+			warn("%s failed %s", op, strerror(errno));
+#endif
 			return -errno;
+		}
 
-		if (ret == 0)
+		if (ret == 0) {
+#ifdef DEBUG_FDIO_SHORT
+			char const *op;
+
+			if (use_offset)
+				if (do_write)
+					op = "pwrite";
+				else
+					op = "pread";
+			else
+				if (do_write)
+					op = "write";
+				else
+					op = "read";
+
+			warn("short %s", op);
+#endif
 			return -ERANGE;
+		}
 
-		data += ret;
-		offset += ret;
+		data += ret; /* not portable but GCC treats like char * */
 		count -= ret;
+
+		offset += ret;
 	}
 
 	return 0;
 }
 
-#if 0 // these should be wrappers -- daniel
+#if 0
+int diskio(int fd, void *data, size_t count, int use_offset, off_t offset, int do_write)
+{
+	return fdio(fd, data, count, 1, offset, do_write);
+}
+#endif
+
+int diskread(int fd, void *data, size_t count, off_t offset)
+{
+	return fdio(fd, data, count, 1, offset, 0);
+}
+
+int diskwrite(int fd, void const *data, size_t count, off_t offset)
+{
+	return fdio(fd, (void *)data, count, 1, offset, 1);
+}
+
 int fdread(int fd, void *data, size_t count)
 {
-	ssize_t ret;
-
-	while (count) {
-		ret = read(fd, data, count);
-
-		if (ret == -1) {
-			warn("%s failed %s", "read", strerror(errno));
-			return -errno;
-		}
-
-		if (ret == 0) {
-			warn("short %s", "read");
-			return -ERANGE;
-		}
-
-		data += ret;
-		count -= ret;
-	}
-
-	return 0;
+	return fdio(fd, data, count, 0, 0, 0);
 }
 
 int fdwrite(int fd, void const *data, size_t count)
 {
-	ssize_t ret;
-
-	while (count) {
-		ret = write(fd, data, count);
-
-		if (ret == -1) {
-			warn("%s failed %s", "write", strerror(errno));
-			return -errno;
-		}
-
-		if (ret == 0) {
-			warn("short %s", "write");
-			return -ERANGE;
-		}
-
-		data += ret;
-		count -= ret;
-	}
-
-	return 0;
+	return fdio(fd, (void *)data, count, 0, 0, 1);
 }
-#endif
+

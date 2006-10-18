@@ -132,7 +132,7 @@ static struct change_list *read_changelist(int cl_fd)
 {
 	struct cl_header clh;
 
-	if (read(cl_fd, &clh, sizeof(clh)) != sizeof(clh)) { /* FIXME: need something like diskio */
+	if (fdread(cl_fd, &clh, sizeof(clh)) < 0) {
 		error("Not a proper changelist file (too short).\n");
 		return NULL;
 	}
@@ -144,7 +144,7 @@ static struct change_list *read_changelist(int cl_fd)
 
 	u32 chunksize_bits;
 
-	if (read(cl_fd, &chunksize_bits, sizeof(u32)) != sizeof(u32)) { /* FIXME: need something like diskio */
+	if (fdread(cl_fd, &chunksize_bits, sizeof(u32)) < 0) {
 		error("Not a proper changelist file (no chunksize).\n");
 		return NULL;
 	}
@@ -159,7 +159,7 @@ static struct change_list *read_changelist(int cl_fd)
 
 	trace_on(printf("reading changelist from file\n"););
 	for (;;) {
-		len = read(cl_fd, &chunkaddr, sizeof(u64)); /* FIXME: need something like diskio */
+		len = read(cl_fd, &chunkaddr, sizeof(u64)); /* FIXME: need to handle short read but fdread() doesn't distinguish short read vs. no read EOF */
 
 		if (len == 0)
 			break;
@@ -190,18 +190,18 @@ static int write_changelist(int change_fd, struct change_list const *cl)
 
 	strncpy(clh.magic, CHANGELIST_MAGIC_ID, sizeof(clh.magic));
 
-	if (write(change_fd, &clh, sizeof(clh)) < 0)
+	if (fdwrite(change_fd, &clh, sizeof(clh)) < 0)
 		error("unable to write magic information to changelist file");
 
-	if (write(change_fd, &cl->chunksize_bits, sizeof(cl->chunksize_bits)) < 0)
+	if (fdwrite(change_fd, &cl->chunksize_bits, sizeof(cl->chunksize_bits)) < 0)
 		error("unable to write chunk size to changelist file");
 
-	if (write(change_fd, cl->chunks, cl->count * sizeof(cl->chunks[0])) < 0)
+	if (fdwrite(change_fd, cl->chunks, cl->count * sizeof(cl->chunks[0])) < 0)
 		error("unable to write changelist file");
 
 	u64 marker = -1;
 
-	if (write(change_fd, &marker, sizeof(marker)) < 0)
+	if (fdwrite(change_fd, &marker, sizeof(marker)) < 0)
 		error("unable to write changelist marker");
 
 	return 0;
@@ -290,11 +290,11 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 		trace_off(printf("\nReading data to calculate "U64FMT"th chunk starting at "U64FMT" to delta\n", num_of_chunks, extent_addr););
 
 		/* read in and generate the necessary chunk information */
-		if (diskio(snapdev1, extent_data1, extent_size, extent_addr, 0) < 0) {
+		if (diskread(snapdev1, extent_data1, extent_size, extent_addr) < 0) {
 			printf("\nExtent_data1 for "U64FMT"th chunk starting at "U64FMT" not read properly from snapdev1.\n", num_of_chunks, extent_addr);
 			goto out_error;
 		}
-		if (diskio(snapdev2, extent_data2, extent_size, extent_addr, 0) < 0) {
+		if (diskread(snapdev2, extent_data2, extent_size, extent_addr) < 0) {
 			printf("\nExtent_data2 for "U64FMT"th chunk starting at "U64FMT" not read properly from snapdev2.\n", num_of_chunks, extent_addr);
 			goto out_error;
 		}
@@ -395,33 +395,39 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 		
 		/* write the chunk header and chunk delta data to the delta file*/
 		trace_off(printf("Writing chunk "U64FMT" at "U64FMT" to delta\n", chunk_num, extent_addr););
-		if (write(deltafile, &deh, sizeof(deh)) != sizeof(deh)) { /* FIXME: need something like diskio */
+		if (fdwrite(deltafile, &deh, sizeof(deh)) < 0) {
 			printf("\nDelta_extent_header was not written properly to deltafile.\n");
 			goto out_error;
 		}
 		
 		if (deh.compress == TRUE) {
 			if (deh.setting == XDELTA) {
-				if (write(deltafile, comp_delta, comp_size) != comp_size) {
+				if (fdwrite(deltafile, comp_delta, comp_size) < 0) {
 					printf("\nComp_delta was not written properly to deltafile.\n");
 					goto out_error;
 				}
 			} else {
-				if (write(deltafile, ext2_comp_delta, ext2_comp_size) != ext2_comp_size) {
+				if (fdwrite(deltafile, ext2_comp_delta, ext2_comp_size) < 0) {
 					printf("\nExt2_comp_delta was not written properly to deltafile.\n");
 					goto out_error;
 				}
 			}
 		} else {
-			if (write(deltafile, delta_data, delta_size) != delta_size) {
+			if (fdwrite(deltafile, delta_data, delta_size) < 0) {
 				printf("\nDelta_data was not written properly to deltafile.\n");
 				goto out_error;
 			}
 		}
 		
                 if (mode == TEST) {
-			write(deltafile, extent_data1, extent_size);
-			write(deltafile, extent_data2, extent_size);
+			if (fdwrite(deltafile, extent_data1, extent_size) < 0) {
+				printf("extent_data1 was not written properly to deltafile.\n");
+				goto out_error;
+			}
+			if (fdwrite(deltafile, extent_data2, extent_size) < 0) {
+				printf("extent_data2 was not written properly to deltafile.\n");
+				goto out_error;
+			}
                 }
 
 		chunk_num = chunk_num + num_of_chunks;
@@ -471,11 +477,11 @@ static int generate_delta(u32 mode, int level, struct change_list *cl, int delta
 	dh.chunk_size = 1 << cl->chunksize_bits;
 	dh.mode = mode;
 
-	trace_on(fprintf(stderr, "writing delta file with chunk_num="U64FMT" chunk_size=%u mode=%u\n", dh.chunk_num, dh.chunk_size, dh.mode););
-	if (write(deltafile, &dh, sizeof(dh)) < sizeof(dh))
-		return -errno;
-
 	int err;
+
+	trace_on(fprintf(stderr, "writing delta file with chunk_num="U64FMT" chunk_size=%u mode=%u\n", dh.chunk_num, dh.chunk_size, dh.mode););
+	if ((err = fdwrite(deltafile, &dh, sizeof(dh))) < 0)
+		return err;
 
 	if ((err = generate_delta_extents(mode, level, cl, deltafile, dev1name, dev2name, TRUE)) < 0)
 		return err;
@@ -666,14 +672,15 @@ static int apply_delta_extents(int deltafile, u32 mode, u32 chunk_size, u64 chun
 	u64 extent_addr, chunk_num;
         int c1_chk_sum = 0;
 	int ret = 0;
+	int err;
 
 	for (chunk_num = 0; chunk_num < chunk_count;) {
 
 		trace_off(printf("reading chunk "U64FMT" header\n", chunk_num););
-		if (read(deltafile, &deh, sizeof(deh)) != sizeof(deh)) { /* FIXME: need something like diskio */
-			fprintf(stderr, "Error reading extent "U64FMT", expected "U64FMT" chunks.\n", chunk_num, chunk_count);
+		if ((err = fdread(deltafile, &deh, sizeof(deh))) < 0) {
+			fprintf(stderr, "Error reading extent "U64FMT", expected "U64FMT" chunks: %s\n", chunk_num, chunk_count, strerror(-err));
 			close(snapdev);
-			return -2; /* FIXME: use named error */
+			return err;
 		}
 
 		if (deh.magic_num != MAGIC_NUM) {
@@ -693,24 +700,24 @@ static int apply_delta_extents(int deltafile, u32 mode, u32 chunk_size, u64 chun
 		
 		extent_addr = deh.extent_addr;
 
-		trace_off(printf("data length is %Lu (buffer is %Lu)\n", deh.data_length, extent_size);); errno = 0;
+		trace_off(printf("data length is %Lu (buffer is %Lu)\n", deh.data_length, extent_size););
 
 		if (deh.compress == TRUE) {
-			if (read(deltafile, comp_delta, deh.data_length) != deh.data_length) { /* FIXME: need something like diskio */
-				fprintf(stderr, "\nCould not properly read comp_delta from deltafile: %s.\n", strerror(errno));
+			if ((err = fdread(deltafile, comp_delta, deh.data_length)) < 0) {
+				fprintf(stderr, "\nCould not properly read comp_delta from deltafile: %s.\n", strerror(-err));
 				close(snapdev);
 				return -1;
 			}
 		} else {
-			if (read(deltafile, delta_data, deh.data_length) != deh.data_length) { /* FIXME: need something like diskio */
-				fprintf(stderr, "\nCould not properly read delta_data from deltafile: %s.\n", strerror(errno));
+			if ((err = fdread(deltafile, delta_data, deh.data_length)) < 0) {
+				fprintf(stderr, "\nCould not properly read delta_data from deltafile: %s.\n", strerror(-err));
 				close(snapdev);
 				return -1;
 			}
 		}
 
 		trace_off(printf("reading extent "U64FMT" data at "U64FMT"\n", chunk_num, extent_addr););
-		if (diskio(snapdev, extent_data, extent_size, extent_addr, 0) < 0) {
+		if (diskread(snapdev, extent_data, extent_size, extent_addr) < 0) {
 			fprintf(stderr, "\nSnapdev reading of downstream extent has failed.\n");
 			close(snapdev);
 			return -1;
@@ -755,12 +762,12 @@ static int apply_delta_extents(int deltafile, u32 mode, u32 chunk_size, u64 chun
 				return -1;
 			}
 			if (mode == TEST) {
-				if (read(deltafile, up_extent1, extent_size) != extent_size) {
-					printf("\nUp_extent1 not read properly from deltafile. \n");
+				if (fdread(deltafile, up_extent1, extent_size) < 0) {
+					printf("\nUp_extent1 not read properly from deltafile.\n");
 					return -1;
 				}
-				if (read(deltafile, up_extent2, extent_size) != extent_size) {
-					printf("\nUp_extent2 not read properly from deltafile. \n");
+				if (fdread(deltafile, up_extent2, extent_size) < 0) {
+					printf("\nUp_extent2 not read properly from deltafile.\n");
 					return -1;
 				}
 				c1_chk_sum = checksum((const unsigned char *) extent_data, extent_size);
@@ -798,7 +805,7 @@ static int apply_delta_extents(int deltafile, u32 mode, u32 chunk_size, u64 chun
 			}
                 }
 		
-		if (diskio(snapdev, updated, extent_size, extent_addr, 1) < 0) {
+		if (diskwrite(snapdev, updated, extent_size, extent_addr) < 0) {
 			printf("\nUpdated was not written properly at "U64FMT" in snapdev.\n", extent_addr);
 			return -1;
 		}
@@ -829,7 +836,7 @@ static int apply_delta(int deltafile, char const *devname)
 {
 	struct delta_header dh;
 
-	if (read(deltafile, &dh, sizeof(dh)) != sizeof(dh)) {
+	if (fdread(deltafile, &dh, sizeof(dh)) < 0) {
 		fprintf(stderr, "Not a proper delta file (too short).\n");
 		return -1; /* FIXME: use named error */
 	}
