@@ -80,7 +80,7 @@ void brelse_dirty(struct buffer *buffer)
 
 int write_buffer_to(struct buffer *buffer, sector_t sector)
 {
-	return diskio(buffer->fd, buffer->data, buffer->size, sector << SECTOR_BITS, 1);
+	return diskwrite(buffer->fd, buffer->data, buffer->size, sector << SECTOR_BITS);
 }
 
 int write_buffer(struct buffer *buffer)
@@ -96,7 +96,7 @@ int write_buffer(struct buffer *buffer)
 int read_buffer(struct buffer *buffer)
 {
 	buftrace(warn("read buffer %llx", buffer->sector););
-	int err = diskio(buffer->fd, buffer->data, buffer->size, buffer->sector << SECTOR_BITS, 0);
+	int err = diskread(buffer->fd, buffer->data, buffer->size, buffer->sector << SECTOR_BITS);
 
 	if (!err)
 		set_buffer_uptodate(buffer);
