@@ -17,8 +17,6 @@
 #define EFULL ENOMEM
 #define PACKED __attribute__ ((packed))
 
-int diskio(int fd, void *data, size_t count, off_t offset, int write);
-
 static inline int readpipe(int fd, void *buffer, size_t count)
 {
 	int n;
