@@ -1566,7 +1566,7 @@ int main(int argc, char *argv[])
 		return ddsnap_daemon(sock, argv[2]);
 
 	}
-	printf("Unrecognized command %s.\n", command);
+	fprintf(stderr, "%s: unrecognized subcommand: %s.\n", argv[0], command);
 
 	return 1;
 }
