@@ -1,3 +1,6 @@
+Patch for kernel source tree 2.6.16:
+	Apply hotcakes-2.6.16.patch
+
 Patch for kernel source tree 2.6.17-rc6:
 	Apply hotcakes-2.6.17-rc6.patch
 
