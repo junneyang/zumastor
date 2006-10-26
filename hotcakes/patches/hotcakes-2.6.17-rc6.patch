@@ -1,7 +1,7 @@
 diff -urp linux-2.6.17-rc6.clean/drivers/md/dm-ddraid.c linux-2.6.17-rc6/drivers/md/dm-ddraid.c
 --- linux-2.6.17-rc6.clean/drivers/md/dm-ddraid.c	2006-09-29 10:55:35.000000000 -0700
-+++ linux-2.6.17-rc6/drivers/md/dm-ddraid.c	2006-10-02 13:44:16.000000000 -0700
-@@ -0,0 +1,1619 @@
++++ linux-2.6.17-rc6/drivers/md/dm-ddraid.c	2006-10-26 13:10:50.000000000 -0700
+@@ -0,0 +1,1621 @@
 +#include <linux/fs.h>
 +#include <linux/slab.h>
 +#include <linux/mm.h>
@@ -16,6 +16,8 @@ diff -urp linux-2.6.17-rc6.clean/drivers/md/dm-ddraid.c linux-2.6.17-rc6/drivers
 +#include <linux/bio.h>
 +#include "dm.h"
 +#include "dm-ddraid.h"
++
++#define DM_MSG_PREFIX "ddraid"
 +
 +#define warn(string, args...) do { printk("%s: " string "\n", __func__, ##args); } while (0)
 +#define error(string, args...) do { warn(string, ##args); BUG(); } while (0)
@@ -1674,8 +1676,8 @@ diff -urp linux-2.6.17-rc6.clean/drivers/md/dm-ddraid.h linux-2.6.17-rc6/drivers
 +#define MIN_REGION_BITS 12
 diff -urp linux-2.6.17-rc6.clean/drivers/md/dm-ddsnap.c linux-2.6.17-rc6/drivers/md/dm-ddsnap.c
 --- linux-2.6.17-rc6.clean/drivers/md/dm-ddsnap.c	2006-09-29 10:55:32.000000000 -0700
-+++ linux-2.6.17-rc6/drivers/md/dm-ddsnap.c	2006-10-16 17:10:26.000000000 -0700
-@@ -0,0 +1,1192 @@
++++ linux-2.6.17-rc6/drivers/md/dm-ddsnap.c	2006-10-26 13:09:40.000000000 -0700
+@@ -0,0 +1,1197 @@
 +#include <linux/fs.h>
 +#include <linux/slab.h>
 +#include <linux/mm.h>
@@ -1691,6 +1693,8 @@ diff -urp linux-2.6.17-rc6.clean/drivers/md/dm-ddsnap.c linux-2.6.17-rc6/drivers
 +#include <linux/bio.h>
 +#include "dm.h"
 +#include "dm-ddsnap.h"
++
++#define DM_MSG_PREFIX "ddsnap"
 +
 +#define warn(string, args...) do { printk("%s: " string "\n", __func__, ##args); } while (0)
 +#define error(string, args...) do { warn(string, ##args); BUG(); } while (0)
@@ -2008,6 +2012,7 @@ diff -urp linux-2.6.17-rc6.clean/drivers/md/dm-ddsnap.c linux-2.6.17-rc6/drivers
 +	struct devinfo *info = target->private;
 +	struct chunk_range *p = body->ranges;
 +	unsigned shift = info->chunksize_bits - SECTOR_SHIFT, mask = (1 << shift) - 1;
++	unsigned long irqflags;
 +	int i, j, submitted = 0;
 +
 +	trace(show_pending(info);)
@@ -2075,7 +2080,9 @@ diff -urp linux-2.6.17-rc6.clean/drivers/md/dm-ddsnap.c linux-2.6.17-rc6/drivers
 +				.old_private = bio->bi_private };
 +			bio->bi_end_io = snapshot_read_end_io;
 +			bio->bi_private = hook;
++			spin_lock_irqsave(&info->end_io_lock, irqflags);
 +			list_add(&hook->list, &info->locked);
++			spin_unlock_irqrestore(&info->end_io_lock, irqflags);
 +		}
 +
 +		generic_make_request(bio);
@@ -2219,6 +2226,7 @@ diff -urp linux-2.6.17-rc6.clean/drivers/md/dm-ddsnap.c linux-2.6.17-rc6/drivers
 +			trace_on(warn("identify succeeded. chunksize %u", chunksize_bits););
 +			info->chunksize_bits = chunksize_bits;
 +			info->chunkshift     = chunksize_bits - SECTOR_SHIFT;
++			target->split_io = 1 << info->chunkshift; // !!! lose this as soon as possible
 +			/* set usecount */
 +			if (outbead(sock, SET_USECOUNT, struct snapinfo, info->snap, 0, 1) < 0) 
 +				warn("unable to send message to snapshot server");
@@ -2773,7 +2781,6 @@ diff -urp linux-2.6.17-rc6.clean/drivers/md/dm-ddsnap.c linux-2.6.17-rc6/drivers
 +	if ((err = kernel_thread((void *)control, target, 0)) < 0)
 +		goto eek;
 +	warn("Created snapshot device origin=%s snapstore=%s socket=%s snapshot=%i", argv[0], argv[1], argv[2], snap);
-+	target->split_io = 1 << info->chunkshift; // !!! lose this as soon as possible
 +	return 0;
 +
 +eek:	warn("Virtual device create error %i: %s!", err, error);

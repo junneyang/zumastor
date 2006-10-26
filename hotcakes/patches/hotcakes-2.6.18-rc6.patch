@@ -1,48 +1,7 @@
-diff --git a/drivers/md/Kconfig b/drivers/md/Kconfig
-index bf869ed..b0e3453 100644
---- a/drivers/md/Kconfig
-+++ b/drivers/md/Kconfig
-@@ -249,5 +249,21 @@ config DM_MULTIPATH_EMC
- 	---help---
- 	  Multipath support for EMC CX/AX series hardware.
- 
-+config DM_DDRAID
-+	tristate "Distributed Data RAID target (EXPERIMENTAL)"
-+	depends on BLK_DEV_DM && EXPERIMENTAL
-+	---help---
-+	  This device-mapper target allows you to join together several
-+	  network and/or local block devices into a raid 3.5 array.
-+	  If unsure, say N.
-+
-+config DM_DDSNAP
-+	tristate "Distributed Data Snapshot target (EXPERIMENTAL)"
-+	depends on BLK_DEV_DM && EXPERIMENTAL
-+	---help---
-+	  This device-mapper target allows you to take multiple simultaneous
-+	  read/write snapshots of a clustered or non-clustered block devices.
-+	  If unsure, say N.
-+
- endmenu
- 
-diff --git a/drivers/md/Makefile b/drivers/md/Makefile
-index 34957a6..19c6dab 100644
---- a/drivers/md/Makefile
-+++ b/drivers/md/Makefile
-@@ -36,6 +36,8 @@ obj-$(CONFIG_DM_MULTIPATH_EMC)	+= dm-emc
- obj-$(CONFIG_DM_SNAPSHOT)	+= dm-snapshot.o
- obj-$(CONFIG_DM_MIRROR)		+= dm-mirror.o
- obj-$(CONFIG_DM_ZERO)		+= dm-zero.o
-+obj-$(CONFIG_DM_DDRAID)		+= dm-ddraid.o
-+obj-$(CONFIG_DM_DDSNAP)		+= dm-ddsnap.o
- 
- quiet_cmd_unroll = UNROLL  $@
-       cmd_unroll = $(PERL) $(srctree)/$(src)/unroll.pl $(UNROLL) \
-diff --git a/drivers/md/dm-ddraid.c b/drivers/md/dm-ddraid.c
-new file mode 100644
-index 0000000..856a73e
---- /dev/null
-+++ b/drivers/md/dm-ddraid.c
-@@ -0,0 +1,1623 @@
+diff -urp linux-2.6.17-rc6.clean/drivers/md/dm-ddraid.c linux-2.6.17-rc6/drivers/md/dm-ddraid.c
+--- linux-2.6.17-rc6.clean/drivers/md/dm-ddraid.c	2006-09-29 10:55:35.000000000 -0700
++++ linux-2.6.17-rc6/drivers/md/dm-ddraid.c	2006-10-26 13:10:50.000000000 -0700
+@@ -0,0 +1,1621 @@
 +#include <linux/fs.h>
 +#include <linux/slab.h>
 +#include <linux/mm.h>
@@ -1664,13 +1623,9 @@ index 0000000..856a73e
 +
 +module_init(dm_ddraid_init);
 +module_exit(dm_ddraid_exit);
-+
-+MODULE_LICENSE("GPL");
-diff --git a/drivers/md/dm-ddraid.h b/drivers/md/dm-ddraid.h
-new file mode 100644
-index 0000000..53f28e3
---- /dev/null
-+++ b/drivers/md/dm-ddraid.h
+diff -urp linux-2.6.17-rc6.clean/drivers/md/dm-ddraid.h linux-2.6.17-rc6/drivers/md/dm-ddraid.h
+--- linux-2.6.17-rc6.clean/drivers/md/dm-ddraid.h	2006-09-29 10:55:36.000000000 -0700
++++ linux-2.6.17-rc6/drivers/md/dm-ddraid.h	2006-10-02 13:44:22.000000000 -0700
 @@ -0,0 +1,47 @@
 +#define PACKED __attribute__ ((packed))
 +
@@ -1719,12 +1674,10 @@ index 0000000..53f28e3
 +
 +// bios submitted before server arrives must be split conservatively (see "bogus")
 +#define MIN_REGION_BITS 12
-diff --git a/drivers/md/dm-ddsnap.c b/drivers/md/dm-ddsnap.c
-new file mode 100644
-index 0000000..b6ab518
---- /dev/null
-+++ b/drivers/md/dm-ddsnap.c
-@@ -0,0 +1,1155 @@
+diff -urp linux-2.6.17-rc6.clean/drivers/md/dm-ddsnap.c linux-2.6.17-rc6/drivers/md/dm-ddsnap.c
+--- linux-2.6.17-rc6.clean/drivers/md/dm-ddsnap.c	2006-09-29 10:55:32.000000000 -0700
++++ linux-2.6.17-rc6/drivers/md/dm-ddsnap.c	2006-10-26 13:09:40.000000000 -0700
+@@ -0,0 +1,1197 @@
 +#include <linux/fs.h>
 +#include <linux/slab.h>
 +#include <linux/mm.h>
@@ -1781,8 +1734,13 @@ index 0000000..b6ab518
 +	iocb.ki_pos = file->f_pos;
 +	oldseg = get_fs();
 +	set_fs(get_ds());
++
 +	while (count) {
 +		int chunk = (*op)(&iocb, buffer, count, iocb.ki_pos);
++		if (chunk == -ERESTARTSYS) {
++			warn("got a ERESTARTSYS"); /* should never get here */
++			continue;
++		}
 +		if (chunk <= 0) {
 +			err = chunk? chunk: -EPIPE;
 +			break;
@@ -2049,11 +2007,12 @@ index 0000000..b6ab518
 +
 +/* This is the part that does all the work. */
 +
-+int replied_rw(struct dm_target *target, struct rw_request *body, unsigned length, int rw, int snap)
++int replied_rw(struct dm_target *target, struct rw_request *body, unsigned length, int rw, int snap, int failed_io)
 +{
 +	struct devinfo *info = target->private;
 +	struct chunk_range *p = body->ranges;
 +	unsigned shift = info->chunksize_bits - SECTOR_SHIFT, mask = (1 << shift) - 1;
++	unsigned long irqflags;
 +	int i, j, submitted = 0;
 +
 +	trace(show_pending(info);)
@@ -2085,6 +2044,13 @@ index 0000000..b6ab518
 +		bio = pending->bio;
 +		trace(warn("Handle pending IO sector %Lx", (long long)bio->bi_sector);)
 +
++		if(failed_io) {
++			warn("Unable to handle pending IO server %Lx", (long long)bio->bi_sector);
++			kmem_cache_free(pending_cache, pending);
++			bio_io_error(bio, bio->bi_size);
++			return -1;
++		}
++
 +		if (chunks != pending->chunks) {
 +			warn("Message mismatch, expected %x got %x", chunks, chunks);
 +			kmem_cache_free(pending_cache, pending);
@@ -2114,7 +2080,9 @@ index 0000000..b6ab518
 +				.old_private = bio->bi_private };
 +			bio->bi_end_io = snapshot_read_end_io;
 +			bio->bi_private = hook;
++			spin_lock_irqsave(&info->end_io_lock, irqflags);
 +			list_add(&hook->list, &info->locked);
++			spin_unlock_irqrestore(&info->end_io_lock, irqflags);
 +		}
 +
 +		generic_make_request(bio);
@@ -2129,8 +2097,23 @@ index 0000000..b6ab518
 +		kick(info->orgdev->bdev);
 +		kick(info->snapdev->bdev);
 +	}
++
 +	return 0;
 +}
++
++/* daemonize code for kernel threads */
++static void daemonize_properly(char const *name, int snap)
++{
++	struct file_struct *files = current->files;
++
++	atomic_inc(&current->files->count); /* a ref count of files */
++	daemonize("%s %d", name, snap);
++	put_files_struct(current->files);   /* decrement the init files */
++	task_lock(current);
++	current->files = files;	/* re-assign file struct */
++	task_unlock(current);
++}
++
 +
 +/*
 + * There happen to be four flavors of server replies to rw queries, two
@@ -2191,10 +2174,11 @@ index 0000000..b6ab518
 +	struct file *sock;
 +	struct task_struct *task = current;
 +	int err, length;
++	u32 chunksize_bits;
 +
-+	strcpy(task->comm, "ddsnap-client");
++	daemonize_properly("ddsnap-clnt", info->snap);
 +	down(&info->exit2_sem);
-+	trace(warn("Client thread started, pid=%i", current->pid);)
++	trace_on(warn("Client thread started, pid=%i for snapshot %d", current->pid, info->snap);)
 +connect:
 +	trace(warn("Request socket connection");)
 +	outbead(info->control_socket, NEED_SERVER, struct { });
@@ -2204,7 +2188,7 @@ index 0000000..b6ab518
 +	sock = info->sock;
 +
 +	while (running(info)) { // stop on module exit
-+		int rw, to_snap;
++		int rw = READ, to_snap = 1, failed_io = 0;
 +
 +		trace(warn("wait message");)
 +		if ((err = readpipe(sock, &message.head, sizeof(message.head))))
@@ -2238,23 +2222,33 @@ index 0000000..b6ab518
 +			break;
 +
 +		case REPLY_IDENTIFY:
-+			trace(warn("identify succeeded");)
++			chunksize_bits = ((struct identify *)message.body)->chunksize_bits;
++			trace_on(warn("identify succeeded. chunksize %u", chunksize_bits););
++			info->chunksize_bits = chunksize_bits;
++			info->chunkshift     = chunksize_bits - SECTOR_SHIFT;
++			target->split_io = 1 << info->chunkshift; // !!! lose this as soon as possible
++			/* set usecount */
++			if (outbead(sock, SET_USECOUNT, struct snapinfo, info->snap, 0, 1) < 0) 
++				warn("unable to send message to snapshot server");
 +			up(&info->server_out_sem);
 +			outbead(info->control_socket, REPLY_CONNECT_SERVER, struct { });
 +			continue;
-+
++		case REPLY_ERROR:	
++			trace_on(warn("failed i/o"););
++			failed_io = 1;
++			break;
 +		default: 
-+			warn("Unknown message %x", message.head.code);
++			warn("Unknown message %x. sending reply error back to server", message.head.code);
 +			continue;
 +		}
 +		if (length < sizeof(struct rw_request))
 +			goto message_too_short;
 +
-+		replied_rw(target, (void *)message.body, length, rw, to_snap);
++		replied_rw(target, (void *)message.body, length, rw, to_snap, failed_io);
 +	}
 +out:
++	warn("%s exiting for snapshot %d", task->comm, info->snap);
 +	up(&info->exit2_sem); /* !!! will crash if module unloaded before ret executes */
-+	warn("%s exiting", task->comm);
 +	return 0;
 +message_too_long:
 +	warn("message %x too long (%u bytes)", message.head.code, message.head.length);
@@ -2267,7 +2261,7 @@ index 0000000..b6ab518
 +	if (!running(info))
 +		goto out;
 +
-+	warn("halt worker");
++	warn("halting worker for snapshot %d",info->snap);
 +	report_error(info);
 +	goto connect;
 +}
@@ -2353,10 +2347,9 @@ index 0000000..b6ab518
 +
 +		while (!list_empty(bucket)) {
 +			struct list_head *entry = bucket->next;
-+
-+			/* FIXME: doesn't compile */
-+			// trace(warn("requeue %u:%Lx", pending->id, pending->chunk););
-+
++			/* struct pending *pending = list_entry(entry, struct pending, list);
++			 * trace(warn("requeue %u:%Lx", pending->id, pending->chunk);)
++                         */
 +			list_move(entry, &info->queries);
 +			up(&info->more_work_sem);
 +		}
@@ -2371,8 +2364,8 @@ index 0000000..b6ab518
 +	struct task_struct *task = current;
 +	int err;
 +
-+	strcpy(task->comm, "ddsnap-worker");
-+	trace(warn("Worker thread started, pid=%i", current->pid);)
++	daemonize_properly("ddsnap-wrkr", info->snap);
++	trace_on(warn("Worker thread started, pid=%i for snapshot %d", current->pid, info->snap);)
 +	down(&info->exit1_sem);
 +	goto recover; /* just for now we'll always upload locks, even on fresh start */
 +restart:
@@ -2433,22 +2426,22 @@ index 0000000..b6ab518
 +		goto recover;
 +	}
 +finish:
++	trace_on(warn("%s exiting for snapshot %d", task->comm, info->snap);)
 +	up(&info->exit1_sem); /* !!! crashes if module unloaded before ret executes */
-+	trace_on(warn("%s exiting", task->comm);)
 +	return 0;
 +
 +report:
 +	warn("worker socket error %i", err);
 +	report_error(info);
 +recover:
-+	trace_on(warn("worker recovering");)
++	trace_on(warn("worker recovering for snapshot %d", info->snap);)
 +	down(&info->recover_sem);
 +	if ((info->flags & FINISH_FLAG))
 +		goto finish;
 +	if (is_snapshot(info))
 +		upload_locks(info);
 +	requeue_queries(info);
-+	trace_on(warn("worker resuming");)
++	trace_on(warn("worker resuming for snapshot %d", info->snap);)
 +
 +	info->flags &= ~(RECOVER_FLAG|(1 << REPORT_BIT));
 +	up(&info->recover_sem);
@@ -2475,8 +2468,8 @@ index 0000000..b6ab518
 +	struct file *sock;
 +	int err, length;
 +
-+	strcpy(task->comm, "ddsnap-control");
-+	trace(warn("Control thread started, pid=%i", current->pid);)
++	daemonize_properly("ddsnap-cntl", info->snap);
++	trace_on(warn("Control thread started, pid=%i for snapshot %d", current->pid, info->snap);)
 +	sock = info->control_socket;
 +	trace(warn("got socket %p", sock);)
 +
@@ -2529,8 +2522,8 @@ index 0000000..b6ab518
 +		}
 +	}
 +out:
++	warn("%s exiting for snapshot %d", task->comm, info->snap);
 +	up(&info->exit3_sem); /* !!! will crash if module unloaded before ret executes */
-+	warn("%s exiting", task->comm);
 +	return 0;
 +message_too_long:
 +	warn("message %x too long (%u bytes)", message.head.code, message.head.length);
@@ -2634,17 +2627,20 @@ index 0000000..b6ab518
 +{
 +	struct devinfo *info = target->private;
 +	int err; /* I have no mouth but I must scream */
-+
 +	trace(warn("%p", target);)
 +	if (!info)
 +		return;
-+
++	/* unset the usecount for this device */
++	warn("Unsetting usecount info");
++	if (outbead(info->sock, SET_USECOUNT, struct snapinfo, info->snap, 0, -1) < 0) 
++		warn("unable to send message to snapshot server");
 +	/* Unblock helper threads */
 +	info->flags |= FINISH_FLAG;
 +	up(&info->server_in_sem); // unblock incoming thread
 +	up(&info->server_out_sem); // unblock io request threads
 +	up(&info->recover_sem); // unblock worker recovery
-+
++	
++	warn("closing socket connection");
 +	if (info->sock && (err = shutdown_socket(info->sock)))
 +		warn("server socket shutdown error %i", err);
 +	if (info->sock && (err = shutdown_socket(info->control_socket)))
@@ -2768,7 +2764,7 @@ index 0000000..b6ab518
 +	sys_close(err);
 +
 +#ifdef CACHE
-+	bm_size = round_up((target->len  + 7) >> (chunksize_bits + 3), sizeof(u32)); // !!! wrong
++	bm_size = round_up((target->len  + 7) >> (chunksize_bits + 3), sizeof(u32)); barf // !!! wrong
 +	error = "Can't allocate bitmap for origin";
 +	if (!(info->shared_bitmap = vmalloc(bm_size)))
 +		goto eek;
@@ -2778,14 +2774,13 @@ index 0000000..b6ab518
 +#endif
 +
 +	error = "Can't start daemon";
-+	if ((err = kernel_thread((void *)incoming, target, CLONE_KERNEL)) < 0)
++	if ((err = kernel_thread((void *)incoming, target, 0)) < 0)
 +		goto eek;
-+	if ((err = kernel_thread((void *)worker, target, CLONE_KERNEL)) < 0)
++	if ((err = kernel_thread((void *)worker, target, 0)) < 0)
 +		goto eek;
-+	if ((err = kernel_thread((void *)control, target, CLONE_KERNEL)) < 0)
++	if ((err = kernel_thread((void *)control, target, 0)) < 0)
 +		goto eek;
-+	warn("Created snapshot device snapstore=%s origin=%s socket=%s snapshot=%i", argv[0], argv[1], argv[2], snap);
-+	target->split_io = 1 << info->chunkshift; // !!! lose this as soon as possible
++	warn("Created snapshot device origin=%s snapstore=%s socket=%s snapshot=%i", argv[0], argv[1], argv[2], snap);
 +	return 0;
 +
 +eek:	warn("Virtual device create error %i: %s!", err, error);
@@ -2880,12 +2875,10 @@ index 0000000..b6ab518
 +module_exit(dm_ddsnap_exit);
 +
 +MODULE_LICENSE("GPL");
-diff --git a/drivers/md/dm-ddsnap.h b/drivers/md/dm-ddsnap.h
-new file mode 100644
-index 0000000..8bed03d
---- /dev/null
-+++ b/drivers/md/dm-ddsnap.h
-@@ -0,0 +1,81 @@
+diff -urp linux-2.6.17-rc6.clean/drivers/md/dm-ddsnap.h linux-2.6.17-rc6/drivers/md/dm-ddsnap.h
+--- linux-2.6.17-rc6.clean/drivers/md/dm-ddsnap.h	2006-09-29 10:55:30.000000000 -0700
++++ linux-2.6.17-rc6/drivers/md/dm-ddsnap.h	2006-10-02 13:44:22.000000000 -0700
+@@ -0,0 +1,99 @@
 +#define PACKED __attribute__ ((packed))
 +#define MAGIC  0xadbe
 +
@@ -2929,17 +2922,35 @@ index 0000000..8bed03d
 +	REPLY_GENERATE_CHANGE_LIST,
 +	SET_PRIORITY,
 +	REPLY_SET_PRIORITY,
++	SET_USECOUNT,
++	REPLY_SET_USECOUNT,
++	STREAM_CHANGE_LIST,
++	REPLY_STREAM_CHANGE_LIST,
++	SEND_DELTA,
++	SEND_DELTA_PROCEED,
++	SEND_DELTA_DONE,
++};
++
++enum csnap_error_codes
++{
++	REPLY_ERROR_REFUSED = 0x01,
++	REPLY_ERROR_OTHER,
 +};
 +
 +#define ID_BITS 16
 +
++struct reply_error { uint32_t err; uint32_t trackno; } PACKED;
 +struct match_id { uint64_t id; uint64_t mask; } PACKED;
 +struct set_id { uint64_t id; } PACKED;
-+struct identify { uint64_t id; int32_t snap; } PACKED;
++struct identify { uint64_t id; int32_t snap; uint32_t chunksize_bits; } PACKED;
 +struct create_snapshot { uint32_t snap; } PACKED;
 +struct generate_changelist { uint32_t snap1; uint32_t snap2; } PACKED;
-+struct snapinfo { uint64_t snap; int8_t prio; char zero[3]; uint64_t ctime; } PACKED;
++struct snapinfo { uint64_t snap; int8_t prio; uint8_t usecnt; char zero[3]; uint64_t ctime; } PACKED;
 +struct snaplist { uint32_t count; struct snapinfo snapshots[]; } PACKED;
++struct stream_changelist { uint32_t snap1; uint32_t snap2; } PACKED;
++struct changelist_stream { uint64_t chunk_count; uint32_t chunksize_bits; } PACKED;
++struct send_delta { int32_t snapid; uint64_t chunk_count; uint32_t chunk_size; uint32_t delta_mode; } PACKED;
++
 +
 +typedef uint16_t shortcount; /* !!! what is this all about */
 +
@@ -2967,11 +2978,10 @@ index 0000000..8bed03d
 +struct rwmessage { struct head head; struct rw_request body; };
 +struct messagebuf { struct head head; char body[maxbody]; };
 +/* ...decruft me */
-diff --git a/drivers/md/dm-table.c b/drivers/md/dm-table.c
-index 75fe949..d6977ca 100644
---- a/drivers/md/dm-table.c
-+++ b/drivers/md/dm-table.c
-@@ -481,8 +481,10 @@ static int __table_get_device(struct dm_
+diff -urp linux-2.6.17-rc6.clean/drivers/md/dm-table.c linux-2.6.17-rc6/drivers/md/dm-table.c
+--- linux-2.6.17-rc6.clean/drivers/md/dm-table.c	2006-06-05 17:57:02.000000000 -0700
++++ linux-2.6.17-rc6/drivers/md/dm-table.c	2006-09-19 10:02:51.000000000 -0700
+@@ -441,8 +441,10 @@ static int __table_get_device(struct dm_
  			return -EOVERFLOW;
  	} else {
  		/* convert the path to a device */
@@ -2983,7 +2993,7 @@ index 75fe949..d6977ca 100644
  	}
  
  	dd = find_device(&t->devices, dev);
-@@ -506,8 +508,10 @@ static int __table_get_device(struct dm_
+@@ -466,8 +468,10 @@ static int __table_get_device(struct dm_
  
  	} else if (dd->mode != (mode | dd->mode)) {
  		r = upgrade_mode(dd, mode, t->md);
@@ -2995,7 +3005,7 @@ index 75fe949..d6977ca 100644
  	}
  	atomic_inc(&dd->count);
  
-@@ -528,7 +532,11 @@ int dm_get_device(struct dm_target *ti, 
+@@ -488,7 +492,11 @@ int dm_get_device(struct dm_target *ti, 
  {
  	int r = __table_get_device(ti->table, ti, path,
  				   start, len, mode, result);
@@ -3007,11 +3017,47 @@ index 75fe949..d6977ca 100644
  		request_queue_t *q = bdev_get_queue((*result)->bdev);
  		struct io_restrictions *rs = &ti->limits;
  
-diff --git a/net/socket.c b/net/socket.c
-index 6d261bf..4f8fadd 100644
---- a/net/socket.c
-+++ b/net/socket.c
-@@ -2161,6 +2161,12 @@ static long compat_sock_ioctl(struct fil
+diff -urp linux-2.6.17-rc6.clean/drivers/md/Kconfig linux-2.6.17-rc6/drivers/md/Kconfig
+--- linux-2.6.17-rc6.clean/drivers/md/Kconfig	2006-06-05 17:57:02.000000000 -0700
++++ linux-2.6.17-rc6/drivers/md/Kconfig	2006-09-19 10:02:51.000000000 -0700
+@@ -263,5 +263,21 @@ config DM_MULTIPATH_EMC
+ 	---help---
+ 	  Multipath support for EMC CX/AX series hardware.
+ 
++config DM_DDRAID
++	tristate "Distributed Data RAID target (EXPERIMENTAL)"
++	depends on BLK_DEV_DM && EXPERIMENTAL
++	---help---
++	  This device-mapper target allows you to join together several
++	  network and/or local block devices into a raid 3.5 array.
++	  If unsure, say N.
++
++config DM_DDSNAP
++	tristate "Distributed Data Snapshot target (EXPERIMENTAL)"
++	depends on BLK_DEV_DM && EXPERIMENTAL
++	---help---
++	  This device-mapper target allows you to take multiple simultaneous
++	  read/write snapshots of a clustered or non-clustered block devices.
++	  If unsure, say N.
++
+ endmenu
+ 
+diff -urp linux-2.6.17-rc6.clean/drivers/md/Makefile linux-2.6.17-rc6/drivers/md/Makefile
+--- linux-2.6.17-rc6.clean/drivers/md/Makefile	2006-06-05 17:57:02.000000000 -0700
++++ linux-2.6.17-rc6/drivers/md/Makefile	2006-09-19 10:02:51.000000000 -0700
+@@ -37,6 +37,8 @@ obj-$(CONFIG_DM_MULTIPATH_EMC)	+= dm-emc
+ obj-$(CONFIG_DM_SNAPSHOT)	+= dm-snapshot.o
+ obj-$(CONFIG_DM_MIRROR)		+= dm-mirror.o
+ obj-$(CONFIG_DM_ZERO)		+= dm-zero.o
++obj-$(CONFIG_DM_DDRAID)		+= dm-ddraid.o
++obj-$(CONFIG_DM_DDSNAP)		+= dm-ddsnap.o
+ 
+ quiet_cmd_unroll = UNROLL  $@
+       cmd_unroll = $(PERL) $(srctree)/$(src)/unroll.pl $(UNROLL) \
+diff -urp linux-2.6.17-rc6.clean/net/socket.c linux-2.6.17-rc6/net/socket.c
+--- linux-2.6.17-rc6.clean/net/socket.c	2006-06-05 17:57:02.000000000 -0700
++++ linux-2.6.17-rc6/net/socket.c	2006-09-19 10:02:51.000000000 -0700
+@@ -2160,6 +2160,12 @@ static long compat_sock_ioctl(struct fil
  }
  #endif
  
