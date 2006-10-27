@@ -1,3 +1,5 @@
+
+
 /*
  * Snapshot Metadata Server
  *
@@ -181,7 +183,7 @@ struct eleaf
 	le_u16 magic;
 	le_u16 version;
 	le_u32 count;
-	le_u64 base_chunk;
+	le_u64 base_chunk; // !!! FIXME the code doesn't use the base_chunk properly
 	le_u64 using_mask;
 	struct etree_map
 	{
@@ -555,19 +557,22 @@ static struct buffer *snapread(struct superblock const *sb, sector_t sector)
 	return bread(sb->metadev, sector, sb->blocksize);
 }
 
+static unsigned leaf_freespace(struct eleaf *leaf);
+static unsigned leaf_payload(struct eleaf *leaf);
+
 static void show_leaf(struct eleaf *leaf)
 {
 	struct exception const *p;
 	int i;
 	
-	printf("%i chunks: ", leaf->count);
+	printf("base chunk: %Lx and %i chunks: ", leaf->base_chunk, leaf->count);
 	for (i = 0; i < leaf->count; i++) {
-		printf("%x=", leaf->map[i].rchunk);
-		// printf("@%i ", leaf->map[i].offset);
+		printf("%Lx=", leaf->map[i].rchunk);
+		printf("@offset:%i ", leaf->map[i].offset);
 		for (p = emap(leaf, i); p < emap(leaf, i+1); p++)
 			printf("%Lx/%08llx%s", p->chunk, p->share, p+1 < emap(leaf, i+1)? ",": " ");
 	}
-	// printf("top@%i", leaf->map[i].offset);
+	printf("top@%i free space calc: %d payload: %d", leaf->map[i].offset, leaf_freespace(leaf), leaf_payload(leaf));
 	printf("\n");
 }
 
@@ -579,7 +584,7 @@ static void show_leaf(struct eleaf *leaf)
 static int origin_chunk_unique(struct eleaf *leaf, u64 chunk, u64 snapmask)
 {
 	u64 using = 0;
-	unsigned i, target = chunk - leaf->base_chunk;
+	u64 i, target = chunk - leaf->base_chunk;
 	struct exception const *p;
 
 	for (i = 0; i < leaf->count; i++)
@@ -657,25 +662,22 @@ static unsigned leaf_payload(struct eleaf *leaf)
 
 static int add_exception_to_leaf(struct eleaf *leaf, u64 chunk, u64 exception, int snapshot, u64 active)
 {
-	unsigned i, j, target = chunk - leaf->base_chunk;
+	unsigned target = chunk - leaf->base_chunk;
 	u64 mask = 1ULL << snapshot, sharemap;
 	struct exception *ins, *exceptions = emap(leaf, 0);
 	char *maptop = (char *)(&leaf->map[leaf->count + 1]); // include sentinel
-	int free = (char *)exceptions - maptop
-#ifdef BUSHY
- - 10
-#endif
-;
-	trace(warn("chunk %Lx exception %Lx, snapshot = %i", chunk, exception, snapshot););
+	unsigned i, j, free = (char *)exceptions - maptop;
+
+	trace(warn("chunk %Lx exception %Lx, snapshot = %i free space = %u", 
+				chunk, exception, snapshot, free););
 
 	for (i = 0; i < leaf->count; i++) // !!! binsearch goes here
 		if (leaf->map[i].rchunk >= target)
 			break;
 
 	if (i == leaf->count || leaf->map[i].rchunk > target) {
-		if (free < sizeof(struct exception) + sizeof(struct etree_map))
+		if (free < 0 || free < sizeof(struct exception) + sizeof(struct etree_map)) 
 			return -EFULL;
-
 		ins = emap(leaf, i);
 		memmove(&leaf->map[i+1], &leaf->map[i], maptop - (char *)&leaf->map[i]);
 		leaf->map[i].offset = (char *)ins - (char *)leaf;
@@ -685,7 +687,7 @@ static int add_exception_to_leaf(struct eleaf *leaf, u64 chunk, u64 exception, i
 		goto insert;
 	}
 
-	if (free < sizeof(struct exception))
+	if (free < sizeof(struct exception)) 
 		return -EFULL;
 
 	if (snapshot == -1) {
@@ -751,17 +753,15 @@ static void merge_leaves(struct eleaf *leaf, struct eleaf *leaf2)
 	unsigned tailsize = (char *)emap(leaf2, ntail) - (char *)emap(leaf2, 0);
 	char *phead = (char *)emap(leaf, 0), *ptail = (char *)emap(leaf, nhead);
 
+	// move data down
+	memmove(phead - tailsize, phead, ptail - phead);
+	
 	// adjust pointers
 	for (i = 0; i <= nhead; i++) // also adjust sentinel
 		leaf->map[i].offset -= tailsize;
 
-	// move data down
-	phead = (char *)emap(leaf, 0);
-	ptail = (char *)emap(leaf, nhead);
-	memmove(phead, phead + tailsize, ptail - phead);
-
 	// move data from leaf2 to top
-	memcpy(ptail, (char *)emap(leaf2, 0), tailsize); // data
+	memcpy(ptail - tailsize, (char *)emap(leaf2, 0), tailsize); // data
 	memcpy(&leaf->map[nhead], &leaf2->map[0], (ntail + 1) * sizeof(struct etree_map)); // map
 	leaf->count += ntail;
 }
@@ -1235,12 +1235,12 @@ static void add_exception_to_tree(struct superblock *sb, struct buffer *leafbuf,
 		return;
 	}
 
-	trace(warn("add leaf"););
+	trace(warn("adding a new leaf to the tree"););
 	struct buffer *childbuf = new_leaf(sb);
 	u64 childkey = split_leaf(buffer2leaf(leafbuf), buffer2leaf(childbuf));
 	sector_t childsector = childbuf->sector;
 
-	if (add_exception_to_leaf(target < childkey? buffer2leaf(leafbuf): buffer2leaf(childbuf), target, exception, snapnum, sb->snapmask))
+	if (add_exception_to_leaf(target < childkey ? buffer2leaf(leafbuf): buffer2leaf(childbuf), target, exception, snapnum, sb->snapmask))
 		error("can't happen");
 	brelse_dirty(leafbuf);
 	brelse_dirty(childbuf);
@@ -1479,7 +1479,7 @@ static void check_leaf(struct eleaf *leaf, u64 snapmask)
  * from bottom to top in the directory map packing nonempty entries into the
  * bottom of the map.
  */
-static int delete_snapshots_from_leaf(struct superblock *sb, struct eleaf *leaf, u64 snapmask, unsigned max_dirty)
+static int delete_snapshots_from_leaf(struct superblock *sb, struct eleaf *leaf, u64 snapmask) 
 {
 	struct exception *p = emap(leaf, leaf->count), *dest = p;
 	struct etree_map *pmap, *dmap;
@@ -1534,7 +1534,7 @@ static void delete_snapshots_from_tree(struct superblock *sb, u64 snapmask)
 		while (path[level].pnext  < node->entries + node->count) {
 			struct buffer *leafbuf = snapread(sb, path[level].pnext++->sector);
 			trace_off(printf("process leaf %Lx\n", leafbuf->sector););
-			if (delete_snapshots_from_leaf(sb, buffer2leaf(leafbuf), snapmask, -1))
+			if (delete_snapshots_from_leaf(sb, buffer2leaf(leafbuf), snapmask))
 				set_buffer_dirty(leafbuf);	
 			brelse(leafbuf);
 			if (dirty_buffer_count >= ((sb->image.journal_size) - 1)) { 
@@ -1621,7 +1621,7 @@ static void brelse_free(struct superblock *sb, struct buffer *buffer)
 	evict_buffer(buffer);
 }
 
-static chunk_t delete_tree_range(struct superblock *sb, u64 snapmask, chunk_t resume, unsigned max_dirty)
+static chunk_t delete_tree_range(struct superblock *sb, u64 snapmask, chunk_t resume) 
 {
 	int levels = sb->image.etree_levels, level = levels - 1;
 	struct etree_path path[levels], hold[levels];
@@ -1635,8 +1635,7 @@ static chunk_t delete_tree_range(struct superblock *sb, u64 snapmask, chunk_t re
 
 	while (1) { /* in-order leaf walk */
 		trace_off(show_leaf(buffer2leaf(leafbuf)););
-		// should pass in and act on max_dirty...
-		if (delete_snapshots_from_leaf(sb, buffer2leaf(leafbuf), snapmask, max_dirty))
+		if (delete_snapshots_from_leaf(sb, buffer2leaf(leafbuf), snapmask)) 
 			set_buffer_dirty(leafbuf);
 
 		if (prevleaf) { /* try to merge this leaf with prev */
@@ -1665,7 +1664,7 @@ keep_prev_leaf:
 					trace_off(warn("check node %p against %p", this, prev););
 					trace_off(warn("this count = %i prev count = %i", this->count, prev->count););
 					if (this->count <= sb->blocks_per_node - prev->count) {
-						trace_off(warn(">>> can merge node %p into node %p", this, prev););
+						trace(warn(">>> can merge node %p into node %p", this, prev););
 						merge_nodes(prev, this);
 						remove_index(path, level - 1);
 						set_buffer_dirty(hold[level].buffer);
@@ -1702,20 +1701,14 @@ keep_prev_node:
 			} while (level < levels - 1);
 		}
 
-		/* Exit if dirty buffer count above threshold */
-		// might incur a few extra index reads but oh well
-		if (dirty_buffer_count >= max_dirty) {
-			brelse(prevleaf);
-			brelse_path(path, levels);
-			for (i = 0; i < levels; i++)
-				if (hold[i].buffer)
-					brelse(hold[i].buffer);
-//			sb->delete_progress = ???;
-			return 1;
+		if (dirty_buffer_count >= sb->image.journal_size - 1) {
+			if(dirty_buffer_count > sb->image.journal_size) 
+				warn("number of dirty buffers is too large for journal");
+			trace_off(warn("flushing dirty buffers to disk"););
+			commit_transaction(sb);
 		}
-
 		leafbuf = snapread(sb, path[level].pnext++->sector);
-	};
+	}
 }
 
 static int delete_snapshot(struct superblock *sb, unsigned tag)
@@ -1734,7 +1727,8 @@ delete:
 	trace_on(printf("Delete snapshot %i (internal %i)\n", tag, bit););
 	memmove(snapshot, snapshot + 1, (char *)(sb->image.snaplist + --sb->image.snapshots) - (char *)snapshot);
 	sb->snapmask &= ~(1ULL << bit);
-	delete_snapshots_from_tree(sb, 1ULL << bit);
+	delete_tree_range(sb, 1ULL << bit, 0); // start from the first chunk
+	// delete_snapshots_from_tree(sb, 1ULL << bit);
 	set_sb_dirty(sb);
 
 	return 0;
@@ -2247,11 +2241,13 @@ static int init_snapstore(struct superblock *sb, u32 js_bytes, u32 bs_bits)
 	show_buffers();
 	show_dirty_buffers();
 	commit_transaction(sb);
+	flush_buffers();
 	evict_buffers();
 
 	show_journal(sb);
 	show_tree(sb);
 	recover_journal(sb);
+	flush_buffers();
 	evict_buffers();
 	show_tree(sb);
 #endif

@@ -146,6 +146,11 @@ static struct buffer *remove_buffer_hash(struct buffer *buffer)
 	return buffer;
 }
 
+static void add_buffer_free(struct buffer *buffer) 
+{
+	list_add_tail(&buffer->list, &free_buffers);
+}
+
 static struct buffer *remove_buffer_free(void) 
 {
 	struct buffer *buffer = NULL;
@@ -163,7 +168,7 @@ struct buffer *new_buffer(sector_t sector, unsigned size)
 
 	/* check if we hit the MAX_BUFFER limit and if there are any free buffers avail */
 	if ( ((buffer = remove_buffer_free()) != NULL) || buffer_count < MAX_BUFFERS)
-		goto cont_buffer;
+		goto alloc_buffer;
 
         buftrace(printf("need to purge a buffer from the lru list\n"););
         struct list_head *list, *safe;
@@ -173,15 +178,15 @@ struct buffer *new_buffer(sector_t sector, unsigned size)
                 struct buffer *buffer_evict = list_entry(list, struct buffer, list);	
                 if (buffer_evict->count == 0 && !buffer_dirty(buffer_evict)) {
                         remove_buffer_lru(buffer_evict);
-                        remove_buffer_hash(buffer_evict); /* remove from hashlist */
-			list_add_tail(&buffer_evict->list, &free_buffers);
+			remove_buffer_hash(buffer_evict); /* remove from hashlist */
+			add_buffer_free(buffer_evict);
                         if(++count == MAX_FREE_BUFFERS)
                                 break;
                 }
         }
 	buffer = remove_buffer_free();
 		
-cont_buffer:	
+alloc_buffer:	
 	if (!buffer) {
 		buftrace(warn("allocating a new buffer"););
 		if (buffer_count == MAX_BUFFERS) {
@@ -191,11 +196,8 @@ cont_buffer:
 		buffer = (struct buffer *)malloc(sizeof(struct buffer));
 		posix_memalign((void **)&(buffer->data), size, size); // what if malloc fails?
 	}
-	else if (buffer->size != size) { /* FIXME: there should only be one size */
-		buftrace(warn("reusing buffer with a different size"););
-		free(buffer->data);
-		posix_memalign((void **)&(buffer->data), size, size); 
-	}
+	else
+		assert(buffer->size == size); /* FIXME: shouldn't need an assert */
  	
 	buffer->count = 1;
 	buffer->flags = 0; 
@@ -243,14 +245,12 @@ struct buffer *bread(unsigned fd, sector_t sector, unsigned size)
 
 void evict_buffer(struct buffer *buffer)
 {
-	if (buffer_dirty(buffer))  
-		write_buffer(buffer);
+	assert(!buffer_dirty(buffer));
 	remove_buffer_lru(buffer);
-        if (remove_buffer_hash(buffer)) 
+        if (!remove_buffer_hash(buffer)) 
 		warn("buffer not found in hashlist");
 	buftrace(printf("Evicted buffer for %llx\n", buffer->sector););
-	free(buffer->data); // using posix_memalign though !!! malloc_aligned means pointer is wrong
-	free(buffer);
+	add_buffer_free(buffer);
 }
 
 void evict_buffers(void) 
