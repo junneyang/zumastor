@@ -2960,7 +2960,8 @@ static void *useme[] = {
 	show_tree_range, snapnum_tag, show_snapshots,
 };
 
-static u32 strtobytes(char *string) 
+#ifdef CREATE
+static u32 strtobytes(char const *string) 
 {
 	long bytes = 0;
 	char *letter = NULL;
@@ -2976,7 +2977,7 @@ static u32 strtobytes(char *string)
 	if (letter[1] != '\0')
 		return INPUT_ERROR;
 
-	switch(letter[0]) {
+	switch (letter[0]) {
 	case 'k': case 'K':
 		return bytes * (1 << 10); 
 	case 'm': case 'M':
@@ -2988,7 +2989,7 @@ static u32 strtobytes(char *string)
 	}		
 }
 
-static u32 strtobits(char *string) 
+static u32 strtobits(char const *string) 
 {
 	long amount = 0;
         u32 bits = 0;
@@ -2999,12 +3000,12 @@ static u32 strtobits(char *string)
 	if ((amount <= 0) || (amount & (amount - 1)))
 		return INPUT_ERROR;
 	
-	while(amount > 1) {
+	while (amount > 1) {
 		bits += 1;
 		amount >>= 1;
 	}
 	
-	switch(letter[0]) {
+	switch (letter[0]) {
 	case '\0':
 		break;	
 	case 'k': case 'K':
@@ -3026,6 +3027,7 @@ static u32 strtobits(char *string)
 
 	return bits;
 }
+#endif
 
 int main(int argc, const char *argv[])
 {
