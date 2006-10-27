@@ -39,10 +39,13 @@
 
 #define trace trace_off
 #define jtrace trace_off
-#define BUSHY
+//#define BUSHY
 
 #define SECTORS_PER_BLOCK 7
-#define JOURNAL_SIZE 100
+#define CHUNK_SIZE 4096
+#define DEFAULT_JOURNAL_SIZE (100 * CHUNK_SIZE)
+#define INPUT_ERROR 0
+#define DIVROUND(N, D) (((N)+(D)-1)/(D))
 
 /*
 Todo:
@@ -1534,7 +1537,7 @@ static void delete_snapshots_from_tree(struct superblock *sb, u64 snapmask)
 			if (delete_snapshots_from_leaf(sb, buffer2leaf(leafbuf), snapmask, -1))
 				set_buffer_dirty(leafbuf);	
 			brelse(leafbuf);
-			if (dirty_buffer_count >= (JOURNAL_SIZE - 1)) { 
+			if (dirty_buffer_count >= ((sb->image.journal_size) - 1)) { 
 				commit_transaction(sb);
 				set_sb_dirty(sb);
 			}
@@ -2137,14 +2140,13 @@ static void save_state(struct superblock *sb)
  * require further unit testing.
  */
 
-static int init_snapstore(struct superblock *sb)
+static int init_snapstore(struct superblock *sb, u32 js_bytes, u32 bs_bits)
 {
 	int i, error;
 
-	unsigned sectors_per_block_bits = SECTORS_PER_BLOCK;
 	sb->image = (struct disksuper){ .magic = SB_MAGIC };
 	sb->image.etree_levels = 1,
-	sb->image.blocksize_bits = SECTOR_BITS + sectors_per_block_bits;
+	sb->image.blocksize_bits = bs_bits;
 	sb->image.chunksize_bits = sb->image.blocksize_bits; // !!! just for now
 	setup_sb(sb);
 
@@ -2158,8 +2160,11 @@ static int init_snapstore(struct superblock *sb)
 	if ((error = fd_size(sb->orgdev, &size)) < 0)
 		error("Error %i: %s determining origin volume size", errno, strerror(-errno));
 	sb->image.orgchunks = size >> sb->image.chunksize_bits;
+
+	u32 chunk_size = 1 << sb->image.chunksize_bits, js_chunks = DIVROUND(js_bytes, chunk_size);
+	trace_on(printf("chunk_size is %u & js_chunks is %u\n", chunk_size, js_chunks););
 	
-	sb->image.journal_size = JOURNAL_SIZE;
+	sb->image.journal_size = js_chunks;
 	sb->image.journal_next = 0;
 	sb->image.sequence = sb->image.journal_size;
 	init_allocation(sb);
@@ -2170,7 +2175,7 @@ static int init_snapstore(struct superblock *sb)
 		struct commit_block *commit = (struct commit_block *)buffer->data;
 		*commit = (struct commit_block){ .magic = JMAGIC, .sequence = i };
 #ifdef TEST_JOURNAL
-		commit->sequence = (i + 3) % JOURNAL_SIZE;
+		commit->sequence = (i + 3) % (sb->image.journal_size);
 #endif
 		commit->checksum = -checksum_block(sb, (void *)commit);
 		brelse_dirty(buffer);
@@ -2539,7 +2544,9 @@ static int incoming(struct superblock *sb, struct client *client)
 	}
 	case INITIALIZE_SNAPSTORE:
 	{
-		init_snapstore(sb);
+		/* FIXME: init_snapstore takes more arguments now */
+		warn("Improper initialization.");
+		init_snapstore(sb, DEFAULT_JOURNAL_SIZE, SECTOR_BITS + SECTORS_PER_BLOCK);
 		break;
 	}
 	case DUMP_TREE:
@@ -2953,6 +2960,73 @@ static void *useme[] = {
 	show_tree_range, snapnum_tag, show_snapshots,
 };
 
+static u32 strtobytes(char *string) 
+{
+	long bytes = 0;
+	char *letter = NULL;
+	
+	bytes = strtol(string, &letter, 10);
+
+	if (bytes <= 0)
+		return INPUT_ERROR;
+	
+	if (letter[0] == '\0')
+		return bytes;
+
+	if (letter[1] != '\0')
+		return INPUT_ERROR;
+
+	switch(letter[0]) {
+	case 'k': case 'K':
+		return bytes * (1 << 10); 
+	case 'm': case 'M':
+		return bytes * (1 << 20);
+	case 'g': case 'G':
+		return bytes * (1 << 30);
+	default:
+		return INPUT_ERROR;
+	}		
+}
+
+static u32 strtobits(char *string) 
+{
+	long amount = 0;
+        u32 bits = 0;
+	char* letter = NULL;
+	
+	amount = strtol(string, &letter, 10);
+
+	if ((amount <= 0) || (amount & (amount - 1)))
+		return INPUT_ERROR;
+	
+	while(amount > 1) {
+		bits += 1;
+		amount >>= 1;
+	}
+	
+	switch(letter[0]) {
+	case '\0':
+		break;	
+	case 'k': case 'K':
+		bits += 10;
+		break;
+	case 'm': case 'M':
+		bits += 20;
+		break;
+	case 'g': case 'G':
+		bits += 30;
+		break;
+	default:
+		return INPUT_ERROR;
+		break;
+	}	
+
+	if (letter[1] != '\0')
+		return INPUT_ERROR;
+
+	return bits;
+}
+
 int main(int argc, const char *argv[])
 {
 	poptContext optCon;
@@ -2963,10 +3037,18 @@ int main(int argc, const char *argv[])
 #ifdef SERVER
 	char const *agent_sockname, *server_sockname;
 #endif
+#ifdef CREATE
+	char *js_str = NULL, *bs_str = NULL;
+	u32 bs_bits = SECTOR_BITS + SECTORS_PER_BLOCK, js_bytes = DEFAULT_JOURNAL_SIZE;
+#endif
 
 	struct poptOption optionsTable[] = {
 #ifdef SERVER
 	     { "foreground", 'f', POPT_ARG_NONE, &nobg, 0, "do not daemonize server", NULL },
+#endif
+#ifdef CREATE
+	     { "journal_size", 'j', POPT_ARG_STRING, &js_str, 0, "User specified journal size, i.e. 400k", "desired journal size (default: 100 * chunk_size)" },
+	     { "block_size", 'b', POPT_ARG_STRING, &bs_str, 0, "User specified block size, i.e. 4k", "desired block size; has to be a power of two (default: 4k)" },
 #endif
 	     POPT_AUTOHELP
 	     POPT_TABLEEND
@@ -3078,9 +3160,35 @@ int main(int argc, const char *argv[])
 
 	return 0; /* not reached */
 #endif
+
+#ifdef CREATE
+
+	trace_off(printf("js_bytes was %d & bs_bits was %d\n", js_bytes, bs_bits););
+
+	if (bs_str != NULL) {
+		bs_bits = strtobits(bs_str);
+		if (bs_bits == INPUT_ERROR) {
+			poptPrintUsage(optCon, stderr, 0);
+			fprintf(stderr, "Invalid block size input. Try 64k\n");
+			exit(1);
+		}
+	}
+
+	if (js_str != NULL) {
+		if (js_bytes == INPUT_ERROR) {
+			poptPrintUsage(optCon, stderr, 0);
+			fprintf(stderr, "Invalid journal size input. Try 400k\n");
+			exit(1);
+		}
+	}
+
+	trace_on(printf("js_bytes is %d & bs_bits is %d\n", js_bytes, bs_bits););
+
+#endif	
+
 #ifdef CREATE
 # ifdef MKDDSNAP_TEST
-	init_snapstore(sb);
+	init_snapstore(sb, js_bytes, bs_bits);
 	create_snapshot(sb, 0);
 
 	int i;
@@ -3098,7 +3206,7 @@ int main(int argc, const char *argv[])
 	return 0;
 # endif /* end of test code */
 
-	return init_snapstore(sb);
+	return init_snapstore(sb, js_bytes, bs_bits);
 #endif
 	if (useme) ;
 }
