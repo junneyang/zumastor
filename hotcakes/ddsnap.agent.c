@@ -6,6 +6,7 @@
 #include <sys/poll.h>
 #include <sys/un.h>
 #include <netinet/in.h>
+#include <string.h>
 //#include <libdlm.h>
 #include <popt.h>
 #include "dm-ddsnap.h" // message codes
@@ -46,13 +47,13 @@ int connect_clients(struct context *context)
 		int sock;
 
 		if ((sock = socket(AF_UNIX, SOCK_STREAM, 0)) < 0)
-			error("Can't get socket");
+			error("Can't get socket: %s", strerror(errno)); 
 		trace_on(printf("server address: %s\n", server->address););
 		strncpy(addr.sun_path, server->address, sizeof(addr.sun_path));
 		if (connect(sock, (struct sockaddr *)&addr, addr_len) == -1) {
 			// this really sucks: if the address is wrong, we silently wait for
 			// some ridiculous amount of time.  Do something about this please.
-			warn("Can't connect to server");
+			warn("Can't connect to server: %s", strerror(errno)); 
 			return -1;
 		}
 		if (outbead(control, CONNECT_SERVER, struct { }) < 0)
@@ -60,6 +61,7 @@ int connect_clients(struct context *context)
 		if (send_fd(control, sock) < 0)
 			error("Could not pass server connection to target");
 		context->waiting[0] = context->waiting[--context->waiters];
+		close(sock); 
 	}
 	return 0;
 }

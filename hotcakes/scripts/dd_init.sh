@@ -1,4 +1,4 @@
-#!/bin/bash -x
+#!/bin/bash 
 
 # import all the sweet variables used throughout the ddsnap scripts
 . ddsnap_env.sh

@@ -22,7 +22,7 @@ if [[ $num_snapshots -ge $MAX_SNAPSHOTS ]]
 then
 	# FIXME: check for return code for each command
 	# need to delete a snapshot... oldest one for now?
-	oldest_snapshot=`${DDSNAP_HOME}/${LIST_SNAPSHOT} | grep tag | awk '{printf "%s %s %s %s %s %s\n", $10, $11, $12, $13, $14, $2}' | sort | head -n 1 | awk '{print $6}'`
+	oldest_snapshot=`${DDSNAP_HOME}/${LIST_SNAPSHOT} | head -n 4 | tail -n 1| awk '{print $2}'`
 	./dd_delete_snap.sh $oldest_snapshot
 	./dd_delete_rsnap.sh $oldest_snapshot
 	new_snapshot=$oldest_snapshot
