@@ -3,6 +3,8 @@
 # ddutil - a wrapper for the ddsnap command
 version="1.0"
 
+# location of configuration file
+conf_file=/etc/ddutil.conf
 
 # setup defaults
 dev_origin=/dev/origin
@@ -12,13 +14,6 @@ map_origin=vol
 map_snap_stem=snap
 ddsnapd_sockpath=/tmp/server
 agent_sockpath=/tmp/control
-
-# read user configuration
-#conf_file=/etc/ddutil.conf
-conf_file=ddutil.conf
-if [ -f "${conf_file}" ]; then
-    . "${conf_file}"
-fi
 
 
 usage_init_store()
@@ -151,6 +146,7 @@ usage_subcommands_long()
 usage()
 {
     echo "usage: $0 [<option>...] <subcommand> [<suboptions>...]"
+    echo "    -c, --config=FILE      use FILE for configuration"
     echo "    -h, --help, --usage    print usage and exit"
     echo "    -V, --version          print version information and exit"
 }
@@ -158,7 +154,7 @@ usage()
 
 # parse command line
 
-newargs=`getopt -o '+hV' -l 'help,usage,version' -n "$0" -- "$@"`
+newargs=`getopt -o '+hc:V' -l 'help,usage,config:,version' -n "$0" -- "$@"`
 if [ $? != 0 ]; then
     exit 1
 fi
@@ -173,6 +169,12 @@ while [ $# -ge 1 ]; do
             usage
             usage_subcommands_long
             exit 0
+            ;;
+
+        -c|--config)
+            conf_file="$2"
+            shift
+            shift
             ;;
 
         -V|--version)
@@ -191,6 +193,15 @@ while [ $# -ge 1 ]; do
     esac
 done
 
+# read user configuration
+if ! [ -r "${conf_file}" ]; then
+    echo "$0: unable to read configuration file \"${conf_file}\""
+    exit 3
+fi
+
+. "${conf_file}"
+
+
 subcommand="$1"
 shift
 if [ X"${subcommand}" = X"" ]; then
@@ -204,7 +215,7 @@ case "${subcommand}" in
         minargs='0'
         maxargs='0'
         shortopts='j:b:'
-        longopts='--journal_size:,--block_size:'
+        longopts='journal_size:,block_size:'
         ;;
 
     create-snap)
