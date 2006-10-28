@@ -1,0 +1,437 @@
+#!/bin/sh
+
+# ddutil - a wrapper for the ddsnap command
+version="1.0"
+
+
+# setup defaults
+dev_origin=/dev/origin
+dev_snapstore=/dev/snapstore
+map_path=/dev/mapper
+map_origin=vol
+map_snap_stem=snap
+ddsnapd_sockpath=/tmp/server
+agent_sockpath=/tmp/control
+
+# read user configuration
+#conf_file=/etc/ddutil.conf
+conf_file=ddutil.conf
+if [ -f "${conf_file}" ]; then
+    . "${conf_file}"
+fi
+
+
+usage_init_store()
+{
+    echo "$@init-store [<option>...]"
+    echo "    -j, --journal_size               User specified journal size"
+    echo "    -b, --block_size                 User specified block size"
+}
+
+usage_create_snap()
+{
+    echo "$@create-snap <snapshot>"
+}
+
+usage_delete_snap()
+{
+    echo "$@delete-snap <snapshot>"
+}
+
+usage_list()
+{
+    echo "$@list"
+}
+
+usage_set_priority()
+{
+    echo "$@set-priority <snap_tag> <new_priority_value>"
+}
+
+usage_set_usecount()
+{
+    echo "$@set-usecount <snap_tag> <inc|dec>"
+}
+
+usage_create_cl()
+{
+    echo "$@create-cl <changelist> <snapshot1> <snapshot2>"
+}
+
+usage_create_delta()
+{
+    echo "$@create-delta [<option>...] <changelist> <deltafile> <snapshot1> <snapshot2>"
+    echo "    -x, --xdelta                     Delta file format: xdelta chunk"
+    echo "    -r, --raw                        Delta file format: raw chunk from later"
+    echo "                                     snapshot"
+    echo "    -t, --test                       Delta file format: xdelta chunk, raw chunk"
+    echo "                                     from earlier snapshot and raw chunk from"
+    echo "                                     later snapshot"
+    echo "    -g, --gzip=compression_level     Compression via gzip"
+    echo "    -o, --optcomp                    Optimal compression (slowest)"
+}
+
+usage_apply_delta()
+{
+    echo "$@apply-delta <deltafile> <snapshot>"
+}
+
+usage_send_delta()
+{
+    echo "$@send-delta [<option>...] <snapshot1> <snapshot2> <remsnapshot> <host>[:<port>]"
+    echo "    -x, --xdelta                     Delta file format: xdelta chunk"
+    echo "    -r, --raw                        Delta file format: raw chunk from later"
+    echo "                                     snapshot"
+    echo "    -t, --test                       Delta file format: xdelta chunk, raw chunk"
+    echo "                                     from earlier snapshot and raw chunk from"
+    echo "                                     later snapshot"
+    echo "    -g, --gzip=compression_level     Compression via gzip"
+    echo "    -o, --optcomp                    Optimal compression (slowest)"
+}
+
+usage_daemon()
+{
+    echo "$@daemon [<host>[:<port>]]"
+}
+
+usage_get_status()
+{
+    echo "$@get-status [<option>...] [<snapshot>]"
+    echo "    -v|--verbose         print all sharing statistics"
+}
+
+usage_subcommands_short()
+{
+    echo ""
+    echo "subcommands:"
+    echo "   init-store        Initialize the snashot store"
+    echo "   create-snap       Creates a snapshot"
+    echo "   delete-snap       Deletes a snapshot"
+    echo "   list              Returns a list of snapshots"
+    echo "   set-priority      Sets the priority of a snapshot"
+    echo "   set-usecount      Sets the use count of a snapshot"
+    echo "   create-cl         Creates a changelist given 2 snapshots"
+    echo "   create-delta      Creates a delta file given a changelist and 2 snapshots"
+    echo "   apply-delta       Applies a delta file to the given device"
+    echo "   send-delta        Sends a delta file downstream"
+    echo "   daemon            Listens for upstream deltas"
+    echo "   get-status        Reports snapshot usage statistics"
+}
+
+usage_subcommands_long()
+{
+    echo ""
+    echo "subcommands:"
+    echo ""
+    usage_init_store "  "
+    echo ""
+    usage_create_snap "  "
+    echo ""
+    usage_delete_snap "  "
+    echo ""
+    usage_list "  "
+    echo ""
+    usage_set_priority "  "
+    echo ""
+    usage_set_usecount "  "
+    echo ""
+    usage_create_cl "  "
+    echo ""
+    usage_create_delta "  "
+    echo ""
+    usage_apply_delta "  "
+    echo ""
+    usage_send_delta "  "
+    echo ""
+    usage_daemon "  "
+    echo ""
+    usage_get_status "  "
+}
+
+usage()
+{
+    echo "usage: $0 [<option>...] <subcommand> [<suboptions>...]"
+    echo "    -h, --help, --usage    print usage and exit"
+    echo "    -V, --version          print version information and exit"
+}
+
+
+# parse command line
+
+newargs=`getopt -o '+hV' -l 'help,usage,version' -n "$0" -- "$@"`
+if [ $? != 0 ]; then
+    exit 1
+fi
+# ugly quoting hack with eval
+eval set -- "${newargs}"
+
+subcommand=""
+
+while [ $# -ge 1 ]; do
+    case "$1" in
+        -h|--help|--usage)
+            usage
+            usage_subcommands_long
+            exit 0
+            ;;
+
+        -V|--version)
+            echo "ddutil ${version}"
+            exit 0
+            ;;
+
+        --)
+            shift
+            break
+            ;;
+
+        init-store|create-snap|delete-snap|list|set-priority|set-usecount|create-cl|create-delta|apply-delta|send-delta|daemon|get-status)
+            break
+            ;;
+    esac
+done
+
+subcommand="$1"
+shift
+if [ X"${subcommand}" = X"" ]; then
+    usage
+    usage_subcommands_short
+    exit 0
+fi
+
+case "${subcommand}" in
+    init-store)
+        minargs='0'
+        maxargs='0'
+        shortopts='j:b:'
+        longopts='--journal_size:,--block_size:'
+        ;;
+
+    create-snap)
+        minargs='1'
+        maxargs='1'
+        shortopts=''
+        longopts=''
+        ;;
+
+    delete-snap)
+        minargs='1'
+        maxargs='1'
+        shortopts=''
+        longopts=''
+        ;;
+
+    list)
+        minargs='0'
+        maxargs='0'
+        shortopts=''
+        longopts=''
+        ;;
+
+    set-priority)
+        minargs='2'
+        maxargs='2'
+        shortopts=''
+        longopts=''
+        ;;
+
+    set-usecount)
+        minargs='2'
+        maxargs='2'
+        shortopts=''
+        longopts=''
+        ;;
+
+    create-cl)
+        minargs='3'
+        maxargs='3'
+        shortopts=''
+        longopts=''
+        ;;
+
+    create-delta)
+        minargs='4'
+        maxargs='4'
+        shortopts='xrtg:o'
+        longopts='xdelta,raw,test,gzip:,optcomp'
+        ;;
+
+    apply-delta)
+        minargs='2'
+        maxargs='2'
+        shortopts=''
+        longopts=''
+        ;;
+
+    send-delta)
+        minargs='4'
+        maxargs='4'
+        shortopts='xrtg:o'
+        longopts='xdelta,raw,test,gzip:,optcomp'
+        ;;
+
+    daemon)
+        minargs='0'
+        maxargs='1'
+        shortopts=''
+        longopts=''
+        ;;
+
+    get-status)
+        minargs='0'
+        maxargs='1'
+        shortopts='v'
+        longopts='verbose'
+        ;;
+
+    *)
+        echo "$0: unknown subcommand \"${subcommand}\"" >&2
+        exit 2
+        ;;
+esac
+
+
+usage_func="usage_`echo \"${subcommand}\" | tr '-' '_'`"
+
+
+newargs=`getopt -o "+h${shortopts}" -l "help,usage,${longopts}" -n "$0 ${subcommand}" -- "$@"`
+if [ $? != 0 ]; then
+    exit 1
+fi
+# ugly quoting hack with eval
+eval set -- "${newargs}"
+
+suboptions=""
+while [ $# -ge 1 ]; do
+    case "$1" in
+        -h|--help|--usage)
+            "${usage_func}" "usage: $0 "
+            exit 0
+            ;;
+
+        --)
+            shift
+            break
+            ;;
+
+        --*)
+            # we will assume options won't contain whitespace, otherwise this would be a lot uglier
+            if echo "${shortopts}" | egrep '^([^,]*,)*'"$1"':(,[^,]*)*$' > /dev/null; then
+                suboptions="${suboptions} $1=$2"
+                shift
+            else
+                suboptions="${suboptions} $1"
+            fi
+            shift
+            ;;
+
+        -)
+            break
+            ;;
+
+        -*)
+            # we will assume options won't contain whitespace, otherwise this would be a lot uglier
+            if echo "${shortopts}" | egrep '^([^,]*,)*'"$1"':(,[^,]*)*$' > /dev/null; then
+                suboptions="${suboptions} $1 $2"
+                shift
+            else
+                suboptions="${suboptions} $1"
+            fi
+            shift
+            ;;
+
+        *)
+            break
+            ;;
+     esac
+done
+
+
+if [ $# -lt ${minargs} ]; then
+    echo "$0: too few arguments to subcommand \"${subcommand}\""
+    "${usage_func}" "usage: $0 "
+    exit 2
+fi
+if [ $# -gt ${maxargs} ]; then
+    echo "$0: too many arguments to subcommand \"${subcommand}\""
+    "${usage_func}" "usage: $0 "
+    exit 2
+fi
+
+
+case "${subcommand}" in
+    init-store)
+        if dmsetup ls 2> /dev/null | egrep "^${map_origin}	" > /dev/null; then
+            echo "$0: snapshot origin device ${map_origin} already in use"
+            exit 3
+        fi
+
+        mkddsnap ${suboptions} "${dev_snapstore}" "${dev_origin}"
+        ;;
+
+    create-snap)
+        originbase="`echo \"${dev_origin}\" | sed -e 's@^.*/@@'`"
+        if ! egrep "${originbase}$" /proc/partitions > /dev/null 2>&1; then
+            echo "$0: snapshot origin device ${dev_origin} not detected in /proc/partitions"
+            exit 3
+        fi
+        originblocks="`egrep \" ${originbase}$\" /proc/partitions | awk '{ print $3 }'`"
+        originsize="`expr 2 '*' \"${originblocks}\"`"
+
+        if [ X"$1" = X"-1" ]; then
+            if dmsetup ls 2> /dev/null | egrep "^${map_origin}	" > /dev/null; then
+                echo "$0: snapshot origin device ${map_origin} already in use"
+                exit 3
+            fi
+            echo 0 "${originsize}" ddsnap "${dev_snapstore}" "${dev_origin}" "${agent_sockpath}" "$1" |
+                dmsetup create "${map_origin}"
+        else
+            if dmsetup ls 2> /dev/null | egrep "^${map_snap_stem}$1	" > /dev/null; then
+                echo "$0: snapshot device ${map_snap_stem}$1 already in use"
+                exit 3
+            fi
+            if ! ddsnap "${subcommand}" ${suboptions} "${ddsnapd_sockpath}" "$1"; then
+                echo "$0: unable to create snapshot $1"
+                exit 4
+            fi
+            echo 0 "${originsize}" ddsnap "${dev_snapstore}" "${dev_origin}" "${agent_sockpath}" "$1" |
+                dmsetup create "${map_snap_stem}$1"
+        fi
+        ;;
+
+    delete-snap)
+        if [ X"$1" = X"-1" ]; then
+            dmsetup remove "${map_origin}"
+        else
+            dmsetup remove "${map_snap_stem}$1"
+            ddsnap "${subcommand}" ${suboptions} "${ddsnapd_sockpath}" "$@"
+        fi
+        ;;
+
+    list|set-priority|set-usecount|create-cl)
+        ddsnap "${subcommand}" ${suboptions} "${ddsnapd_sockpath}" "$@"
+        ;;
+
+    create-delta)
+        ddsnap "${subcommand}" ${suboptions} "$1" "$2" "$3" "$4"
+        ;;
+
+    apply-delta)
+        ddsnap "${subcommand}" ${suboptions} "$1" "${map_path}/${map_snap_stem}$2"
+        ;;
+
+    send-delta)
+        ddsnap "${subcommand}" ${suboptions} "${ddsnapd_sockpath}" "$1" "$2" "${map_path}/${map_snap_stem}$1" "${map_path}/${map_snap_stem}$2" "$3" "$4"
+        ;;
+
+    daemon)
+        ddsnap "${subcommand}" ${suboptions} "${map_path}/${map_snap_stem}" "$@"
+        ;;
+
+    get-status)
+        ddsnap "${subcommand}" ${suboptions} "${ddsnapd_sockpath}" "$@"
+        ;;
+esac
+
+exit $?
+
