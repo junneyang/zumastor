@@ -676,7 +676,7 @@ static int add_exception_to_leaf(struct eleaf *leaf, u64 chunk, u64 exception, i
 			break;
 
 	if (i == leaf->count || leaf->map[i].rchunk > target) {
-		if (free < 0 || free < sizeof(struct exception) + sizeof(struct etree_map))
+		if (free < sizeof(struct exception) + sizeof(struct etree_map))
 			return -EFULL;
 		ins = emap(leaf, i);
 		memmove(&leaf->map[i+1], &leaf->map[i], maptop - (char *)&leaf->map[i]);
