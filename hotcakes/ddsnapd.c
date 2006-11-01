@@ -231,8 +231,8 @@ struct superblock
 		struct snapshot
 		{
 			u32 ctime; // relative to middle 32 bits of super ctime
-			u32 tag;   // external name of snapshot
-			u8 bit;    // internal snapshot number
+			u32 tag;   // external name (id) of snapshot
+			u8 bit;    // internal snapshot number, not derived from tag
 			s8 prio;   // 0=normal, 127=highest, -128=lowestdrop
 			u8 usecnt; // use count on snapshot device (just use a bit?)
 			char reserved[7];
@@ -1438,7 +1438,7 @@ static int create_snapshot(struct superblock *sb, unsigned snaptag)
 	unsigned i, snapshots = sb->image.snapshots;
 	struct snapshot *snapshot;
 
-	/* heck tag not already used */
+	/* check tag not already used */
 	for (i = 0; i < snapshots; i++)
 		if (sb->image.snaplist[i].tag == snaptag)
 			return -1;
@@ -1746,11 +1746,11 @@ delete:
 
 static void show_snapshots(struct superblock *sb)
 {
-	unsigned snapnum, snapshots = sb->image.snapshots;
+	unsigned i, snapshots = sb->image.snapshots;
 
 	printf("%u snapshots\n", snapshots);
-	for (snapnum = 0; snapnum < snapshots; snapnum++) {
-		struct snapshot *snapshot = sb->image.snaplist + snapnum;
+	for (i = 0; i < snapshots; i++) {
+		struct snapshot *snapshot = sb->image.snaplist + i;
 		printf("snapshot %u tag %u prio %i created %x\n", 
 			snapshot->bit, 
 			snapshot->tag, 
