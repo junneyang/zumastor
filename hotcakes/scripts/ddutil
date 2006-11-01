@@ -3,7 +3,7 @@
 # ddutil - a wrapper for the ddsnap command
 version="1.0"
 
-# location of configuration file
+# default location of configuration file
 conf_file=/etc/ddutil.conf
 
 # setup defaults
@@ -145,7 +145,7 @@ usage_subcommands_long()
 
 usage()
 {
-    echo "usage: $0 [<option>...] <subcommand> [<suboptions>...]"
+    echo "usage: $0 [<option>...] <subcommand> [<suboption>...]"
     echo "    -c, --config=FILE      use FILE for configuration"
     echo "    -h, --help, --usage    print usage and exit"
     echo "    -V, --version          print version information and exit"
@@ -193,14 +193,6 @@ while [ $# -ge 1 ]; do
     esac
 done
 
-# read user configuration
-if ! [ -r "${conf_file}" ]; then
-    echo "$0: unable to read configuration file \"${conf_file}\""
-    exit 3
-fi
-
-. "${conf_file}"
-
 
 subcommand="$1"
 shift
@@ -218,14 +210,7 @@ case "${subcommand}" in
         longopts='journal_size:,block_size:'
         ;;
 
-    create-snap)
-        minargs='1'
-        maxargs='1'
-        shortopts=''
-        longopts=''
-        ;;
-
-    delete-snap)
+    create-snap|delete-snap)
         minargs='1'
         maxargs='1'
         shortopts=''
@@ -239,14 +224,7 @@ case "${subcommand}" in
         longopts=''
         ;;
 
-    set-priority)
-        minargs='2'
-        maxargs='2'
-        shortopts=''
-        longopts=''
-        ;;
-
-    set-usecount)
+    set-priority|set-usecount|apply-delta)
         minargs='2'
         maxargs='2'
         shortopts=''
@@ -260,21 +238,7 @@ case "${subcommand}" in
         longopts=''
         ;;
 
-    create-delta)
-        minargs='4'
-        maxargs='4'
-        shortopts='xrtg:o'
-        longopts='xdelta,raw,test,gzip:,optcomp'
-        ;;
-
-    apply-delta)
-        minargs='2'
-        maxargs='2'
-        shortopts=''
-        longopts=''
-        ;;
-
-    send-delta)
+    create-delta|send-delta)
         minargs='4'
         maxargs='4'
         shortopts='xrtg:o'
@@ -368,6 +332,15 @@ if [ $# -gt ${maxargs} ]; then
     "${usage_func}" "usage: $0 "
     exit 2
 fi
+
+
+# read user configuration
+if ! [ -r "${conf_file}" ]; then
+    echo "$0: unable to read configuration file \"${conf_file}\""
+    exit 3
+fi
+
+. "${conf_file}"
 
 
 case "${subcommand}" in
