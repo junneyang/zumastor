@@ -236,7 +236,7 @@ struct superblock
 			s8 prio;   // 0=normal, 127=highest, -128=lowestdrop
 			u8 usecnt; // use count on snapshot device (just use a bit?)
 			char reserved[7];
-		} snaplist[MAX_SNAPSHOTS];
+		} snaplist[MAX_SNAPSHOTS]; // entries are contiguous, in creation order
 		u32 snapshots;
 		u32 etree_levels;
 		s32 journal_base, journal_next, journal_size;
@@ -949,7 +949,8 @@ static chunk_t alloc_chunk_range(struct superblock *sb, chunk_t chunk, chunk_t r
 static int delete_snapshot(struct superblock *sb, unsigned tag);
 // !!! possible/practical to topsort away this forward ref?
 
-static const struct snapshot * find_snapshot_to_delete(const struct snapshot * snaplist, u32 snapshots) {
+static const struct snapshot * find_snapshot_to_delete(const struct snapshot * snaplist, u32 snapshots)
+{
 	const struct snapshot * snap_cand = NULL;
 	int i, min_priority = 128; /* that's max prio plus one */
 
