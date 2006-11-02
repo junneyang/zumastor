@@ -2106,13 +2106,9 @@ static void setup_sb(struct superblock *sb)
 #ifdef SERVER
 static void load_sb(struct superblock *sb)
 {
-	struct buffer *buffer = bread(sb->metadev, SB_SECTOR, SB_SIZE);
-	memcpy(&sb->image, buffer->data, sizeof(sb->image));
-
-	trace(printf("sb image.magic number is: %s and SB_MAGIC is: %s\n",sb->image.magic, SB_MAGIC););
-
+	if (diskread(sb->metadev, &sb->image, SB_SIZE, SB_SECTOR << SECTOR_BITS) < 0)
+		error("Unable to read superblock: %s", strerror(errno));
 	assert(!memcmp(sb->image.magic, SB_MAGIC, sizeof(sb->image.magic)));
-	brelse(buffer);
 	setup_sb(sb);
 	sb->snapmask = calc_snapmask(sb);
 	trace(printf("Active snapshot mask: %016llx\n", sb->snapmask););
@@ -2122,10 +2118,8 @@ static void load_sb(struct superblock *sb)
 static void save_sb(struct superblock *sb)
 {
 	if (sb->flags & SB_DIRTY) {
-		struct buffer *buffer = getblk(sb->metadev, SB_SECTOR, SB_SIZE);
-		memcpy(buffer->data, &sb->image, sizeof(sb->image));
-		write_buffer(buffer);
-		brelse(buffer);
+		if (diskwrite(sb->metadev, &sb->image, SB_SIZE , SB_SECTOR << SECTOR_BITS) < 0)
+			warn("Unable to write superblock to disk: %s", strerror(errno));
 		sb->flags &= ~SB_DIRTY;
 	}
 }
@@ -3135,7 +3129,9 @@ int main(int argc, const char *argv[])
 		return 1;
 	}
 
-	struct superblock *sb = &(struct superblock){};
+	struct superblock *sb;
+	posix_memalign((void **)&sb, 1 << SECTOR_BITS, SB_SIZE);
+	memset(sb, 0, SB_SIZE); 
 
 	init_buffers();
 

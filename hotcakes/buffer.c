@@ -196,8 +196,6 @@ alloc_buffer:
 		buffer = (struct buffer *)malloc(sizeof(struct buffer));
 		posix_memalign((void **)&(buffer->data), size, size); // what if malloc fails?
 	}
-	else
-		assert(buffer->size == size); /* FIXME: shouldn't need an assert */
  	
 	buffer->count = 1;
 	buffer->flags = 0; 
@@ -245,7 +243,6 @@ struct buffer *bread(unsigned fd, sector_t sector, unsigned size)
 
 void evict_buffer(struct buffer *buffer)
 {
-	assert(!buffer_dirty(buffer));
 	remove_buffer_lru(buffer);
         if (!remove_buffer_hash(buffer)) 
 		warn("buffer not found in hashlist");
