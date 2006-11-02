@@ -92,25 +92,39 @@ usage_daemon()
 usage_get_status()
 {
     echo "$@get-status [<option>...] [<snapshot>]"
-    echo "    -v|--verbose         print all sharing statistics"
+    echo "    -v, --verbose                    print all sharing statistics"
+}
+
+usage_start_ddsnap_agent()
+{
+    echo "$@start-ddsnap-agent [<option>...]"
+    echo "    -f, --foreground                 do not daemonize"
+}
+
+usage_start_ddsnapd()
+{
+    echo "$@start-ddsnapd [<option>...]"
+    echo "    -f, --foreground                 do not daemonize"
 }
 
 usage_subcommands_short()
 {
     echo ""
     echo "subcommands:"
-    echo "   init-store        Initialize the snashot store"
-    echo "   create-snap       Creates a snapshot"
-    echo "   delete-snap       Deletes a snapshot"
-    echo "   list              Returns a list of snapshots"
-    echo "   set-priority      Sets the priority of a snapshot"
-    echo "   set-usecount      Sets the use count of a snapshot"
-    echo "   create-cl         Creates a changelist given 2 snapshots"
-    echo "   create-delta      Creates a delta file given a changelist and 2 snapshots"
-    echo "   apply-delta       Applies a delta file to the given device"
-    echo "   send-delta        Sends a delta file downstream"
-    echo "   daemon            Listens for upstream deltas"
-    echo "   get-status        Reports snapshot usage statistics"
+    echo "   init-store         Initialize the snashot store"
+    echo "   create-snap        Creates a snapshot"
+    echo "   delete-snap        Deletes a snapshot"
+    echo "   list               Returns a list of snapshots"
+    echo "   set-priority       Sets the priority of a snapshot"
+    echo "   set-usecount       Sets the use count of a snapshot"
+    echo "   create-cl          Creates a changelist given 2 snapshots"
+    echo "   create-delta       Creates a delta file given a changelist and 2 snapshots"
+    echo "   apply-delta        Applies a delta file to the given device"
+    echo "   send-delta         Sends a delta file downstream"
+    echo "   daemon             Listens for upstream deltas"
+    echo "   get-status         Reports snapshot usage statistics"
+    echo "   start-ddsnap-agent Starts ddsnap-agent daemon"
+    echo "   start-ddsnapd      Starts ddsnapd daemon"
 }
 
 usage_subcommands_long()
@@ -141,6 +155,10 @@ usage_subcommands_long()
     usage_daemon "  "
     echo ""
     usage_get_status "  "
+    echo ""
+    usage_start_ddsnap_agent "  "
+    echo ""
+    usage_start_ddsnapd "  "
 }
 
 usage()
@@ -187,7 +205,7 @@ while [ $# -ge 1 ]; do
             break
             ;;
 
-        init-store|create-snap|delete-snap|list|set-priority|set-usecount|create-cl|create-delta|apply-delta|send-delta|daemon|get-status)
+        init-store|create-snap|delete-snap|list|set-priority|set-usecount|create-cl|create-delta|apply-delta|send-delta|daemon|get-status|start-ddsnap-agent|start-ddsnapd)
             break
             ;;
     esac
@@ -258,6 +276,13 @@ case "${subcommand}" in
         shortopts='v'
         longopts='verbose'
         ;;
+
+    start-ddsnap-agent|start-ddsnapd)
+        minargs='0'
+        maxargs='0'
+        shortopts='f'
+        longopts='foreground'
+	;;
 
     *)
         echo "$0: unknown subcommand \"${subcommand}\"" >&2
@@ -351,6 +376,10 @@ case "${subcommand}" in
         fi
 
         mkddsnap ${suboptions} "${dev_snapstore}" "${dev_origin}"
+        if [ $? -ne 0 ]; then
+            echo "$0: mkddsnap failed to initialize the snapshot store"
+            exit 3
+        fi
         ;;
 
     create-snap)
@@ -369,17 +398,25 @@ case "${subcommand}" in
             fi
             echo 0 "${originsize}" ddsnap "${dev_snapstore}" "${dev_origin}" "${agent_sockpath}" "$1" |
                 dmsetup create "${map_origin}"
+            if [ $? -ne 0 ]; then
+                echo "$0: dmsetup failed to create origin mapping"
+                exit 3
+            fi
         else
             if dmsetup ls 2> /dev/null | egrep "^${map_snap_stem}$1	" > /dev/null; then
                 echo "$0: snapshot device ${map_snap_stem}$1 already in use"
                 exit 3
             fi
             if ! ddsnap "${subcommand}" ${suboptions} "${ddsnapd_sockpath}" "$1"; then
-                echo "$0: unable to create snapshot $1"
+                echo "$0: ddsnap unable to create snapshot $1"
                 exit 4
             fi
             echo 0 "${originsize}" ddsnap "${dev_snapstore}" "${dev_origin}" "${agent_sockpath}" "$1" |
                 dmsetup create "${map_snap_stem}$1"
+            if [ $? -ne 0 ]; then
+                echo "$0: dmsetup failed to create snapshot $1 mapping"
+                exit 3
+            fi
         fi
         ;;
 
@@ -415,7 +452,15 @@ case "${subcommand}" in
     get-status)
         ddsnap "${subcommand}" ${suboptions} "${ddsnapd_sockpath}" "$@"
         ;;
+
+    start-ddsnap-agent)
+	ddsnap-agent ${suboptions} "${agent_sockpath}" 
+	;;
+
+    start-ddsnapd)
+	ddsnapd ${suboptions} "${dev_snapstore}" "${dev_origin}" "${agent_sockpath}" "${ddsnapd_sockpath}"
+	;;
 esac
 
-exit $?
+exit 0
 
