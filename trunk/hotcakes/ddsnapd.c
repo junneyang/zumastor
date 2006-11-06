@@ -230,7 +230,7 @@ struct superblock
 		u64 deleting;
 		struct snapshot
 		{
-			u32 ctime; // relative to middle 32 bits of super ctime
+			u32 ctime; // upper 32 bits are in super create_time
 			u32 tag;   // external name (id) of snapshot
 			u8 bit;    // internal snapshot number, not derived from tag
 			s8 prio;   // 0=normal, 127=highest, -128=lowestdrop
@@ -2148,6 +2148,8 @@ static int init_snapstore(struct superblock *sb, u32 js_bytes, u32 bs_bits)
 	sb->image.blocksize_bits = bs_bits;
 	sb->image.chunksize_bits = sb->image.blocksize_bits; // !!! just for now
 	setup_sb(sb);
+
+	sb->image.create_time = time(NULL);
 
 	u64 size;
 	if ((error = fd_size(sb->snapdev, &size)) < 0)
