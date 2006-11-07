@@ -1,6 +1,6 @@
 #!/bin/bash 
 
-cd /src/2.6.17-rc6-dd/drivers/md/ddraid/scripts
+cd /src/linux-2.6.17-rc6/drivers/md/ddraid/scripts
 
 # import all the sweet variables used throughout the ddsnap scripts
 . ddsnap_env.sh
@@ -24,7 +24,7 @@ then
 	# need to delete a snapshot... oldest one for now?
 	oldest_snapshot=`${DDSNAP_HOME}/${LIST_SNAPSHOT} | head -n 4 | tail -n 1| awk '{print $2}'`
 	./dd_delete_snap.sh $oldest_snapshot
-	./dd_delete_rsnap.sh $oldest_snapshot
+#	./dd_delete_rsnap.sh $oldest_snapshot
 	new_snapshot=$oldest_snapshot
 fi
 	# check to make sure there are no holes within the number of snapshots

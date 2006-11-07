@@ -1,15 +1,16 @@
 #!/bin/bash
 # a bunch of bash variables for the ddsnap scripts
 
-DDSNAP_HOME=/src/2.6.17-rc6-dd/drivers/md/ddraid
+DDSNAP_HOME=/src/linux-2.6.17-rc6/drivers/md/ddraid
+META_DEV=
 META_DEV=
 SNAPSTORE_DEV=/dev/test-snapstore
 ORIGIN_DEV=/dev/test-origin
 ORIGIN_PHYS_DEV=/dev/sda7
 LOGICAL_VOL_NAME=vol
 SNAPSHOT_VOL_NAME=snap
-SERVER_SOCK_NAME=/tmp/server
-AGENT_SOCK_NAME=/tmp/control
+SERVER_SOCK_NAME=/server
+AGENT_SOCK_NAME=/control
 SIZE_LOGICAL_VOL=$(( 2 * $(egrep $(echo $ORIGIN_PHYS_DEV | sed -e 's@^.*/@@') /proc/partitions | awk '{print $3}'))) 
 REMOTE_HOST=victory
 MAX_SNAPSHOTS=64 # just for test purposes.. max can be 64 

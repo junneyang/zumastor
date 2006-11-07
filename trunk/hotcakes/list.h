@@ -1,4 +1,6 @@
 /* List ops from include/linux/list.h */
+#ifndef __DDSNAP_LIST_H
+#define __DDSNAP_LIST_H
 
 #define LIST_POISON1 ((void *) 0x00100100)
 #define LIST_POISON2 ((void *) 0x00200200)
@@ -66,3 +68,4 @@ static inline int list_empty(const struct list_head *head)
         for (pos = (head)->next, n = pos->next; pos != (head); \
                 pos = n, n = pos->next)
 
+#endif // __DDSNAP_LIST_H

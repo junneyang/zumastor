@@ -57,29 +57,30 @@ usage:		error("usage: %s device read/write/randread/randwrite iterations blocksh
 		goto usage;
 
 	int blockshift = atoi(argv[4]), blocksize = 1 << blockshift;
-	int code = atoi(argv[5]), iterations = atoi(argv[3]);
+	int code = atoi(argv[5]); 
+	unsigned long long iterations = atoi(argv[3]);
 	int is_write = cmd & 1, is_rand = (cmd >> 1) & 1, spam_it = (cmd >> 2) & 1;
-	unsigned range = (lseek(dev, 0, SEEK_END) >> blockshift), total = 0;
+	unsigned long long range = (lseek(dev, 0, SEEK_END) >> blockshift), total = 0;
 	char *buffer = malloc_aligned(blocksize, blocksize);
 	char *buffer2 = malloc(blocksize);
 	typeof(pread) *fn = is_write? ((typeof(pread) *)pwrite): pread;
 
-	printf("%s tag = %u, iterations = %u, blocksize = %u, range = %u\n",
+	printf("%s tag = %u, iterations = %Lu, blocksize = %u, range = %Lu\n",
 		command[cmd], code, iterations, blocksize, range);
-
+	iterations = range - 1;
 	while (iterations--) {
-		unsigned block = is_rand? (rand() % range): total;
+		unsigned long long block = is_rand? (rand() % range): total;
 
 		if (spam_it && is_write)
 			spam(buffer, blocksize, code, block);
-
+		printf("doing something to block %Lu with range %Lu\n", block, range);
 		if (fn(dev, buffer, blocksize, block << blockshift) == -1)
 			error("%s error %i: %s", command[cmd], errno, strerror(errno));
 
 		if (spam_it && !is_write) {
 			spam(buffer2, blocksize, code, block);
 			if (memcmp(buffer, buffer2, blocksize))
-				printf("block %u doesn't match\n", block);
+				printf("block %Lu doesn't match\n", block);
 		}
 		total++;
 	}

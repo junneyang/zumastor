@@ -1,9 +1,14 @@
+#ifndef __DDSNAP_BUFFER_H
+#define __DDSNAP_BUFFER_H
+
 #define SECTOR_BITS 9
 #define BUFFER_STATE_INVAL 0
 #define BUFFER_STATE_CLEAN 1
 #define BUFFER_STATE_DIRTY 2
 #define BUFFER_STATE_MASK 3
 #define BUFFER_BUCKETS 9999
+
+#include "list.h"
 
 typedef unsigned long long sector_t;
 typedef unsigned long long offset_t;
@@ -59,3 +64,5 @@ static inline void *malloc_aligned(size_t size, unsigned binalign)
 	unsigned long p = (unsigned long)malloc(size + binalign - 1);
 	return (void *)(p + (-p & (binalign - 1)));
 }
+
+#endif // __DDSNAP_BUFFER_H
