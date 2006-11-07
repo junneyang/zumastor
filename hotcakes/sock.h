@@ -4,6 +4,8 @@
 
 #include "trace.h"
 
+#ifndef __DDSNAP_SOCK_H
+#define __DDSNAP_SOCK_H
 /*
  * Find and return the port number of a host:port pair, updating
  * the length to represent the hostname without the port.
@@ -125,4 +127,4 @@ static inline int recv_fd(int sock)
 	memcpy(&fd, CMSG_DATA(cmsg), sizeof(fd));
 	return fd;
 }
-
+#endif // __DDSNAP_SOCK_H

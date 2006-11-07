@@ -17,6 +17,8 @@
 #define EFULL ENOMEM
 #define PACKED __attribute__ ((packed))
 
+#ifndef __DDSNAP_H
+#define __DDSNAP_H
 static inline int readpipe(int fd, void *buffer, size_t count)
 {
 	int n;
@@ -57,6 +59,7 @@ typedef unsigned long long chunk_t;
 #define MAX_ADDRESS 16
 
 struct server { u16 port; u8 type; u8 address_len; char address[MAX_ADDRESS]; } PACKED;
+#endif
 
 #ifndef HOST_NAME_MAX
 #define HOST_NAME_MAX 256

@@ -1,14 +1,16 @@
-kernel=/src/2.6.17-rc6-dd/drivers/md
+kernel=./kernel
 
 instdir=/usr/bin
 #instdir=/tmp/ddsnap
 
 deps = Makefile trace.h diskio.h buffer.h list.h sock.h
-ddsnap_deps = $(deps) ddsnap.h $(kernel)/dm-ddsnap.h
+ddsnap_agent_deps = $(deps) ddsnap.agent.h $(kernel)/dm-ddsnap.h
+ddsnapd_deps = $(deps) ddsnapd.h $(kernel)/dm-ddsnap.h
+ddsnap_deps = $(deps) ddsnap.h ddsnapd.h ddsnap.agent.h $(kernel)/dm-ddsnap.h
 ddraid_deps = $(deps) ddraid.h $(kernel)/dm-ddraid.h
 
 ddraid_binaries = mkddraid ddraidd ddraid-agent
-ddsnap_binaries = mkddsnap ddsnapd ddsnap-agent ddsnap
+ddsnap_binaries = ddsnap
 binaries =  $(ddraid_binaries) $(ddsnap_binaries) devspam
 
 includes = $(kernel)
@@ -26,6 +28,12 @@ delta.o: delta.c
 
 ddsnap.common.o: ddsnap.common.c $(deps)
 	cc ddsnap.common.c -c $(flags)
+
+ddsnap.agent.o: ddsnap.agent.c $(ddsnap_agent_deps)
+	cc ddsnap.agent.c -I$(includes) -c $(flags)
+
+ddsnapd.o: ddsnapd.c $(ddsnapd_deps)
+	cc ddsnapd.c -I$(includes) -c $(flags)
 
 diskio.o: diskio.c $(deps)
 	cc diskio.c -c $(flags)
@@ -45,17 +53,17 @@ ddraidd: ddraid.c diskio.o buffer.o $(ddraid_deps)
 ddraid-agent: ddraid.agent.c $(ddraid_deps)
 	cc ddraid.agent.c $(flags) -I$(includes) -lpthread -o ddraid-agent -lpopt
 
-mkddsnap: ddsnapd.c ddsnap.common.o diskio.o buffer.o $(ddsnap_deps)
-	cc -DCREATE ddsnapd.c $(flags) -I$(includes) ddsnap.common.o diskio.o buffer.o -o mkddsnap -lpopt
+#mkddsnap: ddsnapd.c ddsnap.common.o diskio.o buffer.o $(ddsnap_deps)
+#	cc -DCREATE ddsnapd.c $(flags) -I$(includes) ddsnap.common.o diskio.o buffer.o -o mkddsnap -lpopt
 
-ddsnapd: ddsnapd.c ddsnap.common.o diskio.o buffer.o daemonize.o $(ddsnap_deps)
-	cc -DSERVER ddsnapd.c $(flags) -I$(includes) ddsnap.common.o diskio.o buffer.o daemonize.o -o ddsnapd -lpopt
+#ddsnapd: ddsnapd.c ddsnap.common.o diskio.o buffer.o daemonize.o $(ddsnap_deps)
+#	cc -DSERVER ddsnapd.c $(flags) -I$(includes) ddsnap.common.o diskio.o buffer.o daemonize.o -o ddsnapd -lpopt
 
-ddsnap-agent: ddsnap.agent.c daemonize.o $(ddsnap_deps)
-	cc ddsnap.agent.c $(flags) -I$(includes) daemonize.o -o ddsnap-agent -lpopt
+#ddsnap-agent: ddsnap.agent.c daemonize.o $(ddsnap_deps)
+#	cc ddsnap.agent.c $(flags) -I$(includes) daemonize.o -o ddsnap-agent -lpopt
 
-ddsnap: ddsnap.c ddsnap.common.o xdelta/xdelta3.o delta.o diskio.o daemonize.o $(ddsnap_deps)
-	cc ddsnap.c $(flags) -I$(includes) ddsnap.common.o xdelta/xdelta3.o delta.o diskio.o daemonize.o -o ddsnap -lpopt -lz
+ddsnap: ddsnap.c buffer.o ddsnapd.o ddsnap.agent.o ddsnap.common.o xdelta/xdelta3.o delta.o diskio.o daemonize.o $(ddsnap_deps)
+	cc ddsnap.c $(flags) -I$(includes) buffer.o ddsnapd.o ddsnap.agent.o ddsnap.common.o xdelta/xdelta3.o delta.o diskio.o daemonize.o -o ddsnap -lpopt -lz
 
 devspam: tests/devspam.c trace.h
 	cd tests && cc devspam.c $(flags) -I$(includes) -o ../devspam
@@ -102,8 +110,8 @@ data=/dev/$(data0) /dev/$(data1) /dev/$(data2) /dev/$(data3) /dev/$(data4)
 #data=/dev/$(data0) /dev/$(data1)
 
 # README test values
-origindev=/dev/hdb1
-snapstoredev=/dev/hdb2
+origindev=/dev/sda7
+snapstoredev=/dev/sda8
 # Ross
 #origindev=/dev/sda3
 #snapstoredev=/dev/sda4
@@ -153,13 +161,13 @@ dd-init:
 	killall ddsnapd || true
 	killall ddsnap-agent || true
 	/sbin/dmsetup remove_all || true
-	./mkddsnap /dev/test-snapstore /dev/test-origin 
+	./ddsnap init /dev/test-snapstore /dev/test-origin 
 
 dd-agent:
-	./ddsnap-agent /tmp/control
+	./ddsnap agent /tmp/control
 
 dd-server:
-	./ddsnapd /dev/test-snapstore /dev/test-origin /tmp/control /tmp/server
+	./ddsnap server /dev/test-snapstore /dev/test-origin /tmp/control /tmp/server
 
 dd-create:
 	./ddsnap create-snap /tmp/server 0

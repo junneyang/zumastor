@@ -17,14 +17,18 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <zlib.h>
-#include "ddsnap.h"
-#include "ddsnap.common.h"
-#include "dm-ddsnap.h"
-#include "trace.h"
-#include "sock.h"
-#include "delta.h"
+#include "buffer.h"
 #include "daemonize.h"
+#include "ddsnap.h"
+#include "ddsnap.agent.h"
+#include "ddsnap.common.h"
+#include "ddsnapd.h"
+#include "delta.h"
 #include "diskio.h"
+#include "dm-ddsnap.h"
+#include "list.h"
+#include "sock.h"
+#include "trace.h"
 
 /* changelist and delta file header info */
 #define MAGIC_SIZE 8
@@ -1160,18 +1164,21 @@ static int ddsnap_daemon(int lsock, char const *snapdevstem)
 static void mainUsage(void)
 {
 	printf("usage: ddsnap [-?|--help|--usage] <subcommand>\n"
-		"\n"
-		"Available subcommands:\n"
-		"	create-snap       Creates a snapshot\n"
-		"	delete-snap       Deletes a snapshot\n"
-		"	list              Returns a list of snapshots\n"
-		"	set-priority      Sets the priority of a snapshot\n"
-		"	set-usecount      Sets the use count of a snapshot\n"
-		"	create-cl         Creates a changelist given 2 snapshots\n"
-		"	create-delta      Creates a delta file given a changelist and 2 snapshots\n"
-		"	apply-delta       Applies a delta file to the given device\n"
-		"	send-delta        Sends a delta file downstream\n"
-		"	daemon            Listens for upstream deltas\n");
+	       "\n"
+	       "Available subcommands:\n"
+	       "        init              Initializes snapshot storage device\n"
+	       "        agent-server      Starts up the snapshot agent\n"
+	       "        snap-server       Starts up the snapshot server\n"
+	       "	create-snap       Creates a snapshot\n"
+	       "	delete-snap       Deletes a snapshot\n"
+	       "	list              Returns a list of snapshots\n"
+	       "	set-priority      Sets the priority of a snapshot\n"
+	       "	set-usecount      Sets the use count of a snapshot\n"
+	       "	create-cl         Creates a changelist given 2 snapshots\n"
+	       "	create-delta      Creates a delta file given a changelist and 2 snapshots\n"
+	       "	apply-delta       Applies a delta file to the given device\n"
+	       "	send-delta        Sends a delta file downstream\n"
+	       "	delta-server      Listens for upstream deltas\n");
 }
 
 static void cdUsage(poptContext optCon, int exitcode, char const *error, char const *addl)
@@ -1184,22 +1191,44 @@ static void cdUsage(poptContext optCon, int exitcode, char const *error, char co
 int main(int argc, char *argv[])
 {
 	char const *command;
-	int xd = FALSE, raw = FALSE, test = FALSE, gzip_level = DEF_GZIP_COMP, opt_comp = FALSE;
 
 	struct poptOption noOptions[] = {
 		POPT_TABLEEND
 	};
+
+	char *js_str = NULL, *bs_str = NULL;
+	int yes = FALSE;
+	struct poptOption initOptions[] = {
+		{ "yes", 'y', POPT_ARG_NONE, &yes, 0, "Answer yes to all prompts", NULL},
+		{ "journal_size", 'j', POPT_ARG_STRING, &js_str, 0, "User specified journal size, i.e. 400k (default: 100 * chunk_size)", "desired journal size" },
+		{ "block_size", 'b', POPT_ARG_STRING, &bs_str, 0, "User specified block size, has to be a power of two, i.e. 8k (default: 4k)", "desired block size" },
+	     POPT_TABLEEND
+	};
+
+	int nobg = 0;
+	struct poptOption serverOptions[] = {
+		{ "foreground", 'f', POPT_ARG_NONE, &nobg, 0, "do not daemonize server", NULL },
+		POPT_TABLEEND
+	};
+
+	int xd = FALSE, raw = FALSE, test = FALSE, gzip_level = DEF_GZIP_COMP, opt_comp = FALSE;
 	struct poptOption cdOptions[] = {
 		{ "xdelta", 'x', POPT_ARG_NONE, &xd, 0, "Delta file format: xdelta chunk", NULL },
 		{ "raw", 'r', POPT_ARG_NONE, &raw, 0, "Delta file format: raw chunk from later snapshot", NULL },
+		{ "optcomp", 'o', POPT_ARG_NONE, &opt_comp, 0, "Delta file format: optimal compression (slowest)", NULL},
 		{ "test", 't', POPT_ARG_NONE, &test, 0, "Delta file format: xdelta chunk, raw chunk from earlier snapshot and raw chunk from later snapshot", NULL },
 		{ "gzip", 'g', POPT_ARG_INT, &gzip_level, 0, "Compression via gzip", "compression_level"},
-		{ "optcomp", 'o', POPT_ARG_NONE, &opt_comp, 0, "Optimal compression (slowest)", NULL},
 		POPT_TABLEEND
 	};
 
 	poptContext mainCon;
 	struct poptOption mainOptions[] = {
+		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &initOptions, 0,
+		  "Initialize\n\t Function: Initializes snapshot storage device\n\t Usage: init [OPTION...] <dev/snapshot> <dev/origin> [dev/meta]" , NULL },
+		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &serverOptions, 0,
+		  "Agent Server\n\t Function: Starts up the snapshot agent\n\t Usage: agent-server [OPTION...] <agent_socket>" , NULL },
+		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &serverOptions, 0,
+		  "Snapshot Server\n\t Function: Starts up the snapshot server\n\t Usage: snap-server [OPTION...] <dev/snapshot> <dev/origin> [dev/meta] <agent_socket> <server_socket>" , NULL },
 		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &noOptions, 0,
 		  "Create snapshot\n\t Function: Creates a snapshot\n\t Usage: create-snap <sockname> <snapshot>" , NULL },
 		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &noOptions, 0,
@@ -1219,7 +1248,7 @@ int main(int argc, char *argv[])
 		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &cdOptions, 0,
 		  "Send delta\n\t Function: Sends a delta file downstream\n\t Usage: send-delta [OPTION...] <sockname> <snapshot1> <snapshot2> <snapdev1> <snapdev2> <remsnapshot> <host>[:<port>]\n" , NULL },
 		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &noOptions, 0,
-		  "Daemon\n\t Function: Listens for upstream deltas\n\t Usage: daemon <snapdevstem> [<host>[:<port>]]" , NULL },
+		  "Delta Server\n\t Function: Listens for upstream deltas\n\t Usage: delta-server <snapdevstem> [<host>[:<port>]]" , NULL },
 		POPT_AUTOHELP
 		POPT_TABLEEND
 	};
@@ -1246,6 +1275,287 @@ int main(int argc, char *argv[])
 		exit(1);
 	}
 
+	if (strcmp(command, "init") == 0) {
+		
+		char const *snapdev, *origdev, *metadev;
+		u32 bs_bits = SECTOR_BITS + SECTORS_PER_BLOCK, js_bytes = DEFAULT_JOURNAL_SIZE;				
+
+		struct poptOption options[] = {
+			{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &initOptions, 0, NULL, NULL },
+			POPT_AUTOHELP
+			POPT_TABLEEND
+		};
+
+		poptContext initCon = poptGetContext(NULL, argc-1, (const char **)&(argv[1]), options, 0);
+		poptSetOtherOptionHelp(initCon, "<dev/snapshot> <dev/origin> [dev/meta]");
+
+		char initOpt = poptGetNextOpt(initCon);
+
+		if (argc < 3) {
+			poptPrintUsage(initCon, stderr, 0);
+			exit(1);
+		}
+
+		if (initOpt < -1) {
+			fprintf(stderr, "%s: %s: %s\n", command, poptBadOption(initCon, POPT_BADOPTION_NOALIAS), poptStrerror(initOpt));
+			poptFreeContext(initCon);
+			return 1;
+		}
+
+		snapdev = poptGetArg(initCon);
+		if (!snapdev) {
+			fprintf(stderr, "%s: snapshot device must be specified\n", command);
+			poptPrintUsage(initCon, stderr, 0);
+			poptFreeContext(initCon);
+			return 1;
+		}
+		
+		origdev = poptGetArg(initCon);
+		if (!origdev) {
+			fprintf(stderr, "%s: origin device must be specified\n", command);
+			poptPrintUsage(initCon, stderr, 0);
+			poptFreeContext(initCon);
+			return 1;
+		}
+		
+		metadev = poptGetArg(initCon); /* ok if NULL */
+		
+		if (poptPeekArg(initCon) != NULL) {
+			fprintf(stderr, "%s: too many arguments\n", command);
+			poptPrintUsage(initCon, stderr, 0);
+			poptFreeContext(initCon);
+			return 1;
+		}
+
+		struct superblock *sb;
+		posix_memalign((void **)&sb, 1 << SECTOR_BITS, SB_SIZE);
+		memset(sb, 0, SB_SIZE);
+		
+		init_buffers();
+		
+		if ((sb->snapdev = open(snapdev, O_RDWR | O_DIRECT)) == -1)
+			error("Could not open snapshot store %s: %s", snapdev, strerror(errno));
+		
+		if ((sb->orgdev = open(origdev, O_RDONLY | O_DIRECT)) == -1)
+			error("Could not open origin volume %s: %s", origdev, strerror(errno));
+		
+		sb->metadev = sb->snapdev;
+		if (metadev && (sb->metadev = open(metadev, O_RDWR)) == -1) /* can I do an O_DIRECT on the ramdevice? */
+			error("Could not open meta volume %s: %s", metadev, strerror(errno));
+
+		poptFreeContext(initCon);
+		
+		trace_off(printf("js_bytes was %d & bs_bits was %d\n", js_bytes, bs_bits););
+
+		if (bs_str != NULL) {
+			bs_bits = strtobits(bs_str);
+			if (bs_bits == INPUT_ERROR) {
+				poptPrintUsage(initCon, stderr, 0);
+				fprintf(stderr, "Invalid block size input. Try 64k\n");
+				exit(1);
+			}
+		}
+
+		if (js_str != NULL) {
+			if (js_bytes == INPUT_ERROR) {
+				poptPrintUsage(initCon, stderr, 0);
+				fprintf(stderr, "Invalid journal size input. Try 400k\n");
+				exit(1);
+			}
+		}
+
+		trace_off(printf("js_bytes is %d & bs_bits is %d\n", js_bytes, bs_bits););
+
+# ifdef MKDDSNAP_TEST
+		init_snapstore(sb, js_bytes, bs_bits);
+		create_snapshot(sb, 0);
+		
+		int i;
+		for (i = 0; i < 100; i++) {
+			make_unique(sb, i, 0);
+		}
+		
+		flush_buffers();
+		evict_buffers();
+		warn("delete...");
+		delete_tree_range(sb, 1, 0, 5);
+		show_buffers();
+		warn("dirty buffers = %i", dirty_buffer_count);
+		show_tree(sb);
+		return 0;
+# endif /* end of test code */
+		
+		return init_snapstore(sb, js_bytes, bs_bits);
+	}
+	if (strcmp(command, "agent-server") == 0) {
+		char const *sockname;
+		int listenfd;	
+
+		struct poptOption options[] = {
+			{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &serverOptions, 0, NULL, NULL },
+			POPT_AUTOHELP
+			POPT_TABLEEND
+		};
+
+		poptContext agentCon = poptGetContext(NULL, argc-1, (const char **)&(argv[1]), options, 0);
+		poptSetOtherOptionHelp(agentCon, "<agent_socket>");
+
+		char agentOpt = poptGetNextOpt(agentCon);
+
+		if (agentOpt < -1) {
+			fprintf(stderr, "%s: %s: %s\n", command, poptBadOption(agentCon, POPT_BADOPTION_NOALIAS), poptStrerror(agentOpt));
+			poptFreeContext(agentCon);
+			return 1;
+		}
+
+		sockname = poptGetArg(agentCon);
+		if (sockname == NULL) {
+			fprintf(stderr, "%s: socket name for ddsnap agent must be specified\n", command);
+			poptPrintUsage(agentCon, stderr, 0);
+			poptFreeContext(agentCon);
+			return 1;
+		}
+		if (poptPeekArg(agentCon) != NULL) {
+			fprintf(stderr, "%s: only one socket name may be specified\n", command);
+			poptPrintUsage(agentCon, stderr, 0);
+			poptFreeContext(agentCon);
+			return 1;
+		}
+
+		poptFreeContext(agentCon);
+
+		if (monitor_setup(sockname, &listenfd) < 0)
+			error("Could not setup ddsnap agent server\n");
+
+		if (!nobg) {
+			pid_t pid;
+
+			pid = daemonize("/tmp/ddsnap.agent.log");
+			if (pid == -1)
+				error("Could not daemonize\n");
+			if (pid != 0) {
+				trace_on(printf("pid = %lu\n", (unsigned long)pid););
+				return 0;
+			}
+		}
+		
+		if (monitor(listenfd, &(struct context){ .polldelay = -1 }) < 0)
+			error("Could not start ddsnap agent server\n");
+		
+		return 0; /* not reached */
+		
+	}
+	if (strcmp(command, "snap-server") == 0) {
+		char const *snapdev, *origdev, *metadev;
+		char const *agent_sockname, *server_sockname;
+		
+		struct poptOption options[] = {
+			{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &serverOptions, 0, NULL, NULL },
+			POPT_AUTOHELP
+			POPT_TABLEEND
+		};
+
+		poptContext serverCon = poptGetContext(NULL, argc-1, (const char **)&(argv[1]), options, 0);
+		poptSetOtherOptionHelp(serverCon, "<dev/snapshot> <dev/origin> [dev/meta] <agent_socket> <server_socket>");
+
+		char serverOpt = poptGetNextOpt(serverCon);
+
+		if (argc < 3) {
+			poptPrintUsage(serverCon, stderr, 0);
+			exit(1);
+		}
+
+		if (serverOpt < -1) {
+			fprintf(stderr, "%s: %s: %s\n", command, poptBadOption(serverCon, POPT_BADOPTION_NOALIAS), poptStrerror(serverOpt));
+			poptFreeContext(serverCon);
+			return 1;
+		}
+
+		snapdev = poptGetArg(serverCon);
+		if (!snapdev) {
+			fprintf(stderr, "%s: snapshot device must be specified\n", command);
+			poptPrintUsage(serverCon, stderr, 0);
+			poptFreeContext(serverCon);
+			return 1;
+		}
+		
+		origdev = poptGetArg(serverCon);
+		if (!origdev) {
+			fprintf(stderr, "%s: origin device must be specified\n", command);
+			poptPrintUsage(serverCon, stderr, 0);
+		poptFreeContext(serverCon);
+		return 1;
+		}	
+	
+		char const *extra_arg[3];
+
+		extra_arg[0] = poptGetArg(serverCon);
+		extra_arg[1] = poptGetArg(serverCon);
+		extra_arg[2] = poptGetArg(serverCon);
+
+		if (!extra_arg[0] || !extra_arg[1]) {
+			fprintf(stderr, "%s: agent and server socket names must both be specified\n", command);
+			poptPrintUsage(serverCon, stderr, 0);
+			poptFreeContext(serverCon);
+			return 1;
+		}
+ 
+		if (extra_arg[2]) {
+			metadev = extra_arg[0];
+			agent_sockname = extra_arg[1];
+			server_sockname = extra_arg[2];
+		} else {
+			metadev = NULL;
+			agent_sockname = extra_arg[0];
+			server_sockname = extra_arg[1];
+		}
+		
+		if (poptPeekArg(serverCon) != NULL) {
+			fprintf(stderr, "%s: too many arguments\n", command);
+			poptPrintUsage(serverCon, stderr, 0);
+			poptFreeContext(serverCon);
+			return 1;
+		}
+		
+		struct superblock *sb;
+		posix_memalign((void **)&sb, 1 << SECTOR_BITS, SB_SIZE);
+		memset(sb, 0, SB_SIZE);
+
+		init_buffers();
+		
+		if ((sb->snapdev = open(snapdev, O_RDWR | O_DIRECT)) == -1)
+			error("Could not open snapshot store %s: %s", snapdev, strerror(errno));
+		
+		if ((sb->orgdev = open(origdev, O_RDONLY | O_DIRECT)) == -1)
+			error("Could not open origin volume %s: %s", origdev, strerror(errno));
+		
+		sb->metadev = sb->snapdev;
+		if (metadev && (sb->metadev = open(metadev, O_RDWR)) == -1) /* can I do an O_DIRECT on the ramdevice? */
+			error("Could not open meta volume %s: %s", metadev, strerror(errno));
+		
+		poptFreeContext(serverCon);
+		
+		
+		int listenfd, getsigfd, agentfd;
+		
+		if (snap_server_setup(agent_sockname, server_sockname, &listenfd, &getsigfd, &agentfd) < 0)
+			error("Could not setup snapshot server\n");
+		if (!nobg) {
+			pid_t pid;
+			
+			pid = daemonize("/tmp/ddsnapd.log");
+			if (pid == -1)
+				error("Could not daemonize\n");
+			if (pid != 0) {
+				trace_on(printf("pid = %lu\n", (unsigned long)pid););
+				return 0;
+			}
+		}
+		if (snap_server(sb, server_sockname, listenfd, getsigfd, agentfd) < 0)
+			error("Could not start snapshot server\n");
+	
+		return 0; /* not reached */
+	}
 	if (strcmp(command, "create-snap") == 0) {
 		if (argc != 4) {
 			printf("Usage: %s create-snap <sockname> <snapshot>\n", argv[0]);
@@ -1360,7 +1670,6 @@ int main(int argc, char *argv[])
 	}
 	if (strcmp(command, "create-delta") == 0) {
 		char cdOpt;
-
 		poptContext cdCon;
 
 		struct poptOption options[] = {
@@ -1381,9 +1690,11 @@ int main(int argc, char *argv[])
 
 		if (cdOpt < -1) {
 			/* an error occurred during option processing */
-			fprintf(stderr, "%s: %s\n",
+			fprintf(stderr, "%s: %s: %s\n",
+				command,
 				poptBadOption(cdCon, POPT_BADOPTION_NOALIAS),
 				poptStrerror(cdOpt));
+			poptFreeContext(cdCon);
 			return 1;
 		}
 
@@ -1523,7 +1834,7 @@ int main(int argc, char *argv[])
 
 		return ret;
 	}
-	if (strcmp(command, "daemon") == 0) {
+	if (strcmp(command, "delta-server") == 0) {
 		char *hostname;
 		unsigned port;
 
@@ -1566,8 +1877,9 @@ int main(int argc, char *argv[])
 		return ddsnap_daemon(sock, argv[2]);
 
 	}
-	fprintf(stderr, "%s: unrecognized subcommand: %s.\n", argv[0], command);
 
+	fprintf(stderr, "%s: unrecognized subcommand: %s.\n", argv[0], command);
+	
 	return 1;
 }
 

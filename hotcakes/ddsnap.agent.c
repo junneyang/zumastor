@@ -10,6 +10,7 @@
 //#include <libdlm.h>
 #include <popt.h>
 #include "dm-ddsnap.h" // message codes
+#include "ddsnap.agent.h"
 #include "ddsnap.h" // outbead
 #include "trace.h"
 #include "sock.h" // send_fd, read/writepipe, connect_socket
@@ -18,15 +19,6 @@
 #define trace trace_off
 
 struct client { int sock; enum { CLIENT_CON, SERVER_CON } type; };
-
-struct context {
-	struct server active, local;
-	int serv;
-	int waiters;
-	struct client *waiting[100];
-	int polldelay;
-	unsigned ast_state;
-};
 
 static inline int have_address(struct server *server)
 {
@@ -137,7 +129,7 @@ pipe_error:
 	return -1;
 }
 
-static int monitor_setup(char const *sockname, int *listenfd)
+int monitor_setup(char const *sockname, int *listenfd)
 {
 	struct sockaddr_un addr = { .sun_family = AF_UNIX };
 	unsigned int addr_len = sizeof(addr) - sizeof(addr.sun_path) + strlen(sockname);
@@ -156,7 +148,7 @@ static int monitor_setup(char const *sockname, int *listenfd)
 	return 0;
 }
 
-static int monitor(int listenfd, struct context *context)
+int monitor(int listenfd, struct context *context)
 {
 	unsigned maxclients = 100, clients = 0, others = 1;
 	struct pollfd pollvec[others+maxclients];
@@ -235,65 +227,3 @@ static int monitor(int listenfd, struct context *context)
 		}
 	}
 }
-
-int main(int argc, char *argv[])
-{
-	poptContext optCon;
-	char c;
-	int nobg=0;
-	char const *sockname;
-	int listenfd;
-
-	struct poptOption optionsTable[] = {
-		{ "foreground", 'f', POPT_ARG_NONE, &nobg, 0, "do not daemonize server", NULL },
-		POPT_AUTOHELP
-		POPT_TABLEEND
-	};
-
-	optCon = poptGetContext(NULL, argc, (char const **)argv, optionsTable, 0);
-	poptSetOtherOptionHelp(optCon, "<agent_socket>");
-
-	while ((c = poptGetNextOpt(optCon)) >= 0);
-	if (c < -1) {
-		fprintf(stderr, "%s: %s: %s\n", argv[0], poptBadOption(optCon, POPT_BADOPTION_NOALIAS), poptStrerror(c));
-		poptFreeContext(optCon);
-		return 1;
-	}
-
-	sockname = poptGetArg(optCon);
-	if (sockname == NULL) {
-		fprintf(stderr, "%s: socket name for ddsnap agent must be specified\n", argv[0]);
-		poptPrintUsage(optCon, stderr, 0);
-		poptFreeContext(optCon);
-		return 1;
-	}
-	if (poptPeekArg(optCon) != NULL) {
-		fprintf(stderr, "%s: only one socket name may be specified\n", argv[0]);
-		poptPrintUsage(optCon, stderr, 0);
-		poptFreeContext(optCon);
-		return 1;
-	}
-
-	poptFreeContext(optCon);
-
-	if (monitor_setup(sockname, &listenfd) < 0)
-		error("Could not setup ddsnap agent server\n");
-
-	if (!nobg) {
-		pid_t pid;
-
-		pid = daemonize("/tmp/ddsnap.agent.log");
-		if (pid == -1)
-			error("Could not daemonize\n");
-		if (pid != 0) {
-			trace_on(printf("pid = %lu\n", (unsigned long)pid););
-			return 0;
-		}
-	}
-
-	if (monitor(listenfd, &(struct context){ .polldelay = -1 }) < 0)
-		error("Could not start ddsnap agent server\n");
-
-	return 0; /* not reached */
-}
-

@@ -29,24 +29,21 @@
 #include <netdb.h> // gethostbyname2_r
 #include <linux/fs.h> // BLKGETSIZE
 #include <popt.h>
-#include "sock.h"
-#include "list.h"
 #include "buffer.h"
+#include "daemonize.h"
 #include "ddsnap.h"
 #include "ddsnap.common.h"
-#include "dm-ddsnap.h"
-#include "trace.h"
-#include "daemonize.h"
+#include "ddsnapd.h"
 #include "diskio.h"
+#include "dm-ddsnap.h"
+#include "list.h"
+#include "sock.h"
+#include "trace.h"
 
 #define trace trace_off
 #define jtrace trace_off
 //#define BUSHY
 
-#define SECTORS_PER_BLOCK 7
-#define CHUNK_SIZE 4096
-#define DEFAULT_JOURNAL_SIZE (100 * CHUNK_SIZE)
-#define INPUT_ERROR 0
 #define DIVROUND(N, D) (((N)+(D)-1)/(D))
 
 /*
@@ -149,7 +146,6 @@ static int fd_size(fd_t fd, u64 *bytes)
 	return 0;
 }
 
-#ifdef SERVER
 static void hexdump(void const *data, unsigned length)
 {
 	while (length) {
@@ -161,7 +157,6 @@ static void hexdump(void const *data, unsigned length)
 		printf("\n");
 	}
 }
-#endif
 
 /* BTree Operations */
 
@@ -216,60 +211,7 @@ static inline struct exception *emap(struct eleaf *leaf, unsigned i)
 	return	(struct exception *)((char *) leaf + leaf->map[i].offset);
 }
 
-struct superblock
-{
-	/* Persistent, saved to disk */
-	struct disksuper
-	{
-		char magic[8];
-		u64 create_time;
-		sector_t etree_root;
-		sector_t orgchunks;
-		u64 flags;
-		u32 blocksize_bits, chunksize_bits;
-		u64 deleting;
-		struct snapshot
-		{
-			u32 ctime; // upper 32 bits are in super create_time
-			u32 tag;   // external name (id) of snapshot
-			u8 bit;    // internal snapshot number, not derived from tag
-			s8 prio;   // 0=normal, 127=highest, -128=lowestdrop
-			u8 usecnt; // use count on snapshot device (just use a bit?)
-			char reserved[7];
-		} snaplist[MAX_SNAPSHOTS]; // entries are contiguous, in creation order
-		u32 snapshots;
-		u32 etree_levels;
-		s32 journal_base, journal_next, journal_size;
-		u32 sequence;
-		struct allocation_info {
-			sector_t bitmap_base;
-			sector_t chunks;
-			sector_t freechunks;
-			chunk_t  last_alloc;
-			u64      bitmap_blocks;
-		} alloc[2]; /* shouldn't be hardcoded? */
-	} image;
-
-	/* Derived, not saved to disk */
-	u64 snapmask;
-	u32 blocksize, chunksize, blocks_per_node;
-	u32 sectors_per_block_bits, sectors_per_block;
-	u32 sectors_per_chunk_bits, sectors_per_chunk;
-	unsigned flags;
-	unsigned snapdev, metadev, orgdev;
-	unsigned snaplock_hash_bits;
-	struct snaplock **snaplocks;
-	unsigned copybuf_size;
-	char *copybuf;
-	chunk_t source_chunk;
-	chunk_t dest_exception;
-	unsigned copy_chunks;
-	unsigned max_commit_blocks;
-	struct allocation_info  *metadata, *snapdata, *current_alloc;
-};
-
 #define SB_BUSY 1
-#define SB_MAGIC "snapshot"
 
 /* Journal handling */
 
@@ -378,7 +320,6 @@ static void commit_transaction(struct superblock *sb)
 	brelse(commit_buffer);
 }
 
-#ifdef SERVER
 static int recover_journal(struct superblock *sb)
 {
 	struct buffer *buffer;
@@ -489,8 +430,8 @@ failed:
 	error("Journal recovery failed, %s", why);
 	return -1;
 }
-#endif
 
+#if 0
 static void _show_journal(struct superblock *sb)
 {
 	int i, j;
@@ -513,6 +454,7 @@ static void _show_journal(struct superblock *sb)
 }
 
 #define show_journal(sb) do { warn("Journal..."); _show_journal(sb); } while (0)
+#endif
 
 /* BTree leaf operations */
 
@@ -787,11 +729,6 @@ static void init_leaf(struct eleaf *leaf, int block_size)
 /*
  * Chunk allocation via bitmaps
  */
-
-#define SB_DIRTY 1
-#define SB_SECTOR 8
-#define SB_SIZE 4096
-
 static void set_sb_dirty(struct superblock *sb)
 {
 	sb->flags |= SB_DIRTY;
@@ -1057,7 +994,6 @@ static void show_tree(struct superblock *sb)
 
 struct etree_path { struct buffer *buffer; struct index_entry *pnext; };
 
-#ifdef SERVER
 /* need to refactor to use a generic Traversal pattern
    gen_changelist, delete_snapshot and show_tree can be
    refactor to use a wrapper. - rob
@@ -1120,7 +1056,6 @@ static struct change_list *gen_changelist_tree(struct superblock const *sb, int 
 		} while (path[level].pnext == node->entries + node->count);
 	}
 }
-#endif
 
 /* High Level BTree Editing */
 
@@ -1173,6 +1108,7 @@ static void brelse_path(struct etree_path *path, unsigned levels)
 		brelse(path[i].buffer);
 }
 
+#if 0
 static void show_tree_range(struct superblock *sb, chunk_t start, unsigned leaves)
 {
 	int levels = sb->image.etree_levels, level = -1;
@@ -1224,6 +1160,7 @@ start:			show_leaf(buffer2leaf(leafbuf));
 		} while (path[level].pnext == node->entries + node->count);
 	}
 }
+#endif
 
 static void insert_child(struct enode *node, struct index_entry *p, sector_t child, u64 childkey)
 {
@@ -1380,7 +1317,6 @@ out:
 	return exception;
 }
 
-#ifdef SERVER
 static int test_unique(struct superblock *sb, chunk_t chunk, int snapnum, chunk_t *exception)
 {
 	unsigned levels = sb->image.etree_levels;
@@ -1394,11 +1330,9 @@ static int test_unique(struct superblock *sb, chunk_t chunk, int snapnum, chunk_
 	brelse_path(path, levels);
 	return result;
 }
-#endif
 
 /* Snapshot Store Superblock handling */
 
-#ifdef SERVER
 static u64 calc_snapmask(struct superblock *sb)
 {
 	u64 mask = 0;
@@ -1420,8 +1354,8 @@ static int tag_snapnum(struct superblock *sb, unsigned tag)
 
 	return -1;
 }
-#endif
 
+#if 0
 static int snapnum_tag(struct superblock *sb, unsigned bit)
 {
 	unsigned i, n = sb->image.snapshots;
@@ -1432,8 +1366,8 @@ static int snapnum_tag(struct superblock *sb, unsigned bit)
 
 	return -1;
 }
+#endif
 
-#ifdef SERVER
 static int create_snapshot(struct superblock *sb, unsigned snaptag)
 {
 	unsigned i, snapshots = sb->image.snapshots;
@@ -1458,7 +1392,6 @@ create:
 	set_sb_dirty(sb);
 	return i;
 }
-#endif
 
 static void check_leaf(struct eleaf *leaf, u64 snapmask)
 {
@@ -1745,6 +1678,7 @@ delete:
 	return 0;
 }
 
+#if 0
 static void show_snapshots(struct superblock *sb)
 {
 	unsigned i, snapshots = sb->image.snapshots;
@@ -1759,16 +1693,15 @@ static void show_snapshots(struct superblock *sb)
 			snapshot->ctime);
 	}
 }
+#endif
 
 /* Lock snapshot reads against origin writes */
 
-#ifdef SERVER
 static void reply(fd_t sock, struct messagebuf *message)
 {
 	trace(warn("%x/%u", message->head.code, message->head.length););
 	writepipe(sock, &message->head, message->head.length + sizeof(message->head));
 }
-#endif
 
 struct client
 {
@@ -1804,7 +1737,6 @@ struct snaplock
 	chunk_t chunk;
 };
 
-#ifdef SERVER
 // used to be malloc... changed to calloc
 static struct snaplock *new_snaplock(struct superblock *sb)
 {
@@ -1876,9 +1808,7 @@ static void show_locks(struct superblock *sb)
 	if (!n) printf("-- no locks --\n");
 }
 # endif
-#endif
 
-#ifdef SERVER
 static void waitfor_chunk(struct superblock *sb, chunk_t chunk, struct pending **pending)
 {
 	struct snaplock *lock;
@@ -1923,9 +1853,7 @@ static void readlock_chunk(struct superblock *sb, chunk_t chunk, struct client *
 	lock->holdlist = hold;
 	trace(printf("leaving readlock_chunk\n"););
 }
-#endif
 
-#ifdef SERVER
 static struct snaplock *release_lock(struct superblock *sb, struct snaplock *lock, struct client *client)
 {
 	struct snaplock *ret = lock;
@@ -1967,9 +1895,7 @@ static struct snaplock *release_lock(struct superblock *sb, struct snaplock *loc
 	trace(printf("leaving release_lock\n"););
 	return ret;
 }
-#endif
 
-#ifdef SERVER
 static int release_chunk(struct superblock *sb, chunk_t chunk, struct client *client)
 {
 	trace(printf("enter release_chunk\n"););
@@ -1996,11 +1922,9 @@ static int release_chunk(struct superblock *sb, chunk_t chunk, struct client *cl
 	trace(printf("release_chunk returning 0\n next lock %p\n",next););
 	return 0;
 }
-#endif
 
 /* Build up a response as a list of chunk ranges */
 
-#ifdef SERVER
 struct addto
 {
 	unsigned count;
@@ -2065,7 +1989,6 @@ static void finish_reply(int sock, struct addto *r, unsigned code, unsigned id)
 	}
 	free(r->reply);
 }
-#endif
 
 /* Initialization, State load/save */
 
@@ -2103,7 +2026,6 @@ static void setup_sb(struct superblock *sb)
 	setup_alloc_sb(sb);
 }
 
-#ifdef SERVER
 static void load_sb(struct superblock *sb)
 {
 	if (diskread(sb->metadev, &sb->image, SB_SIZE, SB_SECTOR << SECTOR_BITS) < 0)
@@ -2113,7 +2035,6 @@ static void load_sb(struct superblock *sb)
 	sb->snapmask = calc_snapmask(sb);
 	trace(printf("Active snapshot mask: %016llx\n", sb->snapmask););
 }
-#endif
 
 static void save_sb(struct superblock *sb)
 {
@@ -2139,7 +2060,7 @@ static void save_state(struct superblock *sb)
  * require further unit testing.
  */
 
-static int init_snapstore(struct superblock *sb, u32 js_bytes, u32 bs_bits)
+int init_snapstore(struct superblock *sb, u32 js_bytes, u32 bs_bits)
 {
 	int i, error;
 
@@ -2356,7 +2277,6 @@ next:
 
 #endif
 
-#ifdef SERVER
 static struct snapshot * valid_snaptag(struct superblock *sb, int tag)
 {
 	int i, n = sb->image.snapshots;
@@ -2368,9 +2288,7 @@ static struct snapshot * valid_snaptag(struct superblock *sb, int tag)
 
 	return (struct snapshot *)0;
 }
-#endif
 
-#ifdef SERVER
 /*
  * Responses to IO requests take two quite different paths through the
  * machinery:
@@ -2755,9 +2673,7 @@ static int incoming(struct superblock *sb, struct client *client)
  pipe_error:
 	return -1; /* we quietly drop the client if the connect breaks */
 }
-#endif
 
-#ifdef SERVER
 /* Signal Delivery via pipe */
 
 static int sigpipe;
@@ -2776,7 +2692,6 @@ static int cleanup(struct superblock *sb)
 	save_state(sb);
 	return 0;
 }
-#endif
 
 #if 0
 static int resolve_host(char *name, int family, void *result, int length)
@@ -2803,8 +2718,7 @@ static int resolve_self(int family, void *result, int length)
 }
 #endif
 
-#ifdef SERVER
-static int snap_server_setup(const char *agent_sockname, const char *server_sockname, int *listenfd, int *getsigfd, int *agentfd)
+int snap_server_setup(const char *agent_sockname, const char *server_sockname, int *listenfd, int *getsigfd, int *agentfd)
 {
 	int pipevec[2];
 
@@ -2849,7 +2763,7 @@ static int snap_server_setup(const char *agent_sockname, const char *server_sock
 	return 0;
 }
 
-static int snap_server(struct superblock *sb, const char *server_sockname, int listenfd, int getsigfd, int agentfd)
+int snap_server(struct superblock *sb, const char *server_sockname, int listenfd, int getsigfd, int agentfd)
 {
 	unsigned maxclients = 100, clients = 0, others = 3;
 	struct client *clientvec[maxclients];
@@ -2959,15 +2873,8 @@ done:
 	close(listenfd);
 	return err;
 }
-#endif
 
-static void *useme[] = {
-	_show_journal, delete_tree_range, /* expand_snapstore, */
-	show_tree_range, snapnum_tag, show_snapshots,
-};
-
-#ifdef CREATE
-static u32 strtobytes(char const *string)
+u32 strtobytes(char const *string)
 {
 	long bytes = 0;
 	char *letter = NULL;
@@ -2995,7 +2902,7 @@ static u32 strtobytes(char const *string)
 	}
 }
 
-static u32 strtobits(char const *string)
+u32 strtobits(char const *string)
 {
 	long amount = 0;
 	u32 bits = 0;
@@ -3033,191 +2940,3 @@ static u32 strtobits(char const *string)
 
 	return bits;
 }
-#endif
-
-int main(int argc, const char *argv[])
-{
-	poptContext optCon;
-#ifdef SERVER
-	int nobg=0;
-#endif
-	char const *snapdev, *origdev, *metadev;
-#ifdef SERVER
-	char const *agent_sockname, *server_sockname;
-#endif
-#ifdef CREATE
-	char *js_str = NULL, *bs_str = NULL;
-	u32 bs_bits = SECTOR_BITS + SECTORS_PER_BLOCK, js_bytes = DEFAULT_JOURNAL_SIZE;
-#endif
-
-	struct poptOption optionsTable[] = {
-#ifdef SERVER
-	     { "foreground", 'f', POPT_ARG_NONE, &nobg, 0, "do not daemonize server", NULL },
-#endif
-#ifdef CREATE
-	     { "journal_size", 'j', POPT_ARG_STRING, &js_str, 0, "User specified journal size, i.e. 400k", "desired journal size (default: 100 * chunk_size)" },
-	     { "block_size", 'b', POPT_ARG_STRING, &bs_str, 0, "User specified block size, i.e. 4k", "desired block size; has to be a power of two (default: 4k)" },
-#endif
-	     POPT_AUTOHELP
-	     POPT_TABLEEND
-	};
-
-	optCon = poptGetContext(NULL, argc, (char const **)argv, optionsTable, 0);
-
-#ifdef SERVER
-	poptSetOtherOptionHelp(optCon, "<dev/snapshot> <dev/origin> [dev/meta] <agent_socket> <server_socket>");
-#endif
-#ifdef CREATE
-	poptSetOtherOptionHelp(optCon, "<dev/snapshot> <dev/origin> [dev/meta]");
-#endif
-
-	char c;
-
-	while ((c = poptGetNextOpt(optCon)) >= 0);
-	if (c < -1) {
-		fprintf(stderr, "%s: %s: %s\n", argv[0], poptBadOption(optCon, POPT_BADOPTION_NOALIAS), poptStrerror(c));
-		poptFreeContext(optCon);
-		return 1;
-	}
-
-	snapdev = poptGetArg(optCon);
-	if (!snapdev) {
-		fprintf(stderr, "%s: snapshot device must be specified\n", argv[0]);
-		poptPrintUsage(optCon, stderr, 0);
-		poptFreeContext(optCon);
-		return 1;
-	}
-
-	origdev = poptGetArg(optCon);
-	if (!origdev) {
-		fprintf(stderr, "%s: origin device must be specified\n", argv[0]);
-		poptPrintUsage(optCon, stderr, 0);
-		poptFreeContext(optCon);
-		return 1;
-	}
-
-#ifdef SERVER
-	char const *extra_arg[3];
-
-	extra_arg[0] = poptGetArg(optCon);
-	extra_arg[1] = poptGetArg(optCon);
-	extra_arg[2] = poptGetArg(optCon);
-
-	if (!extra_arg[0] || !extra_arg[1]) {
-		fprintf(stderr, "%s: agent and server socket names must both be specified\n", argv[0]);
-		poptPrintUsage(optCon, stderr, 0);
-		poptFreeContext(optCon);
-		return 1;
-	}
-
-	if (extra_arg[2]) {
-		metadev = extra_arg[0];
-		agent_sockname = extra_arg[1];
-		server_sockname = extra_arg[2];
-	} else {
-		metadev = NULL;
-		agent_sockname = extra_arg[0];
-		server_sockname = extra_arg[1];
-	}
-#endif
-#ifdef CREATE
-	metadev = poptGetArg(optCon); /* ok if NULL */
-#endif
-
-	if (poptPeekArg(optCon) != NULL) {
-		fprintf(stderr, "%s: too many arguments\n", argv[0]);
-		poptPrintUsage(optCon, stderr, 0);
-		poptFreeContext(optCon);
-		return 1;
-	}
-
-	struct superblock *sb;
-	posix_memalign((void **)&sb, 1 << SECTOR_BITS, SB_SIZE);
-	memset(sb, 0, SB_SIZE); 
-
-	init_buffers();
-
-	if ((sb->snapdev = open(snapdev, O_RDWR | O_DIRECT)) == -1)
-		error("Could not open snapshot store %s: %s", snapdev, strerror(errno));
-
-	if ((sb->orgdev = open(origdev, O_RDONLY | O_DIRECT)) == -1)
-		error("Could not open origin volume %s: %s", origdev, strerror(errno));
-
-	sb->metadev = sb->snapdev;
-	if (metadev && (sb->metadev = open(metadev, O_RDWR)) == -1) /* can I do an O_DIRECT on the ramdevice? */
-		error("Could not open meta volume %s: %s", metadev, strerror(errno));
-
-	poptFreeContext(optCon);
-
-#ifdef SERVER
-	int listenfd, getsigfd, agentfd;
-
-	if (snap_server_setup(agent_sockname, server_sockname, &listenfd, &getsigfd, &agentfd) < 0)
-		error("Could not setup snapshot server\n");
-	if (!nobg) {
-		pid_t pid;
-
-		pid = daemonize("/tmp/ddsnapd.log");
-		if (pid == -1)
-			error("Could not daemonize\n");
-		if (pid != 0) {
-			trace_on(printf("pid = %lu\n", (unsigned long)pid););
-			return 0;
-		}
-	}
-	if (snap_server(sb, server_sockname, listenfd, getsigfd, agentfd) < 0)
-		error("Could not start snapshot server\n");
-
-	return 0; /* not reached */
-#endif
-
-#ifdef CREATE
-
-	trace_off(printf("js_bytes was %d & bs_bits was %d\n", js_bytes, bs_bits););
-
-	if (bs_str != NULL) {
-		bs_bits = strtobits(bs_str);
-		if (bs_bits == INPUT_ERROR) {
-			poptPrintUsage(optCon, stderr, 0);
-			fprintf(stderr, "Invalid block size input. Try 64k\n");
-			exit(1);
-		}
-	}
-
-	if (js_str != NULL) {
-		if (js_bytes == INPUT_ERROR) {
-			poptPrintUsage(optCon, stderr, 0);
-			fprintf(stderr, "Invalid journal size input. Try 400k\n");
-			exit(1);
-		}
-	}
-
-	trace_on(printf("js_bytes is %d & bs_bits is %d\n", js_bytes, bs_bits););
-
-#endif
-
-#ifdef CREATE
-# ifdef MKDDSNAP_TEST
-	init_snapstore(sb, js_bytes, bs_bits);
-	create_snapshot(sb, 0);
-
-	int i;
-	for (i = 0; i < 100; i++) {
-		make_unique(sb, i, 0);
-	}
-
-	flush_buffers();
-	evict_buffers();
-	warn("delete...");
-	delete_tree_range(sb, 1, 0, 5);
-	show_buffers();
-	warn("dirty buffers = %i", dirty_buffer_count);
-	show_tree(sb);
-	return 0;
-# endif /* end of test code */
-
-	return init_snapstore(sb, js_bytes, bs_bits);
-#endif
-	if (useme) ;
-}
-
