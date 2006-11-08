@@ -921,7 +921,7 @@ static chunk_t alloc_chunk(struct superblock *sb)
 	} while (sb->image.snapshots);
 
  unable_to_delete:
-	warn("%s",err_msg);
+	warn("%s", err_msg);
 	return -1;
 }
 
@@ -2599,7 +2599,7 @@ static int incoming(struct superblock *sb, struct client *client)
 		close(change_fd);
 
 	generate_error:
-		trace(printf(err_msg);); /* can't use warn macro */
+		trace(warn("%s", err_msg););
 		outbead(sock, REPLY_ERROR, struct { });
 		break;
 	}
@@ -2634,7 +2634,7 @@ static int incoming(struct superblock *sb, struct client *client)
 		break;
 
 	stream_error:
-		trace(printf(err_msg);); /* can't use warn macro */
+		trace(warn("%s", err_msg););
 		outbead(sock, REPLY_ERROR, struct { });
 		break;
 	}
