@@ -695,12 +695,12 @@ static int apply_delta_extents(int deltafile, u32 mode, u32 chunk_size, u64 chun
 
 		extent_size = (deh.num_of_chunks) * chunk_size;
 		uncomp_size = extent_size;
-		extent_data = (unsigned char *)malloc (extent_size);
-		delta_data   = (unsigned char *)malloc (extent_size + 12 + (extent_size >> 9));
-		updated      = (unsigned char *)malloc (extent_size);
-		comp_delta   = (unsigned char *)malloc (extent_size);
-		up_extent1  = (char *)malloc (extent_size);
-		up_extent2  = (char *)malloc (extent_size);
+		extent_data = malloc(extent_size);
+		delta_data  = malloc(extent_size + 12 + (extent_size >> 9));
+		updated     = malloc(extent_size);
+		comp_delta  = malloc(extent_size);
+		up_extent1  = malloc(extent_size);
+		up_extent2  = malloc(extent_size);
 		
 		extent_addr = deh.extent_addr;
 
