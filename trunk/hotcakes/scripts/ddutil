@@ -6,15 +6,34 @@ version="1.1"
 # default location of configuration file
 conf_file=/etc/ddutil.conf
 
+
 # setup default configuration
+
+# base block devices
 dev_origin=/dev/origin
 dev_snapstore=/dev/snapstore
 dev_meta=
+
+# device mapper devices
 map_path=/dev/mapper
 map_origin=vol
 map_snap_stem=snap
+
+# Unix domain sockets
+# FIXME: use a safer location
 ddsnapd_sockpath=/tmp/server
 agent_sockpath=/tmp/control
+
+# log files
+ddsnap_agent_log=/var/log/ddsnap_agent.log
+ddsnap_server_log=/var/log/ddsnap_server.log
+ddsnap_delta_log=/var/log/ddsnap_delta.log
+
+# pid files
+ddsnap_agent_pid=/var/run/ddsnap_agent.pid
+ddsnap_server_pid=/var/run/ddsnap_server.pid
+ddsnap_delta_pid=/var/run/ddsnap_delta.pid
+
 
 
 usage_init()
@@ -89,7 +108,7 @@ usage_send_delta()
 usage_delta_server()
 {
     echo "$@delta-server [<host>[:<port>]]"
-    #echo "    -f, --foreground         Do not daemonize"
+    echo "    -f, --foreground          Do not daemonize"
 }
 
 usage_get_status()
@@ -452,8 +471,8 @@ case "${subcommand}" in
         ddsnap "${subcommand}" ${suboptions} "${ddsnapd_sockpath}" "$1" "$2" "${map_path}/${map_snap_stem}$1" "${map_path}/${map_snap_stem}$2" "$3" "$4"
         ;;
 
-    daemon)
-        ddsnap "${subcommand}" ${suboptions} "${map_path}/${map_snap_stem}" "$@"
+    delta-server)
+        ddsnap "${subcommand}" ${suboptions} -l "${ddsnap_delta_log}" -p "${ddsnap_delta_pid}" "${map_path}/${map_snap_stem}" "$@"
         ;;
 
     get-status)
@@ -461,14 +480,14 @@ case "${subcommand}" in
         ;;
 
     agent-server)
-	ddsnap "${subcommand}" ${suboptions} "${agent_sockpath}" 
+	ddsnap "${subcommand}" ${suboptions} -l "${ddsnap_agent_log}" -p "${ddsnap_agent_pid}" "${agent_sockpath}" 
 	;;
 
     snap-server)
         if [ X"${dev_meta}" = X"" ] || [ X"${dev_meta}" = X"${dev_snapstore}" ]; then
-	    ddsnap "${subcommand}" ${suboptions} "${dev_snapstore}" "${dev_origin}" "${agent_sockpath}" "${ddsnapd_sockpath}"
+	    ddsnap "${subcommand}" ${suboptions} -l "${ddsnap_server_log}" -p "${ddsnap_server_pid}" "${dev_snapstore}" "${dev_origin}" "${agent_sockpath}" "${ddsnapd_sockpath}"
         else
-	    ddsnap "${subcommand}" ${suboptions} "${dev_snapstore}" "${dev_origin}" "${dev_meta}" "${agent_sockpath}" "${ddsnapd_sockpath}"
+	    ddsnap "${subcommand}" ${suboptions} -l "${ddsnap_server_log}" -p "${ddsnap_server_pid}" "${dev_snapstore}" "${dev_origin}" "${dev_meta}" "${agent_sockpath}" "${ddsnapd_sockpath}"
         fi
 	;;
 esac

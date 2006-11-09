@@ -1061,7 +1061,7 @@ static int set_usecount(int sock, uint32_t tag_val, const char * op)
 	return 0;
 }
 
-static int ddsnap_daemon(int lsock, char const *snapdevstem)
+static int ddsnap_delta_server(int lsock, char const *snapdevstem)
 {
 	for (;;) {
 		int csock;
@@ -1386,8 +1386,12 @@ int main(int argc, char *argv[])
 	};
 
 	int nobg = 0;
+	char *logfile = NULL;
+	char *pidfile = NULL;
 	struct poptOption serverOptions[] = {
 		{ "foreground", 'f', POPT_ARG_NONE, &nobg, 0, "do not daemonize server", NULL },
+		{ "logfile", 'l', POPT_ARG_STRING, &logfile, 0, "use specified log file", NULL },
+		{ "pidfile", 'p', POPT_ARG_STRING, &pidfile, 0, "use specified process id file", NULL },
 		POPT_TABLEEND
 	};
 
@@ -1401,9 +1405,9 @@ int main(int argc, char *argv[])
 		POPT_TABLEEND
 	};
 
-	int opt_verb = FALSE;
+	int verb = FALSE;
 	struct poptOption stOptions[] = {
-		{ "verbose", 'v', POPT_ARG_NONE, &opt_verb, 0, "Verbose sharing information", NULL},
+		{ "verbose", 'v', POPT_ARG_NONE, &verb, 0, "Verbose sharing information", NULL},
 		POPT_TABLEEND
 	};
 
@@ -1433,7 +1437,7 @@ int main(int argc, char *argv[])
 		  "Apply delta\n\t Function: Applies a delta file to the given device\n\t Usage: apply-delta <deltafile> <dev>" , NULL },
 		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &cdOptions, 0,
 		  "Send delta\n\t Function: Sends a delta file downstream\n\t Usage: send-delta [OPTION...] <sockname> <snapshot1> <snapshot2> <snapdev1> <snapdev2> <remsnapshot> <host>[:<port>]\n" , NULL },
-		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &noOptions, 0,
+		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &serverOptions, 0,
 		  "Delta Server\n\t Function: Listens for upstream deltas\n\t Usage: delta-server <snapdevstem> [<host>[:<port>]]" , NULL },
 		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &stOptions, 0,
 		  "Get statistics\n\t Function: Reports snapshot usage statistics\n\t Usage: get-status [OPTION...] <sockname> [<snapshot>]" , NULL },
@@ -1621,7 +1625,9 @@ int main(int argc, char *argv[])
 		if (!nobg) {
 			pid_t pid;
 
-			pid = daemonize("/tmp/ddsnap.agent.log");
+			if (!logfile)
+				logfile = "/var/log/ddsnap.agent.log";
+			pid = daemonize(logfile, pidfile);
 			if (pid == -1)
 				error("Could not daemonize\n");
 			if (pid != 0) {
@@ -1736,7 +1742,9 @@ int main(int argc, char *argv[])
 		if (!nobg) {
 			pid_t pid;
 			
-			pid = daemonize("/tmp/ddsnapd.log");
+			if (!logfile)
+				logfile = "/var/log/ddsnap.server.log";
+			pid = daemonize(logfile, pidfile);
 			if (pid == -1)
 				error("Could not daemonize\n");
 			if (pid != 0) {
@@ -2031,8 +2039,6 @@ int main(int argc, char *argv[])
 		char *hostname;
 		unsigned port;
 
-		/* FIXME: support -f */
-
 		if (argc < 3 || argc > 4) {
 			printf("usage: %s daemon <snapdevstem> [<host>[:<port>]]\n", argv[0]);
 			return 1;
@@ -2059,17 +2065,21 @@ int main(int argc, char *argv[])
 			return 1;
 		}
 
-		pid_t pid;
+		if (!nobg) {
+			pid_t pid;
 
-		pid = daemonize("/tmp/ddsnap.log");
-		if (pid == -1)
-			error("Error: could not daemonize\n");
-		if (pid != 0) {
-			trace_on(printf("pid = %lu\n", (unsigned long)pid););
-			return 0;
+			if (!logfile)
+				logfile = "/var/log/ddsnap.delta.log";
+			pid = daemonize(logfile, pidfile);
+			if (pid == -1)
+				error("Error: could not daemonize\n");
+			if (pid != 0) {
+				trace_on(printf("pid = %lu\n", (unsigned long)pid););
+				return 0;
+			}
 		}
 
-		return ddsnap_daemon(sock, argv[2]);
+		return ddsnap_delta_server(sock, argv[2]);
 
 	}
 	if (strcmp(command, "get-status") == 0) {
@@ -2118,7 +2128,7 @@ int main(int argc, char *argv[])
 
 		int sock = create_socket(sockname);
 
-		int ret = ddsnap_get_status(sock, snapid, opt_verb);
+		int ret = ddsnap_get_status(sock, snapid, verb);
 		close(sock);
 
 		return ret;
