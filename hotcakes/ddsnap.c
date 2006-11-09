@@ -931,13 +931,17 @@ static int list_snapshots(int serv_fd)
 	int i;
 
 	for (i = 0; i < count; i++) {
-		time_t snap_time = (time_t)buffer[i].ctime;
-
 		printf("Snapshot[%d]:\n", i);
 		printf("\ttag= "U64FMT" \t", buffer[i].snap);
 		printf("priority= %d \t", buffer[i].prio);
 		printf("use count= %d \t", buffer[i].usecnt);
-		printf("creation time= %s\n", ctime(&snap_time));
+
+		time_t snap_time = (time_t)buffer[i].ctime;
+		char *ctime_str = ctime(&snap_time);
+		if (ctime_str[strlen(ctime_str)-1] == '\n')
+			ctime_str[strlen(ctime_str)-1] = '\0';
+
+		printf("creation time= %s\n", ctime_str);
 	}
 
 	return 0;
@@ -985,8 +989,13 @@ static int delete_snapshot(int sock, int snap)
 
 	trace_on(printf("reply = %x\n", head.code););
 
-	if (head.code != REPLY_DELETE_SNAPSHOT)
-		error("received unexpected code: %.*s", head.length - 4, buf + 4);
+	if (head.code != REPLY_DELETE_SNAPSHOT) {
+		if (head.code == REPLY_ERROR) {
+			fprintf(stderr, "Unable to delete snapshot %d\n", snap);
+			return 1;
+		}
+		error("received unexpected code=%u length=%u", head.code, head.length);
+	}
 
 	return 0;
 }
@@ -1008,8 +1017,13 @@ static int create_snapshot(int sock, int snap)
 
 	trace_on(printf("reply = %x\n", head.code););
 
-	if (head.code != REPLY_CREATE_SNAPSHOT)
-		error("received unexpected code: %.*s", head.length - 4, buf + 4);
+	if (head.code != REPLY_CREATE_SNAPSHOT) {
+		if (head.code == REPLY_ERROR) {
+			fprintf(stderr, "Unable to create snapshot %d\n", snap);
+			return 1;
+		}
+		error("received unexpected code=%u length=%u", head.code, head.length);
+	}
 
 	return 0;
 }
@@ -1161,6 +1175,171 @@ static int ddsnap_daemon(int lsock, char const *snapdevstem)
 	return 0;
 }
 
+static struct status *get_snap_status(struct status_message *message, int snap)
+{
+	struct status *status;
+
+	status = (struct status *)(message->status_data +
+					snap * (sizeof(struct status) +
+					message->num_columns * sizeof(status->chunk_count[0])));
+
+	return status;
+}
+
+static int ddsnap_get_status(int serv_fd, int snapid, int verbose)
+{
+	int err;
+
+	if ((err = outbead(serv_fd, STATUS_REQUEST, struct status_request, snapid))) {
+		error("%s (%i)", strerror(-err), -err);
+		return 1;
+	}
+
+	struct head head;
+
+	if (readpipe(serv_fd, &head, sizeof(head)) < 0) {
+		error("received incomplete packet header");
+		return 1;
+	}
+
+	trace_on(printf("reply = %x\n", head.code););
+
+	if (head.code != STATUS_MESSAGE)
+		error("received unexpected code=%u length=%u", head.code, head.length);
+
+	if (head.length < sizeof(struct status_message))
+		error("reply length mismatch: expected >=%u, actual %u", sizeof(struct status_message), head.length);
+
+	struct status_message *reply;
+
+	if (!(reply = malloc(head.length)))
+		error("unable to allocate %u bytes for reply buffer\n", head.length);
+
+	/* We won't bother to check that the lengths match because it would
+	 * be ugly to read in the structure in pieces.
+	 */
+	if (readpipe(serv_fd, reply, head.length) < 0)
+		return eek();
+
+	if (reply->status_count > reply->num_columns)
+		error("mismatched snapshot status count (%u) and the number of columns (%u)\n", reply->status_count, reply->num_columns);
+
+	if (reply->store.chunksize_bits == 0 && reply->store.used == 0 && reply->store.free == 0) {
+		printf("Chunk size: %lu\n", 1UL << reply->meta.chunksize_bits);
+		printf("Used: %llu\n", reply->meta.used);
+		printf("Free: %llu\n", reply->meta.free);
+	} else {
+		printf("Data chunk size: %lu\n", 1UL << reply->store.chunksize_bits);
+		printf("Used data: %llu\n", reply->store.used);
+		printf("Free data: %llu\n", reply->store.free);
+
+		printf("Metadata chunk size: %lu\n", 1UL << reply->meta.chunksize_bits);
+		printf("Used metadata: %llu\n", reply->meta.used);
+		printf("Free metadata: %llu\n", reply->meta.free);
+	}
+
+	printf("Write density: %g\n", (double)reply->write_density/(double)0xffffffff);
+
+	time_t time = (time_t)reply->ctime;
+	char *ctime_str = ctime(&time);
+	if (ctime_str[strlen(ctime_str)-1] == '\n')
+		ctime_str[strlen(ctime_str)-1] = '\0';
+	printf("Creation time: %s\n", ctime_str);
+
+	unsigned int row, col;
+	u64 total_chunks;
+
+	printf("%6s %24s %8s %8s", "Snap", "Creation time", "Chunks", "Unshared");
+
+	if (verbose) {
+		for (col = 1; col < reply->num_columns; col++)
+			printf(" %7dX", col);
+	} else {
+		printf(" %8s", "Shared");
+	}
+
+	printf("\n");
+
+	struct status *snap_status;
+
+	for (row = 0; row < reply->status_count; row++) {
+		snap_status = get_snap_status(reply, row);
+
+		printf("%6d", snap_status->snapid);
+
+		time = (time_t)snap_status->ctime;
+		ctime_str = ctime(&time);
+		if (ctime_str[strlen(ctime_str)-1] == '\n')
+			ctime_str[strlen(ctime_str)-1] = '\0';
+		printf(" %24s", ctime_str);
+
+		total_chunks = 0;
+		for (col = 0; col < reply->num_columns; col++)
+			total_chunks += snap_status->chunk_count[col];
+
+		printf(" %8llu", total_chunks);
+		printf(" %8llu", snap_status->chunk_count[0]);
+
+		if (verbose)
+			for (col = 1; col < reply->num_columns; col++)
+				printf(" %8llu", snap_status->chunk_count[col]);
+		else
+			printf(" %8llu", total_chunks - snap_status->chunk_count[0]);
+
+		printf("\n");
+	}
+
+	/* if we are printing all the snapshot stats, also print totals for each
+	 * degree of sharing
+	 */
+
+	if (snapid < 0) {
+		u64 *column_totals;
+
+		if (!(column_totals = malloc(sizeof(u64) * reply->num_columns)))
+			error("unable to allocate array for column totals\n");
+
+		/* sum the columns and divide by their share counts */
+
+		total_chunks = 0;
+		for (col = 0; col < reply->num_columns; col++) {
+			column_totals[col] = 0;
+			for (row = 0; row < reply->status_count; row++) {
+				snap_status = get_snap_status(reply, row);
+
+				column_totals[col] += snap_status->chunk_count[col];
+			}
+			column_totals[col] /= col+1;
+
+			total_chunks += column_totals[col];
+		}
+
+		printf("%6s", "totals");
+		printf(" %24s", "");
+		printf(" %8llu", total_chunks);
+		if (reply->num_columns > 0)
+			printf(" %8llu", column_totals[0]);
+		else
+			printf(" %8d", 0);
+
+		if (verbose)
+			for (col = 1; col < reply->num_columns; col++)
+				printf(" %8llu", column_totals[col]);
+		else if (reply->num_columns > 0)
+			printf(" %8llu", total_chunks - column_totals[0]);
+		else
+			printf(" %8d", 0);
+
+		printf("\n");
+
+		free(column_totals);
+	}
+
+	free(reply);
+
+	return 0;
+}
+
 static void mainUsage(void)
 {
 	printf("usage: ddsnap [-?|--help|--usage] <subcommand>\n"
@@ -1178,7 +1357,8 @@ static void mainUsage(void)
 	       "	create-delta      Creates a delta file given a changelist and 2 snapshots\n"
 	       "	apply-delta       Applies a delta file to the given device\n"
 	       "	send-delta        Sends a delta file downstream\n"
-	       "	delta-server      Listens for upstream deltas\n");
+	       "	delta-server      Listens for upstream deltas\n"
+	       "	get-status        Reports snapshot usage statistics\n");
 }
 
 static void cdUsage(poptContext optCon, int exitcode, char const *error, char const *addl)
@@ -1221,6 +1401,12 @@ int main(int argc, char *argv[])
 		POPT_TABLEEND
 	};
 
+	int opt_verb = FALSE;
+	struct poptOption stOptions[] = {
+		{ "verbose", 'v', POPT_ARG_NONE, &opt_verb, 0, "Verbose sharing information", NULL},
+		POPT_TABLEEND
+	};
+
 	poptContext mainCon;
 	struct poptOption mainOptions[] = {
 		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &initOptions, 0,
@@ -1249,6 +1435,8 @@ int main(int argc, char *argv[])
 		  "Send delta\n\t Function: Sends a delta file downstream\n\t Usage: send-delta [OPTION...] <sockname> <snapshot1> <snapshot2> <snapdev1> <snapdev2> <remsnapshot> <host>[:<port>]\n" , NULL },
 		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &noOptions, 0,
 		  "Delta Server\n\t Function: Listens for upstream deltas\n\t Usage: delta-server <snapdevstem> [<host>[:<port>]]" , NULL },
+		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &stOptions, 0,
+		  "Get statistics\n\t Function: Reports snapshot usage statistics\n\t Usage: get-status [OPTION...] <sockname> [<snapshot>]" , NULL },
 		POPT_AUTOHELP
 		POPT_TABLEEND
 	};
@@ -1342,6 +1530,9 @@ int main(int argc, char *argv[])
 		sb->metadev = sb->snapdev;
 		if (metadev && (sb->metadev = open(metadev, O_RDWR)) == -1) /* can I do an O_DIRECT on the ramdevice? */
 			error("Could not open meta volume %s: %s", metadev, strerror(errno));
+
+		if (diskread(sb->metadev, &sb->image, SB_SIZE, SB_SECTOR << SECTOR_BITS) < 0)
+			warn("Unable to read superblock: %s", strerror(errno));
 
 		poptFreeContext(initCon);
 		
@@ -1532,9 +1723,11 @@ int main(int argc, char *argv[])
 		sb->metadev = sb->snapdev;
 		if (metadev && (sb->metadev = open(metadev, O_RDWR)) == -1) /* can I do an O_DIRECT on the ramdevice? */
 			error("Could not open meta volume %s: %s", metadev, strerror(errno));
-		
+
+		if (diskread(sb->metadev, &sb->image, SB_SIZE, SB_SECTOR << SECTOR_BITS) < 0)
+			warn("Unable to read superblock: %s", strerror(errno));
+
 		poptFreeContext(serverCon);
-		
 		
 		int listenfd, getsigfd, agentfd;
 		
@@ -1723,7 +1916,7 @@ int main(int argc, char *argv[])
 			cdUsage(cdCon, 1, "Specify a snapdev1", ".e.g., /dev/mapper/snap0 \n");
 		if (snapdev2 == NULL)
 			cdUsage(cdCon, 1, "Specify a snapdev2", ".e.g., /dev/mapper/snap1 \n");
-		if (!(poptPeekArg(cdCon) == NULL))
+		if (poptPeekArg(cdCon) != NULL)
 			cdUsage(cdCon, 1, "Too many arguments inputted", "\n");
 
 		int ret = ddsnap_generate_delta(mode, gzip_level, changelist, deltafile, snapdev1, snapdev2);
@@ -1785,7 +1978,7 @@ int main(int argc, char *argv[])
 
 		if (hoststr == NULL)
 			cdUsage(cdCon, 1, argv[0], "Not enough arguments to send-delta\n");
-		if (!(poptPeekArg(cdCon) == NULL))
+		if (poptPeekArg(cdCon) != NULL)
 			cdUsage(cdCon, 1, argv[0], "Too many arguments to send-delta\n");
 
 		poptFreeContext(cdCon);
@@ -1838,6 +2031,8 @@ int main(int argc, char *argv[])
 		char *hostname;
 		unsigned port;
 
+		/* FIXME: support -f */
+
 		if (argc < 3 || argc > 4) {
 			printf("usage: %s daemon <snapdevstem> [<host>[:<port>]]\n", argv[0]);
 			return 1;
@@ -1876,6 +2071,57 @@ int main(int argc, char *argv[])
 
 		return ddsnap_daemon(sock, argv[2]);
 
+	}
+	if (strcmp(command, "get-status") == 0) {
+		poptContext cdCon;
+
+		struct poptOption options[] = {
+			{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &stOptions, 0, NULL, NULL },
+			POPT_AUTOHELP
+			POPT_TABLEEND
+		};
+
+		cdCon = poptGetContext(NULL, argc-1, (const char **)&(argv[1]), options, 0);
+		poptSetOtherOptionHelp(cdCon, "<sockname> [<snapshot>]");
+
+		char c;
+
+		while ((c = poptGetNextOpt(cdCon)) >= 0);
+		if (c < -1) {
+			fprintf(stderr, "%s: %s: %s\n", argv[0], poptBadOption(cdCon, POPT_BADOPTION_NOALIAS), poptStrerror(c));
+			poptFreeContext(cdCon);
+			return 1;
+		}
+
+		char const *sockname, *snapidstr;
+
+		sockname  = poptGetArg(cdCon);
+		snapidstr = poptGetArg(cdCon);
+
+		if (sockname == NULL)
+			cdUsage(cdCon, 1, argv[0], "Must specify socket name to get-status\n");
+		if (poptPeekArg(cdCon) != NULL)
+			cdUsage(cdCon, 1, argv[0], "Too many arguments to get-status\n");
+
+		poptFreeContext(cdCon);
+
+		int snapid;
+
+		if (snapidstr) {
+			if (parse_snapid(snapidstr, &snapid) < 0 || snapid < 0) {
+				fprintf(stderr, "%s: invalid snapshot id %s\n", argv[0], snapidstr);
+				return 1;
+			}
+		} else {
+			snapid = -2; /* meaning "all snapshots" */
+		}
+
+		int sock = create_socket(sockname);
+
+		int ret = ddsnap_get_status(sock, snapid, opt_verb);
+		close(sock);
+
+		return ret;
 	}
 
 	fprintf(stderr, "%s: unrecognized subcommand: %s.\n", argv[0], command);

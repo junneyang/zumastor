@@ -31,7 +31,7 @@ enum csnap_codes
 	SET_IDENTITY,
 	UPLOAD_LOCK,
 	FINISH_UPLOAD_LOCK,
-	NEED_CLIENTS,
+	NEED_CLIENTS, /* unused */
 	UPLOAD_CLIENT_ID,
 	FINISH_UPLOAD_CLIENT_ID,
 	REMOVE_CLIENT_IDS,
@@ -48,6 +48,8 @@ enum csnap_codes
 	SEND_DELTA,
 	SEND_DELTA_PROCEED,
 	SEND_DELTA_DONE,
+	STATUS_REQUEST,
+	STATUS_MESSAGE,
 };
 
 enum csnap_error_codes
@@ -69,6 +71,10 @@ struct snaplist { uint32_t count; struct snapinfo snapshots[]; } PACKED;
 struct stream_changelist { uint32_t snap1; uint32_t snap2; } PACKED;
 struct changelist_stream { uint64_t chunk_count; uint32_t chunksize_bits; } PACKED;
 struct send_delta { int32_t snapid; uint64_t chunk_count; uint32_t chunk_size; uint32_t delta_mode; } PACKED;
+struct status_request { int32_t snapid; } PACKED;
+struct overall_status { uint32_t chunksize_bits; uint64_t used; uint64_t free; } PACKED;
+struct status { uint64_t ctime; int32_t snapid; uint64_t chunk_count[]; } PACKED;
+struct status_message { uint64_t ctime; struct overall_status meta; struct overall_status store; uint32_t write_density; uint32_t status_count; uint32_t num_columns; char status_data[]; } PACKED;
 
 
 typedef uint16_t shortcount; /* !!! what is this all about */
