@@ -1,14 +1,15 @@
 #!/bin/sh
 
 # ddutil - a wrapper for the ddsnap command
-version="1.0"
+version="1.1"
 
 # default location of configuration file
 conf_file=/etc/ddutil.conf
 
-# setup defaults
+# setup default configuration
 dev_origin=/dev/origin
 dev_snapstore=/dev/snapstore
+dev_meta=
 map_path=/dev/mapper
 map_origin=vol
 map_snap_stem=snap
@@ -16,11 +17,12 @@ ddsnapd_sockpath=/tmp/server
 agent_sockpath=/tmp/control
 
 
-usage_init_store()
+usage_init()
 {
-    echo "$@init-store [<option>...]"
-    echo "    -j, --journal_size               User specified journal size"
-    echo "    -b, --block_size                 User specified block size"
+    echo "$@init [<option>...]"
+    echo "    -y, --yes                 Answer yes to all prompts"
+    echo "    -j, --journal_size=JS     User specified journal size"
+    echo "    -b, --block_size=BS       User specified block size"
 }
 
 usage_create_snap()
@@ -56,14 +58,14 @@ usage_create_cl()
 usage_create_delta()
 {
     echo "$@create-delta [<option>...] <changelist> <deltafile> <snapshot1> <snapshot2>"
-    echo "    -x, --xdelta                     Delta file format: xdelta chunk"
-    echo "    -r, --raw                        Delta file format: raw chunk from later"
-    echo "                                     snapshot"
-    echo "    -t, --test                       Delta file format: xdelta chunk, raw chunk"
-    echo "                                     from earlier snapshot and raw chunk from"
-    echo "                                     later snapshot"
-    echo "    -g, --gzip=compression_level     Compression via gzip"
-    echo "    -o, --optcomp                    Optimal compression (slowest)"
+    echo "    -x, --xdelta              Delta file format: xdelta chunk"
+    echo "    -r, --raw                 Delta file format: raw chunk from later"
+    echo "                              snapshot"
+    echo "    -t, --test                Delta file format: xdelta chunk, raw chunk"
+    echo "                              from earlier snapshot and raw chunk from"
+    echo "                              later snapshot"
+    echo "    -g, --gzip=LEVEL          Compression via gzip"
+    echo "    -o, --optcomp             Optimal compression (slowest)"
 }
 
 usage_apply_delta()
@@ -74,44 +76,45 @@ usage_apply_delta()
 usage_send_delta()
 {
     echo "$@send-delta [<option>...] <snapshot1> <snapshot2> <remsnapshot> <host>[:<port>]"
-    echo "    -x, --xdelta                     Delta file format: xdelta chunk"
-    echo "    -r, --raw                        Delta file format: raw chunk from later"
-    echo "                                     snapshot"
-    echo "    -t, --test                       Delta file format: xdelta chunk, raw chunk"
-    echo "                                     from earlier snapshot and raw chunk from"
-    echo "                                     later snapshot"
-    echo "    -g, --gzip=compression_level     Compression via gzip"
-    echo "    -o, --optcomp                    Optimal compression (slowest)"
+    echo "    -x, --xdelta              Delta file format: xdelta chunk"
+    echo "    -r, --raw                 Delta file format: raw chunk from later"
+    echo "                              snapshot"
+    echo "    -t, --test                Delta file format: xdelta chunk, raw chunk"
+    echo "                              from earlier snapshot and raw chunk from"
+    echo "                              later snapshot"
+    echo "    -g, --gzip=LEVEL          Compression via gzip"
+    echo "    -o, --optcomp             Optimal compression (slowest)"
 }
 
-usage_daemon()
+usage_delta_server()
 {
-    echo "$@daemon [<host>[:<port>]]"
+    echo "$@delta-server [<host>[:<port>]]"
+    #echo "    -f, --foreground         Do not daemonize"
 }
 
 usage_get_status()
 {
     echo "$@get-status [<option>...] [<snapshot>]"
-    echo "    -v, --verbose                    print all sharing statistics"
+    echo "    -v, --verbose             Print all sharing statistics"
 }
 
-usage_start_ddsnap_agent()
+usage_agent_server()
 {
-    echo "$@start-ddsnap-agent [<option>...]"
-    echo "    -f, --foreground                 do not daemonize"
+    echo "$@agent-server [<option>...]"
+    echo "    -f, --foreground          Do not daemonize"
 }
 
-usage_start_ddsnapd()
+usage_snap_server()
 {
-    echo "$@start-ddsnapd [<option>...]"
-    echo "    -f, --foreground                 do not daemonize"
+    echo "$@snap-server [<option>...]"
+    echo "    -f, --foreground          Do not daemonize"
 }
 
 usage_subcommands_short()
 {
     echo ""
     echo "subcommands:"
-    echo "   init-store         Initialize the snashot store"
+    echo "   init               Initialize the snashot store"
     echo "   create-snap        Creates a snapshot"
     echo "   delete-snap        Deletes a snapshot"
     echo "   list               Returns a list of snapshots"
@@ -121,10 +124,10 @@ usage_subcommands_short()
     echo "   create-delta       Creates a delta file given a changelist and 2 snapshots"
     echo "   apply-delta        Applies a delta file to the given device"
     echo "   send-delta         Sends a delta file downstream"
-    echo "   daemon             Listens for upstream deltas"
+    echo "   delta-server       Listens for upstream deltas"
     echo "   get-status         Reports snapshot usage statistics"
-    echo "   start-ddsnap-agent Starts ddsnap-agent daemon"
-    echo "   start-ddsnapd      Starts ddsnapd daemon"
+    echo "   agent-server       Starts the snapshot agent"
+    echo "   snap-server        Starts the snapshot server"
 }
 
 usage_subcommands_long()
@@ -132,7 +135,7 @@ usage_subcommands_long()
     echo ""
     echo "subcommands:"
     echo ""
-    usage_init_store "  "
+    usage_init "  "
     echo ""
     usage_create_snap "  "
     echo ""
@@ -152,13 +155,13 @@ usage_subcommands_long()
     echo ""
     usage_send_delta "  "
     echo ""
-    usage_daemon "  "
+    usage_delta_server "  "
     echo ""
     usage_get_status "  "
     echo ""
-    usage_start_ddsnap_agent "  "
+    usage_agent_server "  "
     echo ""
-    usage_start_ddsnapd "  "
+    usage_snap_server "  "
 }
 
 usage()
@@ -205,7 +208,7 @@ while [ $# -ge 1 ]; do
             break
             ;;
 
-        init-store|create-snap|delete-snap|list|set-priority|set-usecount|create-cl|create-delta|apply-delta|send-delta|daemon|get-status|start-ddsnap-agent|start-ddsnapd)
+        init|create-snap|delete-snap|list|set-priority|set-usecount|create-cl|create-delta|apply-delta|send-delta|delta-server|get-status|agent-server|snap-server)
             break
             ;;
     esac
@@ -221,11 +224,11 @@ if [ X"${subcommand}" = X"" ]; then
 fi
 
 case "${subcommand}" in
-    init-store)
+    init)
         minargs='0'
         maxargs='0'
-        shortopts='j:b:'
-        longopts='journal_size:,block_size:'
+        shortopts='yj:b:'
+        longopts='yes,journal_size:,block_size:'
         ;;
 
     create-snap|delete-snap)
@@ -263,11 +266,11 @@ case "${subcommand}" in
         longopts='xdelta,raw,test,gzip:,optcomp'
         ;;
 
-    daemon)
+    delta-server)
         minargs='0'
         maxargs='1'
-        shortopts=''
-        longopts=''
+        shortopts='f'
+        longopts='foreground'
         ;;
 
     get-status)
@@ -277,12 +280,12 @@ case "${subcommand}" in
         longopts='verbose'
         ;;
 
-    start-ddsnap-agent|start-ddsnapd)
+    agent-server|snap-server)
         minargs='0'
         maxargs='0'
         shortopts='f'
         longopts='foreground'
-	;;
+        ;;
 
     *)
         echo "$0: unknown subcommand \"${subcommand}\"" >&2
@@ -369,13 +372,17 @@ fi
 
 
 case "${subcommand}" in
-    init-store)
+    init)
         if dmsetup ls 2> /dev/null | egrep "^${map_origin}	" > /dev/null; then
             echo "$0: snapshot origin device ${map_origin} already in use"
             exit 3
         fi
 
-        mkddsnap ${suboptions} "${dev_snapstore}" "${dev_origin}"
+        if [ X"${dev_meta}" = X"" ] || [ X"${dev_meta}" = X"${dev_snapstore}" ]; then
+            ddsnap "${subcommand}" ${suboptions} "${dev_snapstore}" "${dev_origin}"
+        else
+            ddsnap "${subcommand}" ${suboptions} "${dev_snapstore}" "${dev_origin}" "${dev_meta}"
+        fi
         if [ $? -ne 0 ]; then
             echo "$0: mkddsnap failed to initialize the snapshot store"
             exit 3
@@ -453,12 +460,16 @@ case "${subcommand}" in
         ddsnap "${subcommand}" ${suboptions} "${ddsnapd_sockpath}" "$@"
         ;;
 
-    start-ddsnap-agent)
-	ddsnap-agent ${suboptions} "${agent_sockpath}" 
+    agent-server)
+	ddsnap "${subcommand}" ${suboptions} "${agent_sockpath}" 
 	;;
 
-    start-ddsnapd)
-	ddsnapd ${suboptions} "${dev_snapstore}" "${dev_origin}" "${agent_sockpath}" "${ddsnapd_sockpath}"
+    snap-server)
+        if [ X"${dev_meta}" = X"" ] || [ X"${dev_meta}" = X"${dev_snapstore}" ]; then
+	    ddsnap "${subcommand}" ${suboptions} "${dev_snapstore}" "${dev_origin}" "${agent_sockpath}" "${ddsnapd_sockpath}"
+        else
+	    ddsnap "${subcommand}" ${suboptions} "${dev_snapstore}" "${dev_origin}" "${dev_meta}" "${agent_sockpath}" "${ddsnapd_sockpath}"
+        fi
 	;;
 esac
 
