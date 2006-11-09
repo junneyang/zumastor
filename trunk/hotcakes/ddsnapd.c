@@ -502,22 +502,6 @@ static struct buffer *snapread(struct superblock const *sb, sector_t sector)
 static unsigned leaf_freespace(struct eleaf *leaf);
 static unsigned leaf_payload(struct eleaf *leaf);
 
-static void show_leaf(struct eleaf *leaf)
-{
-	struct exception const *p;
-	int i;
-
-	printf("base chunk: %Lx and %i chunks: ", leaf->base_chunk, leaf->count);
-	for (i = 0; i < leaf->count; i++) {
-		printf("%x=", leaf->map[i].rchunk);
-		printf("@offset:%i ", leaf->map[i].offset);
-		for (p = emap(leaf, i); p < emap(leaf, i+1); p++)
-			printf("%Lx/%08llx%s", p->chunk, p->share, p+1 < emap(leaf, i+1)? ",": " ");
-	}
-	printf("top@%i free space calc: %d payload: %d", leaf->map[i].offset, leaf_freespace(leaf), leaf_payload(leaf));
-	printf("\n");
-}
-
 /*
  * origin_chunk_unique: an origin logical chunk is shared unless all snapshots
  * have exceptions.
@@ -964,17 +948,146 @@ static struct buffer *new_node(struct superblock *sb)
 	return buffer;
 }
 
+struct etree_path { struct buffer *buffer; struct index_entry *pnext; };
+
+static struct buffer *probe(struct superblock *sb, u64 chunk, struct etree_path *path);
+static void brelse_path(struct etree_path *path, unsigned levels);
+
+static int traverse_tree_range(struct superblock *sb, chunk_t start, unsigned int leaves, void (*visit_leaf)(struct superblock *sb, struct eleaf *leaf, void *data), void (*visit_leaf_buffer)(struct superblock *sb, struct buffer *leafbuf, void *data), void *data)
+{
+	int levels = sb->image.etree_levels, level = -1;
+	struct etree_path path[levels];
+	struct buffer *nodebuf;
+	struct buffer *leafbuf;
+	struct enode *node;
+
+	if (leaves != 0) {
+		leafbuf = probe(sb, start, path);
+		level = levels - 1;
+		nodebuf = path[level].buffer;
+		node = buffer2node(nodebuf);
+		goto start;
+	}
+
+	while (1) {
+		do {
+			level++;
+			nodebuf = snapread(sb, level? path[level - 1].pnext++->sector: sb->image.etree_root);
+			if (!nodebuf) {
+				warn("unable to read node at sector 0x%llx at level %d of tree traversal", level? path[level - 1].pnext++->sector: sb->image.etree_root, level);
+				return -EIO;
+			}
+			node = buffer2node(nodebuf);
+			path[level].buffer = nodebuf;
+			path[level].pnext = node->entries;
+			trace(printf("push to level %i, %i nodes\n", level, node->count););
+		} while (level < levels - 1);
+
+		trace(printf("do %i leaf nodes, level = %i\n", node->count, level););
+		while (path[level].pnext < node->entries + node->count) {
+			leafbuf = snapread(sb, path[level].pnext++->sector);
+
+start:
+			trace(printf("process leaf %Lx\n", leafbuf->sector););
+			visit_leaf(sb, buffer2leaf(leafbuf), data);
+
+			brelse(leafbuf);
+
+			if (visit_leaf_buffer)
+				visit_leaf_buffer(sb, leafbuf, data);
+
+			if (leaves != 0 && !--leaves) {
+				brelse_path(path, level + 1);
+				return 0;
+			}
+		}
+
+		do {
+			brelse(nodebuf);
+			if (!level)
+				return 0;
+			nodebuf = path[--level].buffer;
+			node = buffer2node(nodebuf);
+			trace(printf("pop to level %i, %i of %i nodes\n", level, path[level].pnext - node->entries, node->count););
+		} while (path[level].pnext == node->entries + node->count);
+	}
+}
+
+static int traverse_tree_chunks(struct superblock *sb, void (*visit_leaf)(struct superblock *sb, struct eleaf *leaf, void *data), void (*visit_leaf_buffer)(struct superblock *sb, struct buffer *leafbuf, void *data), void *data)
+{
+	return traverse_tree_range(sb, 0, 0, visit_leaf, visit_leaf_buffer, data);
+}
+
+struct gen_changelist
+{
+	u64 mask1;
+	u64 mask2;
+	struct change_list *cl;
+};
+
+static void gen_changelist_leaf(struct superblock *sb, struct eleaf *leaf, void *data)
+{
+	u64 mask1 = ((struct gen_changelist *)data)->mask1;
+	u64 mask2 = ((struct gen_changelist *)data)->mask2;
+	struct change_list *cl = ((struct gen_changelist *)data)->cl;
+	struct exception const *p;
+	u64 newchunk;
+	int i;
+
+	for (i = 0; i < leaf->count; i++)
+		for (p = emap(leaf, i); p < emap(leaf, i+1); p++) {
+			if ( ((p->share & mask2) == mask2) != ((p->share & mask1) == mask1) ) {
+				newchunk = leaf->base_chunk + leaf->map[i].rchunk;
+				if (append_change_list(cl, newchunk) < 0)
+					warn("unable to write chunk %Lu to changelist\n", newchunk);
+				break;
+			}
+		}
+}
+
+static struct change_list *gen_changelist_tree(struct superblock *sb, int snapshot1, int snapshot2)
+{
+	struct gen_changelist gcl;
+
+	gcl.mask1 = 1ULL << snapshot1;
+	gcl.mask2 = 1ULL << snapshot2;
+	if ((gcl.cl = init_change_list(sb->image.chunksize_bits)) == NULL)
+		return NULL;
+
+	traverse_tree_chunks(sb, gen_changelist_leaf, NULL, &gcl);
+
+	return gcl.cl;
+}
+
 /* BTree debug dump */
+
+static void show_leaf(struct eleaf *leaf)
+{
+	struct exception const *p;
+	int i;
+
+	printf("base chunk: %Lx and %i chunks: ", leaf->base_chunk, leaf->count);
+	for (i = 0; i < leaf->count; i++) {
+		printf("%x=", leaf->map[i].rchunk);
+		printf("@offset:%i ", leaf->map[i].offset);
+		for (p = emap(leaf, i); p < emap(leaf, i+1); p++)
+			printf("%Lx/%08llx%s", p->chunk, p->share, p+1 < emap(leaf, i+1)? ",": " ");
+	}
+	printf("top@%i free space calc: %d payload: %d", leaf->map[i].offset, leaf_freespace(leaf), leaf_payload(leaf));
+	printf("\n");
+}
 
 static void show_subtree(struct superblock *sb, struct enode *node, int levels, int indent)
 {
 	int i;
+
 	printf("%*s", indent, "");
 	printf("%i nodes:\n", node->count);
 	for (i = 0; i < node->count; i++) {
 		struct buffer *buffer = snapread(sb, node->entries[i].sector);
 		if (i)
 			printf("pivot = %Lx\n", (long long)node->entries[i].key);
+
 		if (levels)
 			show_subtree(sb, buffer2node(buffer), levels - 1, indent + 3);
 		else {
@@ -992,69 +1105,14 @@ static void show_tree(struct superblock *sb)
 	brelse(buffer);
 }
 
-struct etree_path { struct buffer *buffer; struct index_entry *pnext; };
-
-/* need to refactor to use a generic Traversal pattern
-   gen_changelist, delete_snapshot and show_tree can be
-   refactor to use a wrapper. - rob
-*/
-static void gen_changelist_leaf(struct eleaf *leaf, int snapshot1, int snapshot2, struct change_list *cl)
+static void show_tree_leaf(struct superblock *sb, struct eleaf *leaf, void *data)
 {
-	struct exception const *p;
-	int i;
-	u64 newchunk, tag1 = 1LL << snapshot1, tag2 = 1LL << snapshot2;
-
-	for (i = 0; i < leaf->count; i++)
-		for (p = emap(leaf, i); p < emap(leaf, i+1); p++) {
-			if ( ((p->share & tag2) == tag2) != ((p->share & tag1) == tag1) ) {
-				newchunk = leaf->base_chunk + leaf->map[i].rchunk;
-				if (append_change_list(cl, newchunk) < 0)
-					warn("unable to write chunk %Lu to changelist\n", newchunk);
-				break;
-			}
-		}
+	show_leaf(leaf);
 }
 
-static struct change_list *gen_changelist_tree(struct superblock const *sb, int snapshot1, int snapshot2)
+static void show_tree_range(struct superblock *sb, chunk_t start, unsigned int leaves)
 {
-	int levels = sb->image.etree_levels, level = -1;
-	struct etree_path path[levels];
-	struct buffer *nodebuf;
-	struct enode *node;
-	struct change_list *cl;
-
-	if ((cl = init_change_list(sb->image.chunksize_bits)) == NULL)
-		return NULL;
-
-	while (1) {
-		do {
-			level++;
-			nodebuf = snapread(sb, level? path[level - 1].pnext++->sector: sb->image.etree_root);
-			node = buffer2node(nodebuf);
-			path[level].buffer = nodebuf;
-			path[level].pnext = node->entries;
-			trace(printf("push to level %i, %i nodes\n", level, node->count););
-		} while (level < levels - 1);
-
-		trace(printf("do %i leaf nodes, level = %i\n", node->count, level););
-		while (path[level].pnext < node->entries + node->count) {
-			struct buffer *leafbuf = snapread(sb, path[level].pnext++->sector);
-			trace(printf("process leaf %Lx\n", leafbuf->sector););
-
-			gen_changelist_leaf(buffer2leaf(leafbuf), snapshot1, snapshot2, cl);
-
-			brelse(leafbuf);
-		}
-
-		do {
-			brelse(nodebuf);
-			if (!level)
-				return cl;
-			nodebuf = path[--level].buffer;
-			node = buffer2node(nodebuf);
-			trace(printf("pop to level %i, %i of %i nodes\n", level, path[level].pnext - node->entries, node->count););
-		} while (path[level].pnext == node->entries + node->count);
-	}
+	traverse_tree_range(sb, start, leaves, show_tree_leaf, NULL, NULL);
 }
 
 /* High Level BTree Editing */
@@ -1107,60 +1165,6 @@ static void brelse_path(struct etree_path *path, unsigned levels)
 	for (i = 0; i < levels; i++)
 		brelse(path[i].buffer);
 }
-
-#if 0
-static void show_tree_range(struct superblock *sb, chunk_t start, unsigned leaves)
-{
-	int levels = sb->image.etree_levels, level = -1;
-	struct etree_path path[levels];
-	struct buffer *nodebuf;
-	struct enode *node;
-	struct buffer *leafbuf;
-
-#if 1
-	leafbuf = probe(sb, start, path);
-	level = levels - 1;
-	nodebuf = path[level].buffer;
-	node = buffer2node(nodebuf);
-	goto start;
-#endif
-
-	while (1) {
-		do {
-			level++;
-			nodebuf = snapread(sb, level? path[level - 1].pnext++->sector: sb->image.etree_root);
-			node = buffer2node(nodebuf);
-			path[level].buffer = nodebuf;
-			path[level].pnext = node->entries;
-			trace(printf("push to level %i, %i nodes\n", level, node->count););
-		} while (level < levels - 1);
-
-		trace(printf("do %i leaf nodes, level = %i\n", node->count, level););
-		while (path[level].pnext < node->entries + node->count) {
-			leafbuf = snapread(sb, path[level].pnext++->sector);
-			trace_off(printf("process leaf %Lx\n", leafbuf->sector););
-
-start:			show_leaf(buffer2leaf(leafbuf));
-
-			brelse(leafbuf);
-
-			if (!--leaves) {
-				brelse_path(path, level + 1);
-				return;
-			}
-		}
-
-		do {
-			brelse(nodebuf);
-			if (!level)
-				return;
-			nodebuf = path[--level].buffer;
-			node = buffer2node(nodebuf);
-			trace(printf("pop to level %i, %i of %i nodes\n", level, path[level].pnext - node->entries, node->count););
-		} while (path[level].pnext == node->entries + node->count);
-	}
-}
-#endif
 
 static void insert_child(struct enode *node, struct index_entry *p, sector_t child, u64 childkey)
 {
@@ -1410,6 +1414,12 @@ static void check_leaf(struct eleaf *leaf, u64 snapmask)
 	// printf("top@%i", leaf->map[i].offset);
 }
 
+struct delete_info
+{
+	u64 snapmask;
+	int any;
+};
+
 /*
  * delete_snapshot: remove all exceptions from a given snapshot from a leaf
  * working from top to bottom of the exception list clearing snapshot bits
@@ -1417,11 +1427,14 @@ static void check_leaf(struct eleaf *leaf, u64 snapmask)
  * from bottom to top in the directory map packing nonempty entries into the
  * bottom of the map.
  */
-static int delete_snapshots_from_leaf(struct superblock *sb, struct eleaf *leaf, u64 snapmask)
+static void _delete_snapshots_from_leaf(struct superblock *sb, struct eleaf *leaf, void *data)
 {
+	struct delete_info *dinfo = data;
 	struct exception *p = emap(leaf, leaf->count), *dest = p;
 	struct etree_map *pmap, *dmap;
-	unsigned i, any = 0;
+	unsigned i;
+
+	dinfo->any = 0;
 
 	sb->current_alloc = sb->snapdata;
 
@@ -1430,8 +1443,8 @@ static int delete_snapshots_from_leaf(struct superblock *sb, struct eleaf *leaf,
 	for (i = leaf->count; i--;) {
 		while (p != emap(leaf, i)) {
 			u64 share = (--p)->share;
-			any |= share & snapmask;
-			if ((p->share &= ~snapmask))
+			dinfo->any |= share & dinfo->snapmask;
+			if ((p->share &= ~dinfo->snapmask))
 				*--dest = *p;
 			else
 				free_chunk(sb, p->chunk);
@@ -1446,55 +1459,44 @@ static int delete_snapshots_from_leaf(struct superblock *sb, struct eleaf *leaf,
 	dmap->offset = pmap->offset;
 	dmap->rchunk = 0; // tidy up
 	leaf->count = dmap - &leaf->map[0];
-	check_leaf(leaf, snapmask);
-	return !!any;
+	check_leaf(leaf, dinfo->snapmask);
 }
 
-#if 0
+static void check_leaf_dirty(struct superblock *sb, struct buffer *leafbuf, void *data)
+{
+	struct delete_info *dinfo = data;
+
+	if (!!dinfo->any)
+		set_buffer_dirty(leafbuf);
+
+	if (dirty_buffer_count >= (sb->image.journal_size - 1)) {
+		commit_transaction(sb);
+		set_sb_dirty(sb);
+	}
+}
+
+static int delete_snapshots_from_leaf(struct superblock *sb, struct eleaf *leaf, u64 snapmask)
+{
+	struct delete_info dinfo;
+
+	dinfo.snapmask = snapmask;
+
+	_delete_snapshots_from_leaf(sb, leaf, &dinfo);
+
+	return !!dinfo.any;
+}
+
+#if 1
 static void delete_snapshots_from_tree(struct superblock *sb, u64 snapmask)
 {
-	int levels = sb->image.etree_levels, level = -1;
-	struct etree_path path[levels];
-	struct buffer *nodebuf;
-	struct enode *node;
+	struct delete_info dinfo;
+
+	dinfo.snapmask = snapmask;
+	dinfo.any = 0;
 
 	trace_on(printf("delete snapshot mask %Lx\n", snapmask););
 
-	while (1) {
-		do {
-			level++;
-			nodebuf = snapread(sb, level? path[level - 1].pnext++->sector: sb->image.etree_root);
-			node = buffer2node(nodebuf);
-			path[level].buffer = nodebuf;
-			path[level].pnext = node->entries;
-			trace(printf("push to level %i, %i nodes\n", level, node->count););
-		} while (level < levels - 1);
-
-		trace(printf("do %i leaf nodes, level = %i\n", node->count, level););
-		while (path[level].pnext < node->entries + node->count) {
-			struct buffer *leafbuf = snapread(sb, path[level].pnext++->sector);
-			trace_off(printf("process leaf %Lx\n", leafbuf->sector););
-
-			if (delete_snapshots_from_leaf(sb, buffer2leaf(leafbuf), snapmask))
-				set_buffer_dirty(leafbuf);
-
-			brelse(leafbuf);
-
-			if (dirty_buffer_count >= ((sb->image.journal_size) - 1)) {
-				commit_transaction(sb);
-				set_sb_dirty(sb);
-			}
-		}
-
-		do {
-			brelse(nodebuf);
-			if (!level)
-				return;
-			nodebuf = path[--level].buffer;
-			node = buffer2node(nodebuf);
-			trace(printf("pop to level %i, %i of %i nodes\n", level, path[level].pnext - node->entries, node->count););
-		} while (path[level].pnext == node->entries + node->count);
-	}
+	traverse_tree_chunks(sb, _delete_snapshots_from_leaf, check_leaf_dirty, &dinfo);
 }
 #endif
 
@@ -1681,7 +1683,7 @@ delete:
 #if 0
 static void show_snapshots(struct superblock *sb)
 {
-	unsigned i, snapshots = sb->image.snapshots;
+	unsigned int i, snapshots = sb->image.snapshots;
 
 	printf("%u snapshots\n", snapshots);
 	for (i = 0; i < snapshots; i++) {
@@ -2277,17 +2279,75 @@ next:
 
 #endif
 
-static struct snapshot * valid_snaptag(struct superblock *sb, int tag)
+static struct snapshot *valid_snaptag(struct superblock *sb, int tag)
 {
 	int i, n = sb->image.snapshots;
 	struct snapshot *snap = sb->image.snaplist;
 
-	for (i=0; i<n; i++)
+	for (i = 0; i < n; i++)
 		if (snap[i].tag == tag)
-			return &(snap[i]);
+			return &snap[i];
 
-	return (struct snapshot *)0;
+	return NULL;
 }
+
+static unsigned int max_snapbit(struct snapshot const *snaplist, unsigned int snapshots)
+{
+	unsigned int max = 0;
+	unsigned int snapnum;
+
+	for (snapnum = 0; snapnum < snapshots; snapnum++)
+		if (snaplist[snapnum].bit > max)
+			max = snaplist[snapnum].bit;
+
+	return max;
+}
+
+/* A very simple-minded implementation.  You can do it in very
+ * few operations with whole-register bit twiddling but I assume
+ * that we can juse find a macro somewhere which works.
+ *  AKA hamming weight, sideways add
+ */
+static unsigned int popcount(u64 num)
+{
+	unsigned count = 0;
+
+	for (; num; num >>= 1)
+		if (num & 1)
+			count++;
+
+	return count;
+}
+
+static void calc_sharing(struct superblock *sb, struct eleaf *leaf, void *data)
+{
+	uint64_t **share_table = data;
+	struct exception const *p;
+	unsigned bit;
+	unsigned int share_count;
+	int i;
+
+	for (i = 0; i < leaf->count; i++)
+		for (p = emap(leaf, i); p < emap(leaf, i+1); p++) {
+			share_count = popcount(p->share) - 1;
+
+			for (bit = 0; bit < MAX_SNAPSHOTS; bit++)
+				if (p->share & (1ULL << (u64)bit))
+					share_table[bit][share_count]++;
+		}
+}
+
+static struct status *get_snap_status(struct status_message *message, int snap)
+{
+	struct status *status;
+
+	status = (struct status *)(message->status_data +
+				snap * (sizeof(struct status) +
+				message->num_columns * sizeof(status->chunk_count[0])));
+
+	return status;
+}
+
 
 /*
  * Responses to IO requests take two quite different paths through the
@@ -2634,6 +2694,144 @@ static int incoming(struct superblock *sb, struct client *client)
 		break;
 
 	stream_error:
+		trace(warn("%s", err_msg););
+		outbead(sock, REPLY_ERROR, struct { });
+		break;
+	}
+	case STATUS_REQUEST:
+	{
+		struct status_request request;
+		char const *err_msg;
+		struct snapshot const *snaplist = sb->image.snaplist;
+		unsigned int snapnum;
+
+		if (message.head.length != sizeof(request)) {
+			err_msg = "status_request has wrong length";
+			goto status_error;
+		}
+
+		memcpy(&request, message.body, sizeof(request));
+
+		/* allocate reply */
+
+		/* max_snapbit() + 1 is always >= the number of snapshots,
+		 * and will allow the calc_sharing() routine to index the
+		 * table by snapbit numbers.
+		 * and we need exactly same number of columns as snapshots.
+		 * extra rows or columns can be ignored when reducing the
+		 * table to be sent because they are always zero.
+		 */
+		unsigned int num_rows = max_snapbit(snaplist, sb->image.snapshots) + 1;
+		unsigned int num_columns = num_rows;
+		unsigned int status_count;
+
+		if (request.snapid >= 0) {
+			status_count = 0;
+			for (snapnum = 0; snapnum < sb->image.snapshots; snapnum++)
+				if (snaplist[snapnum].tag == request.snapid) {
+					status_count = 1;
+					break;
+				}
+		} else {
+			status_count = sb->image.snapshots;
+		}
+
+		unsigned int reply_len = sizeof(struct status_message) +
+					status_count * (sizeof(struct status) +
+							num_columns * sizeof(uint64_t));
+		struct status_message *reply = calloc(reply_len, 1);
+
+		/* calculate the usage statistics */
+
+		uint64_t *share_array = calloc(sizeof(uint64_t) * num_rows * num_columns, 1);
+
+		/* make it look like a two dimensional array so users don't have to
+		 * know about the number of columns.  the rows are in ascending
+		 * snapbit order.
+		 */
+		uint64_t **share_table = malloc(sizeof(uint64_t *) * num_rows);
+		unsigned int snapbit;
+		for (snapbit = 0; snapbit < num_rows; snapbit++)
+			share_table[snapbit] = share_array + num_columns * snapbit;
+
+		traverse_tree_chunks(sb, calc_sharing, NULL, share_table);
+
+#ifdef DEBUG_STATUS
+		{
+			int row, col;
+
+			printf("num_rows=%u num_columns=%u status_count=%u\n", num_rows, num_columns, status_count);
+
+			printf("snapshots:\n");
+			for (snapnum = 0; snapnum < sb->image.snapshots; snapnum++)
+				printf(" %2d: bit=%d, idtag=%d\n", snapnum, sb->image.snaplist[snapnum].bit, sb->image.snaplist[snapnum].tag);
+			printf("\n");
+
+			for (row = 0; row < num_rows; row++) {
+				printf("%2d: ", row);
+				for (col = 0; col < num_columns; col++)
+					printf(" %2llu", share_table[row][col]);
+				printf("\n");
+			}
+			printf("\n");
+		}
+#endif
+
+		/* fill in reply structure */
+
+		reply->ctime = sb->image.create_time;
+
+		reply->meta.chunksize_bits = sb->image.chunksize_bits;
+		reply->meta.used = sb->metadata->chunks - sb->metadata->freechunks;
+		reply->meta.free = sb->metadata->freechunks;
+
+		if (sb->metadev == sb->snapdev) {
+			reply->store.chunksize_bits = 0;
+			reply->store.used = 0;
+			reply->store.free = 0;
+		} else {
+			reply->store.chunksize_bits = sb->image.chunksize_bits;
+			reply->store.used = sb->snapdata->chunks - sb->snapdata->freechunks;
+			reply->store.free = sb->snapdata->freechunks;
+		}
+
+		reply->write_density = 0;
+
+		reply->status_count = status_count;
+		reply->num_columns = num_columns;
+
+		unsigned int row, col;
+		struct status *snap_status;
+
+		row = 0;
+		for (snapnum = 0; snapnum < sb->image.snapshots; snapnum++) {
+			if (request.snapid >= 0 && snaplist[snapnum].tag != request.snapid)
+				continue;
+
+			snap_status = get_snap_status(reply, row);
+
+			snap_status->ctime = snaplist[snapnum].ctime;
+			snap_status->snapid = snaplist[snapnum].tag;
+
+			for (col = 0; col < num_columns; col++)
+				snap_status->chunk_count[col] = share_table[snaplist[snapnum].bit][col];
+
+			row++;
+		}
+
+		free(share_table);
+		free(share_array);
+
+		/* send it */
+
+		outhead(sock, STATUS_MESSAGE, reply_len);
+		writepipe(sock, reply, reply_len);
+
+		free(reply);
+
+		break;
+
+	status_error:
 		trace(warn("%s", err_msg););
 		outbead(sock, REPLY_ERROR, struct { });
 		break;
