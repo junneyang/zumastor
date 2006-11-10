@@ -219,6 +219,7 @@ while [ $# -ge 1 ]; do
 
         -V|--version)
             echo "ddutil ${version}"
+            ddsnap -V
             exit 0
             ;;
 
@@ -455,7 +456,7 @@ case "${subcommand}" in
         fi
         ;;
 
-    list|set-priority|set-usecount|create-cl)
+    list|set-priority|set-usecount|create-cl|get-status)
         ddsnap "${subcommand}" ${suboptions} "${ddsnapd_sockpath}" "$@"
         ;;
 
@@ -475,10 +476,6 @@ case "${subcommand}" in
         ddsnap "${subcommand}" ${suboptions} -l "${ddsnap_delta_log}" -p "${ddsnap_delta_pid}" "${map_path}/${map_snap_stem}" "$@"
         ;;
 
-    get-status)
-        ddsnap "${subcommand}" ${suboptions} "${ddsnapd_sockpath}" "$@"
-        ;;
-
     agent-server)
 	ddsnap "${subcommand}" ${suboptions} -l "${ddsnap_agent_log}" -p "${ddsnap_agent_pid}" "${agent_sockpath}" 
 	;;
@@ -489,7 +486,11 @@ case "${subcommand}" in
         else
 	    ddsnap "${subcommand}" ${suboptions} -l "${ddsnap_server_log}" -p "${ddsnap_server_pid}" "${dev_snapstore}" "${dev_origin}" "${dev_meta}" "${agent_sockpath}" "${ddsnapd_sockpath}"
         fi
-	;;
+        ;;
+
+    *)
+        echo "$0: unhandled subcommand \"${subcommand}\""
+        ;;
 esac
 
 exit 0
