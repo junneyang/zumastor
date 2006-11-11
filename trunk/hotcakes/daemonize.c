@@ -13,14 +13,18 @@
 
 pid_t daemonize(char const *logfile, char const *pidfile)
 {
-	struct sigaction sa;
+	struct sigaction ign_sa;
 	pid_t pid;
 
-	sa.sa_handler = SIG_IGN;
-	sigemptyset(&sa.sa_mask);
-	sa.sa_flags = 0;
-	if (sigaction(SIGCHLD, &sa, NULL) == -1)
-		error("could not disable SIGCHLD: %s", strerror(errno));
+	ign_sa.sa_handler = SIG_IGN;
+	sigemptyset(&ign_sa.sa_mask);
+	ign_sa.sa_flags = 0;
+
+	if (sigaction(SIGCHLD, &ign_sa, NULL) == -1)
+		warn("could not disable SIGCHLD: %s", strerror(errno));
+
+	if (sigaction(SIGPIPE, &ign_sa, NULL) == -1)
+		warn("could not disable SIGPIPE: %s", strerror(errno));
 
 	fflush(stdout);
 
