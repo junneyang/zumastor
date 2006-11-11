@@ -3,7 +3,7 @@ kernel=./kernel
 instdir=/usr/bin
 #instdir=/tmp/ddsnap
 
-deps = Makefile trace.h diskio.h buffer.h list.h sock.h
+deps = Makefile trace.h diskio.h buffer.h list.h sock.h build.h
 ddsnap_agent_deps = $(deps) ddsnap.agent.h $(kernel)/dm-ddsnap.h
 ddsnapd_deps = $(deps) ddsnapd.h $(kernel)/dm-ddsnap.h
 ddsnap_deps = $(deps) ddsnap.h ddsnapd.h ddsnap.agent.h $(kernel)/dm-ddsnap.h
@@ -83,6 +83,18 @@ kernel:
 kern:
 	cd ../../.. && make bzImage SUBDIRS=drivers/md
 
+build.h:
+	rm -f $@
+	@echo '/*' > $@
+	@echo ' * This file is generated automatically by the Makefile.' >> $@
+	@echo ' */' >> $@
+	@echo '' >> $@
+	@echo '#define SVN_VERSION "'`svnversion .`'"' >> $@
+	@echo '#define BUILD_DATE "'`date`'"' >> $@
+	@echo '#define BUILD_USER "'`whoami`'"' >> $@
+	@echo '#define BUILD_HOST "'`hostname`'"' >> $@
+
+
 # Just tests from here on.
 device=test
 port=8080
@@ -112,9 +124,6 @@ data=/dev/$(data0) /dev/$(data1) /dev/$(data2) /dev/$(data3) /dev/$(data4)
 # README test values
 origindev=/dev/sda7
 snapstoredev=/dev/sda8
-# Ross
-#origindev=/dev/sda3
-#snapstoredev=/dev/sda4
 
 ddraid-test: ddraid-test1 ddraid-test2
 
