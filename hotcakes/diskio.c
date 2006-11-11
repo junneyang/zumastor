@@ -28,6 +28,9 @@ static int fdio(int fd, void *data, size_t count, int use_offset, off_t offset, 
 
 
 		if (ret == -1) {
+			if (errno == EAGAIN || errno == EINTR)
+				continue;
+
 #ifdef DEBUG_FDIO_FAIL
 			char const *op;
 
@@ -64,7 +67,7 @@ static int fdio(int fd, void *data, size_t count, int use_offset, off_t offset, 
 
 			warn("short %s", op);
 #endif
-			return -ERANGE;
+			return -ERANGE; /* FIXME: wouldn't EPIPE be better? */
 		}
 
 		data += ret; /* not portable but GCC treats like char * */
