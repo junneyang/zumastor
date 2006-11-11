@@ -1,4 +1,5 @@
-#include<errno.h>
+#include <unistd.h>
+#include <errno.h>
 
 #define u8 unsigned char
 #define s8 char
@@ -13,7 +14,6 @@
 #define le_u32 u32
 #define le_u16 u16
 #define le_u64 u64
-#define u64 unsigned long long
 #define EFULL ENOMEM
 #define PACKED __attribute__ ((packed))
 
