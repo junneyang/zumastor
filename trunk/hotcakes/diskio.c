@@ -67,7 +67,7 @@ static int fdio(int fd, void *data, size_t count, int use_offset, off_t offset, 
 
 			warn("short %s", op);
 #endif
-			return -ERANGE; /* FIXME: wouldn't EPIPE be better? */
+			return -EIO;
 		}
 
 		data += ret; /* not portable but GCC treats like char * */
