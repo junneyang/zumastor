@@ -1752,7 +1752,7 @@ int main(int argc, char *argv[])
 				return 0;
 			}
 		}
-		if (snap_server(sb, server_sockname, listenfd, getsigfd, agentfd) < 0)
+		if (snap_server(sb, listenfd, getsigfd, agentfd) < 0)
 			error("Could not start snapshot server\n");
 	
 		return 0; /* not reached */
