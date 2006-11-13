@@ -2918,25 +2918,22 @@ static int resolve_self(int family, void *result, int length)
 
 int snap_server_setup(const char *agent_sockname, const char *server_sockname, int *listenfd, int *getsigfd, int *agentfd)
 {
-	int pipevec[2];
-
 	struct sockaddr_un server_addr = { .sun_family = AF_UNIX };
 	int server_addr_len = sizeof(server_addr) - sizeof(server_addr.sun_path) + strlen(server_sockname);
-
-	struct server server = { .type = AF_UNIX };
-	strncpy(server.address, server_sockname, MAX_ADDRESS);
+	int pipevec[2];
 
 	if (pipe(pipevec) == -1)
 		error("Can't create pipe: %s", strerror(errno));
 	sigpipe = pipevec[1];
 	*getsigfd = pipevec[0];
+	
+	if (strlen(server_sockname) > sizeof(server_addr.sun_path) -1) 
+		error("server socket name too long, %s", server_sockname);
+	strncpy(server_addr.sun_path, server_sockname, sizeof(server_addr.sun_path));
+	unlink(server_sockname);
 
 	if ((*listenfd = socket(AF_UNIX, SOCK_STREAM, 0)) == -1)
 		error("Can't get AF_UNIX socket: %s", strerror(errno));
-
-	unlink(server_sockname);
-	strncpy(server_addr.sun_path, server_sockname, sizeof(server_addr.sun_path));
-
 	if (bind(*listenfd, (struct sockaddr *)&server_addr, server_addr_len) == -1)
 		error("Can't bind to socket %s: %s", server_sockname, strerror(errno));
 	if (listen(*listenfd, 5) == -1)
@@ -2957,23 +2954,22 @@ int snap_server_setup(const char *agent_sockname, const char *server_sockname, i
 	if (connect(*agentfd, (struct sockaddr *)&agent_addr, agent_addr_len) == -1)
 		error("Can't connect to control socket %s: %s", agent_sockname, strerror(errno));
 	trace(warn("Established agent control connection"););
+	
+	struct server server = { .type = AF_UNIX, .length = strlen(server_sockname) };
+	strncpy(server.sockname, server_sockname, MAX_ADDRESS);
+	if (writepipe(*agentfd, &(struct head){ SERVER_READY, sizeof(server) }, sizeof(struct head)) < 0 ||
+	    writepipe(*agentfd, &server, sizeof(server)) < 0)
+		error("Unable to send SEVER_READY msg to agent: %s", strerror(errno));
 
 	return 0;
 }
 
-int snap_server(struct superblock *sb, const char *server_sockname, int listenfd, int getsigfd, int agentfd)
+int snap_server(struct superblock *sb, int listenfd, int getsigfd, int agentfd)
 {
 	unsigned maxclients = 100, clients = 0, others = 3;
 	struct client *clientvec[maxclients];
 	struct pollfd pollvec[others+maxclients];
 	int err = 0; /* FIXME: we never use this */
-	struct server server = { .type = AF_UNIX };
-
-	strncpy(server.address, server_sockname, MAX_ADDRESS);
-
-	if (writepipe(agentfd, &(struct head){ SERVER_READY, sizeof(server) }, sizeof(struct head)) < 0 ||
-	    writepipe(agentfd, &server, sizeof(server)) < 0)
-		error("Unable to send SEVER_READY msg to agent: %s", strerror(errno));
 
 	pollvec[0] = (struct pollfd){ .fd = listenfd, .events = (POLLIN | POLLHUP | POLLERR) };
 	pollvec[1] = (struct pollfd){ .fd = getsigfd, .events = (POLLIN | POLLHUP | POLLERR) };

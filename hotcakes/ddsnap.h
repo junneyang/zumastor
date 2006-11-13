@@ -56,14 +56,14 @@ static inline int writepipe(int fd, void const *buffer, size_t count)
 
 typedef unsigned long long chunk_t;
 
-#define MAX_ADDRESS 16
-
-struct server { u16 port; u8 type; u8 address_len; char address[MAX_ADDRESS]; } PACKED;
-#endif
+#define MAX_ADDRESS FILENAME_MAX
+struct server { u8 type; u8 length; char sockname[MAX_ADDRESS]; } PACKED;
 
 #ifndef HOST_NAME_MAX
 #define HOST_NAME_MAX 256
 #endif
 
 #define MAX_SNAPSHOTS 64
+
+#endif // __DDSNAP_H
 

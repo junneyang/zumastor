@@ -70,7 +70,7 @@ struct superblock
 };
 
 int snap_server_setup(const char *agent_sockname, const char *server_sockname, int *listenfd, int *getsigfd, int *agentfd);
-int snap_server(struct superblock *sb, const char *server_sockname, int listenfd, int getsigfd, int agentfd);
+int snap_server(struct superblock *sb, int listenfd, int getsigfd, int agentfd);
 
 int init_snapstore(struct superblock *sb, u32 js_bytes, u32 bs_bits);
 
