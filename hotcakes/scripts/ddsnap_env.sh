@@ -16,10 +16,10 @@ REMOTE_HOST=victory
 MAX_SNAPSHOTS=64 # just for test purposes.. max can be 64 
 
 # command names... it's early in development, so they might change
-INIT_STORAGE=mkddsnap
-CREATE_SNAPSHOT="ddsnap create-snap"
-DELETE_SNAPSHOT="ddsnap delete-snap"
+INIT_STORAGE="ddsnap initialize"
+CREATE_SNAPSHOT="ddsnap create"
+DELETE_SNAPSHOT="ddsnap delete"
 LIST_SNAPSHOT="ddsnap list $SERVER_SOCK_NAME"
-CREATE_CHANGELIST="ddsnap create-cl"
-CREATE_DELTA="ddsnap create-delta"
-APPLY_DELTA="ddsnap apply-delta"
+CREATE_CHANGELIST="ddsnap delta changelist"
+CREATE_DELTA="ddsnap delta create"
+APPLY_DELTA="ddsnap delta apply"
