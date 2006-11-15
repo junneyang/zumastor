@@ -44,6 +44,18 @@ usage_initialize()
     echo "    -b, --block_size=BS       User specified block size"
 }
 
+usage_agent()
+{
+    echo "$@agent [<option>...]"
+    echo "    -f, --foreground          Do not daemonize"
+}
+
+usage_server()
+{
+    echo "$@server [<option>...]"
+    echo "    -f, --foreground          Do not daemonize"
+}
+
 usage_create()
 {
     echo "$@create <snapshot>"
@@ -67,6 +79,12 @@ usage_priority()
 usage_usecount()
 {
     echo "$@usecount <snap_tag> <inc|dec>"
+}
+
+usage_status()
+{
+    echo "$@status [<option>...] [<snapshot>]"
+    echo "    -v, --verbose             Print all sharing statistics"
 }
 
 usage_delta_changelist()
@@ -111,24 +129,6 @@ usage_delta_listen()
     echo "    -f, --foreground          Do not daemonize"
 }
 
-usage_status()
-{
-    echo "$@status [<option>...] [<snapshot>]"
-    echo "    -v, --verbose             Print all sharing statistics"
-}
-
-usage_agent()
-{
-    echo "$@agent [<option>...]"
-    echo "    -f, --foreground          Do not daemonize"
-}
-
-usage_server()
-{
-    echo "$@server [<option>...]"
-    echo "    -f, --foreground          Do not daemonize"
-}
-
 usage_subcommands_short()
 {
     echo ""
@@ -146,7 +146,7 @@ usage_subcommands_short()
     echo "   delta create       Create a delta file given a changelist and 2 snapshots"
     echo "   delta apply        Apply a delta file to a device"
     echo "   delta send         Send a delta downstream"
-    echo "   delta listen       Listen for deltas arribing from upstream"
+    echo "   delta listen       Listen for deltas arriving from upstream"
 }
 
 usage_subcommands_long()
@@ -155,6 +155,10 @@ usage_subcommands_long()
     echo "subcommands:"
     echo ""
     usage_initialize "  "
+    echo ""
+    usage_agent "  "
+    echo ""
+    usage_server "  "
     echo ""
     usage_create "  "
     echo ""
@@ -166,6 +170,8 @@ usage_subcommands_long()
     echo ""
     usage_usecount "  "
     echo ""
+    usage_status "  "
+    echo ""
     usage_delta_changelist "  "
     echo ""
     usage_delta_create "  "
@@ -175,12 +181,6 @@ usage_subcommands_long()
     usage_delta_send "  "
     echo ""
     usage_delta_listen "  "
-    echo ""
-    usage_status "  "
-    echo ""
-    usage_agent "  "
-    echo ""
-    usage_server "  "
 }
 
 usage()
@@ -266,6 +266,13 @@ case "${subcommand}" in
         longopts='yes,journal_size:,block_size:'
         ;;
 
+    agent|server)
+        minargs='0'
+        maxargs='0'
+        shortopts='fl:p:'
+        longopts='foreground,logfile:,pidfile:'
+        ;;
+
     create|delete)
         minargs='1'
         maxargs='1'
@@ -278,6 +285,13 @@ case "${subcommand}" in
         maxargs='0'
         shortopts=''
         longopts=''
+        ;;
+
+    status)
+        minargs='0'
+        maxargs='1'
+        shortopts='v'
+        longopts='verbose'
         ;;
 
     priority|usecount|delta\ apply)
@@ -304,22 +318,8 @@ case "${subcommand}" in
     delta\ listen)
         minargs='0'
         maxargs='1'
-        shortopts='f'
-        longopts='foreground'
-        ;;
-
-    status)
-        minargs='0'
-        maxargs='1'
-        shortopts='v'
-        longopts='verbose'
-        ;;
-
-    agent|server)
-        minargs='0'
-        maxargs='0'
-        shortopts='f'
-        longopts='foreground'
+        shortopts='fl:p:'
+        longopts='foreground,logfile:,pidfile:'
         ;;
 
     *)

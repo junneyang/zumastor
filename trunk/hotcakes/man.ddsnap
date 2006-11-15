@@ -30,10 +30,10 @@ OPTIONS
     -y, --yes
 	Answer yes to all prompts.
 
-    -j DESIRED_JOURNAL_SIZE, --journal_size=DESIRED_JOURNAL_SIZE
+    -j STRING, --journal_size=STRING
         User can specify their preferred journal size, i.e. 200k. Defaults to 400k.
 
-    -b DESIRED_BLOCK_SIZE, --block_size=DESIRED_BLOCK_SIZE
+    -b STRING, --block_size=STRING
         User can specify their preferred block size. Input has to be a power of two, i.e. 8k.  Defaults to chunk_size.
 
     -f, --foreground
@@ -60,8 +60,8 @@ OPTIONS
     -o, --optcomp
         Generates a delta file with the most optimal compression. For any given chunk, the -o option compares the xdelta and gzipped (at level 9) compression of the chunk against the gzipped (at level 9) compression of the chunk and writes the smaller one into the delta file.  The -o mode is the slowest of all the modes.  Using the -o option nullifies any value specified by the -g option.  Whenever -o is used, gzip compression is automatically maximized to 9.
 
-    -g COMPRESSION_LEVEL, --gzip=COMPRESSION_LEVEL
-        Generates a delta file with user specified mode and then further compress the delta file with gzip at the user specified gzip compression level. Level 0 indicates no compression and level 9 indicates maximum compression. Defaults at level 6.
+    -g INT, --gzip=INT
+        Generates a delta file with user specified mode and then further compress the delta file with gzip at the user specified gzip compression level (an int between 0 to 9). Level 0 indicates no compression and level 9 indicates maximum compression. Defaults at level 6.
 
     -V, --version
 	Shows version.
