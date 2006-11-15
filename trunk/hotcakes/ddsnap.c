@@ -1531,7 +1531,7 @@ static void mainUsage(void)
 	       "	        create            Create a delta file given a changelist and 2 snapshots\n"
 	       "	        apply             Apply a delta file to a volume\n"
 	       "	        send              Send a delta file to a downstream server\n"
-	       "	        downstream        Listen for a delta arriving from upstream\n");
+	       "	        listen            Listen for a delta arriving from upstream\n");
 }
 
 static void deltaUsage(void)
@@ -1543,7 +1543,7 @@ static void deltaUsage(void)
 	       "	create            Create a delta file given a changelist and 2 snapshots\n"
 	       "	apply             Apply a delta file to a volume\n"
 	       "	send              Send a delta file to a downstream server\n"
-	       "        downstream        Listen for a delta arriving from upstream\n");
+	       "        listen            Listen for a delta arriving from upstream\n");
 }
 
 static void cdUsage(poptContext optCon, int exitcode, char const *error, char const *addl)
@@ -1574,7 +1574,7 @@ int main(int argc, char *argv[])
 	char const *logfile = NULL;
 	char const *pidfile = NULL;
 	struct poptOption serverOptions[] = {
-		{ "foreground", 'f', POPT_ARG_NONE, &nobg, 0, "do not daemonize server", NULL },
+		{ "foreground", 'f', POPT_ARG_NONE, &nobg, 0, "run in foreground. daemonized by default.", NULL },
 		{ "logfile", 'l', POPT_ARG_STRING, &logfile, 0, "use specified log file", NULL },
 		{ "pidfile", 'p', POPT_ARG_STRING, &pidfile, 0, "use specified process id file", NULL },
 		POPT_TABLEEND
@@ -1606,7 +1606,7 @@ int main(int argc, char *argv[])
 		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &cdOptions, 0,
 		  "Send delta\n\t Function: Send a delta file to a downstream server\n\t Usage: delta send [OPTION...] <sockname> <snapshot1> <snapshot2> <snapdev1> <snapdev2> <remsnapshot> <host>[:<port>]\n" , NULL },
 		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &serverOptions, 0,
-		  "Downstream\n\t Function: Listen for a delta arriving from upstream\n\t Usage: delta downstream [OPTION...] <snapdevstem> [<host>[:<port>]]" , NULL },
+		  "Listen\n\t Function: Listen for a delta arriving from upstream\n\t Usage: delta listen [OPTION...] <snapdevstem> [<host>[:<port>]]" , NULL },
 		POPT_TABLEEND
 	};
 
@@ -2332,7 +2332,7 @@ int main(int argc, char *argv[])
 
 		return ret;
 	}
-		if (strcmp(subcommand, "downstream") == 0) {
+		if (strcmp(subcommand, "listen") == 0) {
 		char const *snapdevstem;
 		char const *hostspec;
 
