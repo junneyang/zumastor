@@ -36,22 +36,22 @@ ddsnap_delta_pid=/var/run/ddsnap_delta.pid
 
 
 
-usage_init()
+usage_initialize()
 {
-    echo "$@init [<option>...]"
+    echo "$@initialize [<option>...]"
     echo "    -y, --yes                 Answer yes to all prompts"
     echo "    -j, --journal_size=JS     User specified journal size"
     echo "    -b, --block_size=BS       User specified block size"
 }
 
-usage_create_snap()
+usage_create()
 {
-    echo "$@create-snap <snapshot>"
+    echo "$@create <snapshot>"
 }
 
-usage_delete_snap()
+usage_delete()
 {
-    echo "$@delete-snap <snapshot>"
+    echo "$@delete <snapshot>"
 }
 
 usage_list()
@@ -59,24 +59,24 @@ usage_list()
     echo "$@list"
 }
 
-usage_set_priority()
+usage_priority()
 {
-    echo "$@set-priority <snap_tag> <new_priority_value>"
+    echo "$@priority <snap_tag> <new_priority_value>"
 }
 
-usage_set_usecount()
+usage_usecount()
 {
-    echo "$@set-usecount <snap_tag> <inc|dec>"
+    echo "$@usecount <snap_tag> <inc|dec>"
 }
 
-usage_create_cl()
+usage_delta_changelist()
 {
-    echo "$@create-cl <changelist> <snapshot1> <snapshot2>"
+    echo "$@delta changelist <changelist> <snapshot1> <snapshot2>"
 }
 
-usage_create_delta()
+usage_delta_create()
 {
-    echo "$@create-delta [<option>...] <changelist> <deltafile> <snapshot1> <snapshot2>"
+    echo "$@delta create [<option>...] <changelist> <deltafile> <snapshot1> <snapshot2>"
     echo "    -x, --xdelta              Delta file format: xdelta chunk"
     echo "    -r, --raw                 Delta file format: raw chunk from later"
     echo "                              snapshot"
@@ -87,14 +87,14 @@ usage_create_delta()
     echo "    -o, --optcomp             Optimal compression (slowest)"
 }
 
-usage_apply_delta()
+usage_delta_apply()
 {
-    echo "$@apply-delta <deltafile> <snapshot>"
+    echo "$@delta apply <deltafile> <snapshot>"
 }
 
-usage_send_delta()
+usage_delta_send()
 {
-    echo "$@send-delta [<option>...] <snapshot1> <snapshot2> <remsnapshot> <host>[:<port>]"
+    echo "$@delta send [<option>...] <snapshot1> <snapshot2> <remsnapshot> <host>[:<port>]"
     echo "    -x, --xdelta              Delta file format: xdelta chunk"
     echo "    -r, --raw                 Delta file format: raw chunk from later"
     echo "                              snapshot"
@@ -105,27 +105,27 @@ usage_send_delta()
     echo "    -o, --optcomp             Optimal compression (slowest)"
 }
 
-usage_delta_server()
+usage_delta_listen()
 {
-    echo "$@delta-server [<host>[:<port>]]"
+    echo "$@delta listen [<host>[:<port>]]"
     echo "    -f, --foreground          Do not daemonize"
 }
 
-usage_get_status()
+usage_status()
 {
-    echo "$@get-status [<option>...] [<snapshot>]"
+    echo "$@status [<option>...] [<snapshot>]"
     echo "    -v, --verbose             Print all sharing statistics"
 }
 
-usage_agent_server()
+usage_agent()
 {
-    echo "$@agent-server [<option>...]"
+    echo "$@agent [<option>...]"
     echo "    -f, --foreground          Do not daemonize"
 }
 
-usage_snap_server()
+usage_server()
 {
-    echo "$@snap-server [<option>...]"
+    echo "$@server [<option>...]"
     echo "    -f, --foreground          Do not daemonize"
 }
 
@@ -133,20 +133,20 @@ usage_subcommands_short()
 {
     echo ""
     echo "subcommands:"
-    echo "   init               Initialize the snashot store"
-    echo "   create-snap        Creates a snapshot"
-    echo "   delete-snap        Deletes a snapshot"
-    echo "   list               Returns a list of snapshots"
-    echo "   set-priority       Sets the priority of a snapshot"
-    echo "   set-usecount       Sets the use count of a snapshot"
-    echo "   create-cl          Creates a changelist given 2 snapshots"
-    echo "   create-delta       Creates a delta file given a changelist and 2 snapshots"
-    echo "   apply-delta        Applies a delta file to the given device"
-    echo "   send-delta         Sends a delta file downstream"
-    echo "   delta-server       Listens for upstream deltas"
-    echo "   get-status         Reports snapshot usage statistics"
-    echo "   agent-server       Starts the snapshot agent"
-    echo "   snap-server        Starts the snapshot server"
+    echo "   initialize         Initialize the snashot store"
+    echo "   agent              Start the snapshot agent"
+    echo "   server             Start the snapshot server"
+    echo "   create             Create a snapshot"
+    echo "   delete             Delete a snapshot"
+    echo "   list               Return the list of current snapshots"
+    echo "   priority           Set the priority of a snapshot"
+    echo "   usecount           Changes the use count of a snapshot"
+    echo "   status             Report snapshot usage statistics"
+    echo "   delta changelist   Create a changelist given 2 snapshots"
+    echo "   delta create       Create a delta file given a changelist and 2 snapshots"
+    echo "   delta apply        Apply a delta file to a device"
+    echo "   delta send         Send a delta downstream"
+    echo "   delta listen       Listen for deltas arribing from upstream"
 }
 
 usage_subcommands_long()
@@ -154,33 +154,33 @@ usage_subcommands_long()
     echo ""
     echo "subcommands:"
     echo ""
-    usage_init "  "
+    usage_initialize "  "
     echo ""
-    usage_create_snap "  "
+    usage_create "  "
     echo ""
-    usage_delete_snap "  "
+    usage_delete "  "
     echo ""
     usage_list "  "
     echo ""
-    usage_set_priority "  "
+    usage_priority "  "
     echo ""
-    usage_set_usecount "  "
+    usage_usecount "  "
     echo ""
-    usage_create_cl "  "
+    usage_delta_changelist "  "
     echo ""
-    usage_create_delta "  "
+    usage_delta_create "  "
     echo ""
-    usage_apply_delta "  "
+    usage_delta_apply "  "
     echo ""
-    usage_send_delta "  "
+    usage_delta_send "  "
     echo ""
-    usage_delta_server "  "
+    usage_delta_listen "  "
     echo ""
-    usage_get_status "  "
+    usage_status "  "
     echo ""
-    usage_agent_server "  "
+    usage_agent "  "
     echo ""
-    usage_snap_server "  "
+    usage_server "  "
 }
 
 usage()
@@ -225,33 +225,48 @@ while [ $# -ge 1 ]; do
 
         --)
             shift
+            # if there's no next arg that's ok, empty command will print usage
+            subcommand="$1"
+            shift
             break
             ;;
 
-        init|create-snap|delete-snap|list|set-priority|set-usecount|create-cl|create-delta|apply-delta|send-delta|delta-server|get-status|agent-server|snap-server)
-            break
+        *)
+            echo "$0: unexpected argument $1"
+            usage
+            exit 1
             ;;
     esac
 done
 
 
-subcommand="$1"
-shift
 if [ X"${subcommand}" = X"" ]; then
     usage
     usage_subcommands_short
     exit 0
 fi
 
+if [ X"${subcommand}" = X"delta" ]; then
+    if [ $# -lt 1 ]; then
+        echo "$0: no delta subcommand specified"
+        usage
+        usage_subcommands_short
+        exit 0
+    fi
+    subcommand="delta $1"
+    shift
+fi
+
+
 case "${subcommand}" in
-    init)
+    initialize)
         minargs='0'
         maxargs='0'
         shortopts='yj:b:'
         longopts='yes,journal_size:,block_size:'
         ;;
 
-    create-snap|delete-snap)
+    create|delete)
         minargs='1'
         maxargs='1'
         shortopts=''
@@ -265,42 +280,42 @@ case "${subcommand}" in
         longopts=''
         ;;
 
-    set-priority|set-usecount|apply-delta)
+    priority|usecount|delta\ apply)
         minargs='2'
         maxargs='2'
         shortopts=''
         longopts=''
         ;;
 
-    create-cl)
+    delta\ changelist)
         minargs='3'
         maxargs='3'
         shortopts=''
         longopts=''
         ;;
 
-    create-delta|send-delta)
+    delta\ create|delta\ send)
         minargs='4'
         maxargs='4'
         shortopts='xrtg:o'
         longopts='xdelta,raw,test,gzip:,optcomp'
         ;;
 
-    delta-server)
+    delta\ listen)
         minargs='0'
         maxargs='1'
         shortopts='f'
         longopts='foreground'
         ;;
 
-    get-status)
+    status)
         minargs='0'
         maxargs='1'
         shortopts='v'
         longopts='verbose'
         ;;
 
-    agent-server|snap-server)
+    agent|server)
         minargs='0'
         maxargs='0'
         shortopts='f'
@@ -314,7 +329,7 @@ case "${subcommand}" in
 esac
 
 
-usage_func="usage_`echo \"${subcommand}\" | tr '-' '_'`"
+usage_func="usage_`echo \"${subcommand}\" | tr ' ' '_'`"
 
 
 newargs=`getopt -o "+h${shortopts}" -l "help,usage,${longopts}" -n "$0 ${subcommand}" -- "$@"`
@@ -392,7 +407,7 @@ fi
 
 
 case "${subcommand}" in
-    init)
+    initialize)
         if dmsetup ls 2> /dev/null | egrep "^${map_origin}	" > /dev/null; then
             echo "$0: snapshot origin device ${map_origin} already in use"
             exit 3
@@ -409,7 +424,7 @@ case "${subcommand}" in
         fi
         ;;
 
-    create-snap)
+    create)
         originbase="`echo \"${dev_origin}\" | sed -e 's@^.*/@@'`"
         if ! egrep "${originbase}$" /proc/partitions > /dev/null 2>&1; then
             echo "$0: snapshot origin device ${dev_origin} not detected in /proc/partitions"
@@ -447,7 +462,7 @@ case "${subcommand}" in
         fi
         ;;
 
-    delete-snap)
+    delete)
         if [ X"$1" = X"-1" ]; then
             dmsetup remove "${map_origin}"
         else
@@ -456,35 +471,35 @@ case "${subcommand}" in
         fi
         ;;
 
-    list|set-priority|set-usecount|create-cl|get-status)
+    list|priority|usecount|delta\ changelist|status)
         ddsnap "${subcommand}" ${suboptions} "${ddsnapd_sockpath}" "$@"
         ;;
 
-    create-delta)
+    delta\ create)
         ddsnap "${subcommand}" ${suboptions} "$1" "$2" "$3" "$4"
         ;;
 
-    apply-delta)
+    delta\ apply)
         ddsnap "${subcommand}" ${suboptions} "$1" "${map_path}/${map_snap_stem}$2"
         ;;
 
-    send-delta)
+    delta\ send)
         ddsnap "${subcommand}" ${suboptions} "${ddsnapd_sockpath}" "$1" "$2" "${map_path}/${map_snap_stem}$1" "${map_path}/${map_snap_stem}$2" "$3" "$4"
         ;;
 
-    delta-server)
+    delta\ listen)
         ddsnap "${subcommand}" ${suboptions} -l "${ddsnap_delta_log}" -p "${ddsnap_delta_pid}" "${map_path}/${map_snap_stem}" "$@"
         ;;
 
-    agent-server)
-	ddsnap "${subcommand}" ${suboptions} -l "${ddsnap_agent_log}" -p "${ddsnap_agent_pid}" "${agent_sockpath}" 
-	;;
+    agent)
+        ddsnap "${subcommand}" ${suboptions} -l "${ddsnap_agent_log}" -p "${ddsnap_agent_pid}" "${agent_sockpath}" 
+        ;;
 
-    snap-server)
+    server)
         if [ X"${dev_meta}" = X"" ] || [ X"${dev_meta}" = X"${dev_snapstore}" ]; then
-	    ddsnap "${subcommand}" ${suboptions} -l "${ddsnap_server_log}" -p "${ddsnap_server_pid}" "${dev_snapstore}" "${dev_origin}" "${agent_sockpath}" "${ddsnapd_sockpath}"
+            ddsnap "${subcommand}" ${suboptions} -l "${ddsnap_server_log}" -p "${ddsnap_server_pid}" "${dev_snapstore}" "${dev_origin}" "${agent_sockpath}" "${ddsnapd_sockpath}"
         else
-	    ddsnap "${subcommand}" ${suboptions} -l "${ddsnap_server_log}" -p "${ddsnap_server_pid}" "${dev_snapstore}" "${dev_origin}" "${dev_meta}" "${agent_sockpath}" "${ddsnapd_sockpath}"
+            ddsnap "${subcommand}" ${suboptions} -l "${ddsnap_server_log}" -p "${ddsnap_server_pid}" "${dev_snapstore}" "${dev_origin}" "${dev_meta}" "${agent_sockpath}" "${ddsnapd_sockpath}"
         fi
         ;;
 
