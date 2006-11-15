@@ -1,5 +1,3 @@
-
-
 /*
  * Snapshot Metadata Server
  *
@@ -2927,7 +2925,7 @@ int snap_server_setup(const char *agent_sockname, const char *server_sockname, i
 	sigpipe = pipevec[1];
 	*getsigfd = pipevec[0];
 	
-	if (strlen(server_sockname) > sizeof(server_addr.sun_path) -1) 
+	if (strlen(server_sockname) > sizeof(server_addr.sun_path) - 1) 
 		error("server socket name too long, %s", server_sockname);
 	strncpy(server_addr.sun_path, server_sockname, sizeof(server_addr.sun_path));
 	unlink(server_sockname);
@@ -2954,13 +2952,14 @@ int snap_server_setup(const char *agent_sockname, const char *server_sockname, i
 	if (connect(*agentfd, (struct sockaddr *)&agent_addr, agent_addr_len) == -1)
 		error("Can't connect to control socket %s: %s", agent_sockname, strerror(errno));
 	trace(warn("Established agent control connection"););
-	
-	struct server server = { .type = AF_UNIX, .length = strlen(server_sockname) };
-	strncpy(server.sockname, server_sockname, MAX_ADDRESS);
-	if (writepipe(*agentfd, &(struct head){ SERVER_READY, sizeof(server) }, sizeof(struct head)) < 0 ||
-	    writepipe(*agentfd, &server, sizeof(server)) < 0)
-		error("Unable to send SEVER_READY msg to agent: %s", strerror(errno));
 
+	struct server_head server_head = { .type = AF_UNIX, .length = (strlen(server_sockname) + 1) };
+	printf("server socket name is %s and length is %d\n", server_sockname, server_head.length);	
+	if (writepipe(*agentfd, &(struct head){ SERVER_READY, sizeof(struct server_head) }, sizeof(struct head)) < 0 ||
+	    writepipe(*agentfd, &server_head, sizeof(server_head)) < 0 || 
+	    writepipe(*agentfd, server_sockname, server_head.length) < 0)
+		error("Unable to send SEVER_READY msg to agent: %s", strerror(errno));
+	
 	return 0;
 }
 

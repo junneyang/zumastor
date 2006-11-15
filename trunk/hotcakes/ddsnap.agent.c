@@ -28,20 +28,22 @@ static inline int have_address(struct server *server)
 
 int connect_clients(struct context *context)
 {
-	warn("connect clients to %x", *(int *)(context->active.sockname));
+	warn("connect clients to %s", context->active.address);
 	while (context->waiters)
 	{
 		struct client *client = context->waiting[0];
 		int control = client->sock;
 		struct server *server = &context->active;
-		struct sockaddr_un addr = { .sun_family = server->type };
-		int addr_len = sizeof(addr) - sizeof(addr.sun_path) + strlen(server->sockname);
+		struct sockaddr_un addr = { .sun_family = server->header.type };
+		int addr_len = sizeof(addr) - sizeof(addr.sun_path) + strlen(server->address);
 		int sock;
 
+		if (server->header.length > sizeof(addr.sun_path)) // length includes terminating NULL
+			error("server socket name, %s, is too long", server->address);
 		if ((sock = socket(AF_UNIX, SOCK_STREAM, 0)) < 0)
 			error("Can't get socket: %s", strerror(errno)); 
-		trace_on(printf("server socket name: %s\n", server->sockname););
-		strncpy(addr.sun_path, server->sockname, sizeof(addr.sun_path));
+		trace_on(printf("server socket name: %s\n", server->address););
+		strncpy(addr.sun_path, server->address, sizeof(addr.sun_path));
 		if (connect(sock, (struct sockaddr *)&addr, addr_len) == -1) {
 			// this really sucks: if the address is wrong, we silently wait for
 			// some ridiculous amount of time.  Do something about this please.
@@ -61,7 +63,12 @@ int connect_clients(struct context *context)
 int try_to_instantiate(struct context *context)
 {
 	warn("Activate local server");
+	if (context->active.address)
+		free(context->active.address);
 	memcpy(&context->active, &context->local, sizeof(struct server));
+	if (!(context->active.address = (char *)malloc(context->local.header.length)))
+		error("unable to allocate space for socket name\n");
+	memcpy(context->active.address, context->local.address, context->local.header.length);
 	if (outbead(context->serv, START_SERVER, struct { }) < 0) 
 		error("Could not send message to server");
 	connect_clients(context);
@@ -73,6 +80,7 @@ static int incoming(struct context *context, struct client *client)
 	int err;
 	struct messagebuf message;
 	int sock = client->sock;
+	struct server *server = NULL;
 
 	if ((err = readpipe(sock, &message.head, sizeof(message.head))))
 		goto pipe_error;
@@ -83,9 +91,18 @@ static int incoming(struct context *context, struct client *client)
 
 	switch (message.head.code) {
 	case SERVER_READY:
+		server = &context->local;
 		warn("received server ready");
-		assert(message.head.length == sizeof(struct server));
-		memcpy(&context->local, message.body, sizeof(struct server));
+		assert(message.head.length == sizeof(struct server_head));
+		memcpy(&server->header, message.body, sizeof(struct server_head));
+		if (server->address)
+			free(server->address);
+		printf("socket name length: %d\n", server->header.length);
+		if (!(server->address = (char *)malloc(server->header.length)))
+			error("unable to allocate space for server address");
+		if ((err = readpipe(sock, server->address, server->header.length)))
+			goto pipe_error;
+		printf("server socket name %s\n", server->address);
 		context->serv = sock; // !!! refuse more than one
 		client->type = SERVER_CON;
 		goto instantiate;
@@ -212,6 +229,8 @@ int monitor(int listenfd, struct context *context)
 //							memset(&context->active, 0, sizeof(struct server));
 //							memset(lksb->sb_lvbptr, 0, sizeof(struct server));
 						}
+						if (context->local.address)
+							free(context->local.address);
 						memset(&context->local, 0, sizeof(struct server));
 					}
 					close(client->sock);
