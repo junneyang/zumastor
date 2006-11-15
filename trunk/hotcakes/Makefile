@@ -122,8 +122,8 @@ data=/dev/$(data0) /dev/$(data1) /dev/$(data2) /dev/$(data3) /dev/$(data4)
 #data=/dev/$(data0) /dev/$(data1)
 
 # README test values
-origindev=/dev/sda7
-snapstoredev=/dev/sda8
+origindev=/dev/hdb1
+snapstoredev=/dev/hdb2
 
 ddraid-test: ddraid-test1 ddraid-test2
 
@@ -170,7 +170,7 @@ dd-init:
 	killall ddsnapd || true
 	killall ddsnap-agent || true
 	/sbin/dmsetup remove_all || true
-	./ddsnap init /dev/test-snapstore /dev/test-origin 
+	./ddsnap initialize /dev/test-snapstore /dev/test-origin 
 
 dd-agent:
 	./ddsnap agent /tmp/control
@@ -179,10 +179,10 @@ dd-server:
 	./ddsnap server /dev/test-snapstore /dev/test-origin /tmp/control /tmp/server
 
 dd-create:
-	./ddsnap create-snap /tmp/server 0
+	./ddsnap create /tmp/server 0
  
 dd-delete:
-	./ddsnap delete-snap /tmp/server 0
+	./ddsnap delete /tmp/server 0
 
  
 origin: 
@@ -190,17 +190,17 @@ origin:
 .PHONY: origin
 
 snap0:
-	sudo ./ddsnap create-snap /tmp/server 0
+	sudo ./ddsnap create /tmp/server 0
 	echo 0 $$((2 * $$(egrep $$(echo $(origindev) | sed -e 's@^.*/@@')'$$' /proc/partitions | awk '{print $$3}'))) ddsnap /dev/test-snapstore /dev/test-origin /tmp/control 0 | sudo /sbin/dmsetup create snapshot0
 .PHONY: snap0
 
 snap1:
-	sudo ./ddsnap create-snap /tmp/server 1
+	sudo ./ddsnap create /tmp/server 1
 	echo 0 $$((2 * $$(egrep $$(echo $(origindev) | sed -e 's@^.*/@@')'$$' /proc/partitions | awk '{print $$3}'))) ddsnap /dev/test-snapstore /dev/test-origin /tmp/control 1 | sudo /sbin/dmsetup create snapshot1
 .PHONY: snap1
 
 snap2:
-	sudo ./ddsnap create-snap /tmp/server 2
+	sudo ./ddsnap create /tmp/server 2
 	echo 0 $$((2 * $$(egrep $$(echo $(origindev) | sed -e 's@^.*/@@')'$$' /proc/partitions | awk '{print $$3}'))) ddsnap /dev/test-snapstore /dev/test-origin /tmp/control 2 | sudo /sbin/dmsetup create snapshot2
 .PHONY: snap2
 
@@ -214,26 +214,26 @@ changelist:	changelist0-1
 .PHONY: changelist
 
 changelist0-1:
-	sudo ./ddsnap create-cl /tmp/server $@ 0 1
+	sudo ./ddsnap delta changelist /tmp/server $@ 0 1
 
 changelist0-2:
-	sudo ./ddsnap create-cl /tmp/server $@ 0 2
+	sudo ./ddsnap delta changelist /tmp/server $@ 0 2
 
 changelist1-2:
-	sudo ./ddsnap create-cl /tmp/server $@ 1 2
+	sudo ./ddsnap delta changelist /tmp/server $@ 1 2
 
 
 delta:	deltafile0-1
 .PHONY: delta
 
 deltafile0-1: changelist0-1
-	sudo ./ddsnap create-delta -r changelist0-1 $@ /dev/mapper/snapshot0 /dev/mapper/snapshot1
+	sudo ./ddsnap delta create -r changelist0-1 $@ /dev/mapper/snapshot0 /dev/mapper/snapshot1
 
 deltafile0-2: changelist0-2
-	sudo ./ddsnap create-delta -r changelist0-2 $@ /dev/mapper/snapshot0 /dev/mapper/snapshot2
+	sudo ./ddsnap delta create -r changelist0-2 $@ /dev/mapper/snapshot0 /dev/mapper/snapshot2
 
 deltafile1-2: changelist1-2
-	sudo ./ddsnap create-delta -r changelist1-2 $@ /dev/mapper/snapshot1 /dev/mapper/snapshot2
+	sudo ./ddsnap delta create -r changelist1-2 $@ /dev/mapper/snapshot1 /dev/mapper/snapshot2
 
 
 ddsnap-test3: 
