@@ -212,7 +212,7 @@ static int write_changelist(int change_fd, struct change_list const *cl)
 	return 0;
 }
 
-u64 chunks_in_extent(struct change_list *cl, u64 pos, u32 chunk_size)
+static u64 chunks_in_extent(struct change_list *cl, u64 pos, u32 chunk_size)
 {
 	u64 start_chunkaddr, cur_chunkaddr, num_of_chunks = 1;
 	start_chunkaddr = cl->chunks[pos];
@@ -225,7 +225,7 @@ u64 chunks_in_extent(struct change_list *cl, u64 pos, u32 chunk_size)
 	return num_of_chunks;
 }
 
-static int generate_delta_extents(u32 mode, int level, struct change_list *cl, int deltafile, char const *dev1name, char const *dev2name, int progress) 
+static int generate_delta_extents(u32 mode, int level, struct change_list *cl, int deltafile, char const *dev1name, char const *dev2name, int progress)
 {
 	int snapdev1, snapdev2;
 	int err;
@@ -264,13 +264,13 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 	u64 delta_size;
 	
 	trace_on(printf("starting delta generation\n"););
-								
+
 	/* Chunk address followed by CHUNK_SIZE bytes of chunk data */
 	for (chunk_num = 0; chunk_num < cl->count;) {
 
 		extent_addr = cl->chunks[chunk_num] << cl->chunksize_bits;
 
-		if (chunk_num == (cl->count - 1) ) 
+		if (chunk_num == (cl->count - 1) )
 			num_of_chunks = 1;
 		else
 			num_of_chunks = chunks_in_extent(cl, chunk_num, chunk_size);
@@ -298,8 +298,8 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 			goto gen_readsnap2_error;
 
 		/* 3 different modes, raw (raw snapshot2 chunk), xdelta (xdelta), test (xdelta, raw snapshot1 chunk & raw snapshot2 chunk) */
-		if (mode == RAW) 
-			memcpy(delta_data, extent_data2, extent_size);		
+		if (mode == RAW)
+			memcpy(delta_data, extent_data2, extent_size);
 		else {
 			int ret = create_delta_chunk(extent_data1, extent_data2, delta_data, extent_size, (int *)&delta_size);
 
@@ -307,7 +307,7 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 			if (ret == BUFFER_SIZE_ERROR) {
 				trace_off(printf("Buffer size error\n"););
 				memcpy(delta_data, extent_data2, extent_size);
-				delta_size = extent_size;	
+				delta_size = extent_size;
 			} else if (ret < 0)
 				goto gen_create_error;
 			if (ret >= 0) {
@@ -320,7 +320,7 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 					goto gen_applytest_error;
 				}
 				
-//				if (checksum((const unsigned char *) delta_test, extent_size) 
+//				if (checksum((const unsigned char *) delta_test, extent_size)
 //				    != checksum((const unsigned char *) extent_data2, extent_size))
 //					printf("checksum of delta_test does not match check_sum of extent_data2");
 				
@@ -333,7 +333,7 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 				free(delta_test);
 			}
 		}
-		
+
 		/* zlib compression */
 		int comp_ret = compress2(comp_delta, (unsigned long *) &comp_size, delta_data, delta_size, level);
 
@@ -343,7 +343,7 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 			goto gen_compbuf_error;
 		if (comp_ret == Z_STREAM_ERROR)
 			goto gen_compstream_error;
-		
+
 		trace_off(printf("Set up delta extent header\n"););
 		deh.check_sum = checksum((const unsigned char *) extent_data2, extent_size);
 		deh.extent_addr = extent_addr;
@@ -357,12 +357,12 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 
 			int ext2_comp_ret = compress2(ext2_comp_delta, (unsigned long *) &ext2_comp_size, extent_data2, extent_size, level);
 
-	                if (ext2_comp_ret == Z_MEM_ERROR)
+			if (ext2_comp_ret == Z_MEM_ERROR)
 				goto gen_compmem_error;
-	                if (ext2_comp_ret == Z_BUF_ERROR)
-	                        goto gen_compbuf_error;
-	                if (ext2_comp_ret == Z_STREAM_ERROR)
-                	        goto gen_compstream_error;
+			if (ext2_comp_ret == Z_BUF_ERROR)
+				goto gen_compbuf_error;
+			if (ext2_comp_ret == Z_STREAM_ERROR)
+				goto gen_compstream_error;
 		}
 
 		if (comp_size < delta_size) {
@@ -370,7 +370,7 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 			if (ext2_comp_size < comp_size) {
 				deh.data_length = ext2_comp_size;
 				deh.setting = RAW;
-			} else { 			
+			} else {
 				deh.data_length = comp_size;
 				deh.setting = XDELTA;
 			}
@@ -380,7 +380,7 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 		trace_off(printf("Writing chunk "U64FMT" at "U64FMT" to delta\n", chunk_num, extent_addr););
 		if ((err = fdwrite(deltafile, &deh, sizeof(deh))) < 0)
 			goto gen_writehead_error;
-		
+
 		if (deh.compress == TRUE) {
 			if (deh.setting == XDELTA) {
 				if ((err = fdwrite(deltafile, comp_delta, comp_size)) < 0)
@@ -395,7 +395,7 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 				goto out_error;
 			}
 		}
-		
+
                 if (mode == TEST) {
 			if ((err = fdwrite(deltafile, extent_data1, extent_size)) < 0)
 				goto gen_writetest_error;
@@ -812,7 +812,7 @@ static int apply_delta_extents(int deltafile, u32 mode, u32 chunk_size, u64 chun
 		} else
 			uncomp_size = deh.data_length;
 
-                if (deh.setting == RAW) 
+                if (deh.setting == RAW)
 			memcpy(updated, delta_data, extent_size);
 		else {
 			trace_off(printf("uncomp_size %llu & deh.data_length %llu\n", uncomp_size, deh.data_length););
@@ -1023,7 +1023,7 @@ static int apply_delta(int deltafile, char const *devname)
 	}
 
 	int err;
-       
+
 	if ((err = apply_delta_extents(deltafile, dh.mode, dh.chunk_size, dh.chunk_num, devname, TRUE)) < 0)
 		return err;
 
@@ -1523,8 +1523,8 @@ static void mainUsage(void)
 	       "	priority          Set the priority of a snapshot\n"
 	       "	usecount          Change the use count of a snapshot\n"
 	       "        status            Report snapshot usage statistics\n"
-	       "	delta             \n"   
-               "        usage: ddsnap delta [-?|--help|--usage] <subcommand>\n"          
+	       "	delta             \n"
+               "        usage: ddsnap delta [-?|--help|--usage] <subcommand>\n"
                "\n"
                "        Available delta subcommands:\n"
                "                changelist        Create a changelist given 2 snapshots\n"
@@ -1666,9 +1666,8 @@ int main(int argc, char *argv[])
 	}
 
 	if (strcmp(command, "initialize") == 0) {
-		
 		char const *snapdev, *origdev, *metadev;
-		u32 bs_bits = SECTOR_BITS + SECTORS_PER_BLOCK, js_bytes = DEFAULT_JOURNAL_SIZE;				
+		u32 bs_bits = SECTOR_BITS + SECTORS_PER_BLOCK, js_bytes = DEFAULT_JOURNAL_SIZE;
 
 		struct poptOption options[] = {
 			{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &initOptions, 0, NULL, NULL },
@@ -1796,7 +1795,7 @@ int main(int argc, char *argv[])
 	}
 	if (strcmp(command, "agent") == 0) {
 		char const *sockname;
-		int listenfd;	
+		int listenfd;
 
 		struct poptOption options[] = {
 			{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &serverOptions, 0, NULL, NULL },
@@ -1894,7 +1893,7 @@ int main(int argc, char *argv[])
 			poptPrintUsage(serverCon, stderr, 0);
 			poptFreeContext(serverCon);
 			return 1;
-		}	
+		}
 	
 		char const *extra_arg[3];
 
@@ -1908,7 +1907,7 @@ int main(int argc, char *argv[])
 			poptFreeContext(serverCon);
 			return 1;
 		}
- 
+
 		if (extra_arg[2]) {
 			metadev = extra_arg[0];
 			agent_sockname = extra_arg[1];
@@ -2109,7 +2108,6 @@ int main(int argc, char *argv[])
 		return ret;
 	}
 	if (strcmp(command, "delta") == 0) {
-
 		poptContext deltaCon;
 		struct poptOption options[] = {
 			{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &deltaOptions, 0, NULL, NULL },
@@ -2138,61 +2136,62 @@ int main(int argc, char *argv[])
 			deltaUsage();
 			exit(0);
 		}
+
 		if (strcmp(subcommand, "changelist") == 0) {
 			if (argc != 7) {
 				printf("usage: %s %s changelist <sockname> <changelist> <snapshot1> <snapshot2>\n", argv[0], argv[1]);
-			return 1;
-		}
+				return 1;
+			}
 
-		int snapid1, snapid2;
+			int snapid1, snapid2;
 
 			if (parse_snapid(argv[5], &snapid1) < 0) {
 				fprintf(stderr, "%s %s: invalid snapshot id %s\n", argv[0], argv[1], argv[5]);
-			return 1;
-		}
+				return 1;
+			}
 
 			if (parse_snapid(argv[6], &snapid2) < 0) {
 				fprintf(stderr, "%s %s: invalid snapshot id %s\n", argv[0], argv[1], argv[6]);
-			return 1;
-		}
+				return 1;
+			}
 
 			int sock = create_socket(argv[3]);
 
 			int ret = ddsnap_generate_changelist(sock, argv[4], snapid1, snapid2);
-		close(sock);
-		return ret;
-	}
+			close(sock);
+			return ret;
+		}
 		if (strcmp(subcommand, "create") == 0) {
-		char cdOpt;
-		poptContext cdCon;
+			char cdOpt;
+			poptContext cdCon;
 
-		struct poptOption options[] = {
-			{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &cdOptions, 0, NULL, NULL },
-			POPT_AUTOHELP
-			POPT_TABLEEND
-		};
+			struct poptOption options[] = {
+				{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &cdOptions, 0, NULL, NULL },
+				POPT_AUTOHELP
+				POPT_TABLEEND
+			};
 
 			cdCon = poptGetContext(NULL, argc-2, (const char **)&(argv[2]), options, 0);
-		poptSetOtherOptionHelp(cdCon, "<changelist> <deltafile> <snapdev1> <snapdev2>");
+			poptSetOtherOptionHelp(cdCon, "<changelist> <deltafile> <snapdev1> <snapdev2>");
 
-		cdOpt = poptGetNextOpt(cdCon);
+			cdOpt = poptGetNextOpt(cdCon);
 
 			if (argc < 4) {
-			poptPrintUsage(cdCon, stderr, 0);
-			exit(1);
-		}
+				poptPrintUsage(cdCon, stderr, 0);
+				exit(1);
+			}
 
-		if (cdOpt < -1) {
-			/* an error occurred during option processing */
-			fprintf(stderr, "%s: %s: %s\n",
-				command,
-				poptBadOption(cdCon, POPT_BADOPTION_NOALIAS),
-				poptStrerror(cdOpt));
-			poptFreeContext(cdCon);
-			return 1;
-		}
+			if (cdOpt < -1) {
+				/* an error occurred during option processing */
+				fprintf(stderr, "%s: %s: %s\n",
+					command,
+					poptBadOption(cdCon, POPT_BADOPTION_NOALIAS),
+					poptStrerror(cdOpt));
+				poptFreeContext(cdCon);
+				return 1;
+			}
 
-		/* Make sure the options are mutually exclusive */
+			/* Make sure the options are mutually exclusive */
 			if (xd+raw+test+opt_comp > 1) {
 				fprintf(stderr, "%s %s: Too many chunk options were selected.\nPlease select only one: -x, -r, -t or -o\n", argv[0], argv[1]);
 				poptPrintUsage(cdCon, stderr, 0);
@@ -2200,147 +2199,147 @@ int main(int argc, char *argv[])
 				return 1;
 			}
 
-		u32 mode = (test ? TEST : (raw ? RAW : (xd? XDELTA : OPT_COMP)));
-		if (opt_comp)
-			gzip_level = MAX_GZIP_COMP;
+			u32 mode = (test ? TEST : (raw ? RAW : (xd? XDELTA : OPT_COMP)));
+			if (opt_comp)
+				gzip_level = MAX_GZIP_COMP;
 		
-		trace_on(fprintf(stderr, "xd=%d raw=%d test=%d opt_comp=%d mode=%u gzip_level=%d\n", xd, raw, test, opt_comp, mode, gzip_level););
+			trace_on(fprintf(stderr, "xd=%d raw=%d test=%d opt_comp=%d mode=%u gzip_level=%d\n", xd, raw, test, opt_comp, mode, gzip_level););
 
-		char const *changelist, *deltafile, *snapdev1, *snapdev2;
+			char const *changelist, *deltafile, *snapdev1, *snapdev2;
 
-		changelist = poptGetArg(cdCon);
-		deltafile  = poptGetArg(cdCon);
-		snapdev1   = poptGetArg(cdCon);
-		snapdev2   = poptGetArg(cdCon);
+			changelist = poptGetArg(cdCon);
+			deltafile  = poptGetArg(cdCon);
+			snapdev1   = poptGetArg(cdCon);
+			snapdev2   = poptGetArg(cdCon);
 
-		if (changelist == NULL)
-			cdUsage(cdCon, 1, "Specify a changelist", ".e.g., cl01 \n");
-		if (deltafile == NULL)
-			cdUsage(cdCon, 1, "Specify a deltafile", ".e.g., df01 \n");
-		if (snapdev1 == NULL)
-			cdUsage(cdCon, 1, "Specify a snapdev1", ".e.g., /dev/mapper/snap0 \n");
-		if (snapdev2 == NULL)
-			cdUsage(cdCon, 1, "Specify a snapdev2", ".e.g., /dev/mapper/snap1 \n");
-		if (poptPeekArg(cdCon) != NULL)
-			cdUsage(cdCon, 1, "Too many arguments inputted", "\n");
+			if (changelist == NULL)
+				cdUsage(cdCon, 1, "Specify a changelist", ".e.g., cl01 \n");
+			if (deltafile == NULL)
+				cdUsage(cdCon, 1, "Specify a deltafile", ".e.g., df01 \n");
+			if (snapdev1 == NULL)
+				cdUsage(cdCon, 1, "Specify a snapdev1", ".e.g., /dev/mapper/snap0 \n");
+			if (snapdev2 == NULL)
+				cdUsage(cdCon, 1, "Specify a snapdev2", ".e.g., /dev/mapper/snap1 \n");
+			if (poptPeekArg(cdCon) != NULL)
+				cdUsage(cdCon, 1, "Too many arguments inputted", "\n");
 
-		int ret = ddsnap_generate_delta(mode, gzip_level, changelist, deltafile, snapdev1, snapdev2);
+			int ret = ddsnap_generate_delta(mode, gzip_level, changelist, deltafile, snapdev1, snapdev2);
 
-		poptFreeContext(cdCon);
-		return ret;
-	}
+			poptFreeContext(cdCon);
+			return ret;
+		}
 		if (strcmp(subcommand, "apply") == 0) {
 			if (argc != 5) {
 				printf("usage: %s %s apply <deltafile> <dev>\n", argv[0], argv[1]);
-			return 1;
-		}
+				return 1;
+			}
 			return ddsnap_apply_delta(argv[3], argv[4]);
-	}
+		}
 		if (strcmp(subcommand, "send") == 0) {
-		poptContext cdCon;
+			poptContext cdCon;
 
-		struct poptOption options[] = {
-			{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &cdOptions, 0, NULL, NULL },
-			POPT_AUTOHELP
-			POPT_TABLEEND
-		};
+			struct poptOption options[] = {
+				{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &cdOptions, 0, NULL, NULL },
+				POPT_AUTOHELP
+				POPT_TABLEEND
+			};
 
 			cdCon = poptGetContext(NULL, argc-2, (const char **)&(argv[2]), options, 0);
-		poptSetOtherOptionHelp(cdCon, "<sockname> <snapshot1> <snapshot2> <snapdev1> <snapdev2> <remsnapshot> <host>[:<port>]");
+			poptSetOtherOptionHelp(cdCon, "<sockname> <snapshot1> <snapshot2> <snapdev1> <snapdev2> <remsnapshot> <host>[:<port>]");
 
-		char c;
+			char c;
 
-		while ((c = poptGetNextOpt(cdCon)) >= 0);
-		if (c < -1) {
-			fprintf(stderr, "%s: %s: %s\n", argv[0], poptBadOption(cdCon, POPT_BADOPTION_NOALIAS), poptStrerror(c));
-			poptFreeContext(cdCon);
-			return 1;
-		}
+			while ((c = poptGetNextOpt(cdCon)) >= 0);
+			if (c < -1) {
+				fprintf(stderr, "%s: %s: %s\n", argv[0], poptBadOption(cdCon, POPT_BADOPTION_NOALIAS), poptStrerror(c));
+				poptFreeContext(cdCon);
+				return 1;
+			}
 
-		/* Make sure the options are mutually exclusive */
-		if (xd+raw+test+opt_comp > 1) {
+			/* Make sure the options are mutually exclusive */
+			if (xd+raw+test+opt_comp > 1) {
 				fprintf(stderr, "%s %s: Too many chunk options were selected.\nPlease select only one: -x, -r, -t or -o\n", argv[0], argv[1]);
-			poptPrintUsage(cdCon, stderr, 0);
+				poptPrintUsage(cdCon, stderr, 0);
+				poptFreeContext(cdCon);
+				return 1;
+			}
+
+			u32 mode = (test ? TEST : (raw ? RAW : (xd ? XDELTA : OPT_COMP)));
+			if (opt_comp)
+				gzip_level = MAX_GZIP_COMP;
+
+			trace_on(fprintf(stderr, "xd=%d raw=%d test=%d opt_comp=%d mode=%u gzip_level=%d\n", xd, raw, test, opt_comp, mode, gzip_level););
+
+			char const *sockname, *snapid1str, *snapid2str, *snapdev1, *snapdev2, *snapidremstr, *hoststr;
+
+			sockname  = poptGetArg(cdCon);
+			snapid1str = poptGetArg(cdCon);
+			snapid2str = poptGetArg(cdCon);
+			snapdev1 = poptGetArg(cdCon);
+			snapdev2 = poptGetArg(cdCon);
+			snapidremstr = poptGetArg(cdCon);
+			hoststr = poptGetArg(cdCon);
+
+			if (hoststr == NULL)
+				cdUsage(cdCon, 1, argv[0], "Not enough arguments to send-delta\n");
+			if (poptPeekArg(cdCon) != NULL)
+				cdUsage(cdCon, 1, argv[0], "Too many arguments to send-delta\n");
+
 			poptFreeContext(cdCon);
-			return 1;
-		}
 
-		u32 mode = (test ? TEST : (raw ? RAW : (xd ? XDELTA : OPT_COMP)));
-		if (opt_comp)
-			gzip_level = MAX_GZIP_COMP;
+			char *hostname;
+			unsigned port;
 
-		trace_on(fprintf(stderr, "xd=%d raw=%d test=%d opt_comp=%d mode=%u gzip_level=%d\n", xd, raw, test, opt_comp, mode, gzip_level););
+			hostname = strdup(hoststr);
 
-		char const *sockname, *snapid1str, *snapid2str, *snapdev1, *snapdev2, *snapidremstr, *hoststr;
+			if (strchr(hostname, ':')) {
+				unsigned int len = strlen(hostname);
+				port = parse_port(hostname, &len);
+				hostname[len] = '\0';
+			} else {
+				port = DEFAULT_REPLICATION_PORT;
+			}
 
-		sockname  = poptGetArg(cdCon);
-		snapid1str = poptGetArg(cdCon);
-		snapid2str = poptGetArg(cdCon);
-		snapdev1 = poptGetArg(cdCon);
-		snapdev2 = poptGetArg(cdCon);
-		snapidremstr = poptGetArg(cdCon);
-		hoststr = poptGetArg(cdCon);
+			int snapid1, snapid2, remsnapid;
 
-		if (hoststr == NULL)
-			cdUsage(cdCon, 1, argv[0], "Not enough arguments to send-delta\n");
-		if (poptPeekArg(cdCon) != NULL)
-			cdUsage(cdCon, 1, argv[0], "Too many arguments to send-delta\n");
-
-		poptFreeContext(cdCon);
-
-		char *hostname;
-		unsigned port;
-
-		hostname = strdup(hoststr);
-
-		if (strchr(hostname, ':')) {
-			unsigned int len = strlen(hostname);
-			port = parse_port(hostname, &len);
-			hostname[len] = '\0';
-		} else {
-			port = DEFAULT_REPLICATION_PORT;
-		}
-
-		int snapid1, snapid2, remsnapid;
-
-		if (parse_snapid(snapid1str, &snapid1) < 0) {
+			if (parse_snapid(snapid1str, &snapid1) < 0) {
 				fprintf(stderr, "%s %s: invalid snapshot id %s\n", argv[0], argv[1], snapid1str);
-			return 1;
-		}
+				return 1;
+			}
 
-		if (parse_snapid(snapid2str, &snapid2) < 0) {
+			if (parse_snapid(snapid2str, &snapid2) < 0) {
 				fprintf(stderr, "%s %s: invalid snapshot id %s\n", argv[0], argv[1], snapid2str);
-			return 1;
-		}
+				return 1;
+			}
 
-		if (parse_snapid(snapidremstr, &remsnapid) < 0) {
+			if (parse_snapid(snapidremstr, &remsnapid) < 0) {
 				fprintf(stderr, "%s %s: invalid snapshot id %s\n", argv[0], argv[1], snapidremstr);
-			return 1;
-		}
+				return 1;
+			}
 
-		int sock = create_socket(sockname);
+			int sock = create_socket(sockname);
 
-		int ds_fd = open_socket(hostname, port);
-		if (ds_fd < 0) {
+			int ds_fd = open_socket(hostname, port);
+			if (ds_fd < 0) {
 				fprintf(stderr, "%s %s: unable to connect to downstream server %s port %u\n", argv[0], argv[1], hostname, port);
-			return 1;
+				return 1;
+			}
+
+			int ret = ddsnap_send_delta(sock, snapid1, snapid2, snapdev1, snapdev2, remsnapid, mode, gzip_level, ds_fd);
+			close(ds_fd);
+			close(sock);
+
+			return ret;
 		}
-
-		int ret = ddsnap_send_delta(sock, snapid1, snapid2, snapdev1, snapdev2, remsnapid, mode, gzip_level, ds_fd);
-		close(ds_fd);
-		close(sock);
-
-		return ret;
-	}
 		if (strcmp(subcommand, "listen") == 0) {
-		char const *snapdevstem;
-		char const *hostspec;
+			char const *snapdevstem;
+			char const *hostspec;
 
-		struct poptOption options[] = {
-			{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &serverOptions, 0, NULL, NULL },
-			POPT_AUTOHELP
-			POPT_TABLEEND
-		};
+			struct poptOption options[] = {
+				{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &serverOptions, 0, NULL, NULL },
+				POPT_AUTOHELP
+				POPT_TABLEEND
+			};
 
 			poptContext dsCon = poptGetContext(NULL, argc-2, (const char **)&(argv[2]), options, 0);
 			poptSetOtherOptionHelp(dsCon, "<snapdevstem> <host>[:<port>]");
@@ -2350,16 +2349,16 @@ int main(int argc, char *argv[])
 			if (dsOpt < -1) {
 				fprintf(stderr, "%s %s: %s: %s\n", command, subcommand, poptBadOption(dsCon, POPT_BADOPTION_NOALIAS), poptStrerror(dsOpt));
 				poptFreeContext(dsCon);
-			return 1;
-		}
+				return 1;
+			}
 
 			snapdevstem = poptGetArg(dsCon);
-		if (snapdevstem == NULL) {
+			if (snapdevstem == NULL) {
 				fprintf(stderr, "%s %s: snapshot device stem must be specified\n", command, subcommand);
 				poptPrintUsage(dsCon, stderr, 0);
 				poptFreeContext(dsCon);
-			return 1;
-		}
+				return 1;
+			}
 
 			hostspec = poptGetArg(dsCon);
 
@@ -2367,57 +2366,57 @@ int main(int argc, char *argv[])
 				fprintf(stderr, "%s %s: only one host may be specified\n", command, subcommand);
 				poptPrintUsage(dsCon, stderr, 0);
 				poptFreeContext(dsCon);
-			return 1;
-		}
+				return 1;
+			}
 
 			poptFreeContext(dsCon);
 
-		char *hostname;
-		unsigned port;
+			char *hostname;
+			unsigned port;
 
-		if (!hostspec) {
-			hostname = strdup("0.0.0.0");
-			port = DEFAULT_REPLICATION_PORT;
-		} else {
-			hostname = strdup(hostspec);
-
-			if (strchr(hostname, ':')) {
-				unsigned int len = strlen(hostname);
-				port = parse_port(hostname, &len);
-				hostname[len] = '\0';
-			} else {
+			if (!hostspec) {
+				hostname = strdup("0.0.0.0");
 				port = DEFAULT_REPLICATION_PORT;
-			}
-		}
+			} else {
+				hostname = strdup(hostspec);
 
-		int sock = bind_socket(hostname, port);
-		if (sock < 0) {
+				if (strchr(hostname, ':')) {
+					unsigned int len = strlen(hostname);
+					port = parse_port(hostname, &len);
+					hostname[len] = '\0';
+				} else {
+					port = DEFAULT_REPLICATION_PORT;
+				}
+			}
+
+			int sock = bind_socket(hostname, port);
+			if (sock < 0) {
 				fprintf(stderr, "%s %s: unable to bind to %s port %u\n", command, subcommand, hostname, port);
-			return 1;
-		}
-
-		if (!nobg) {
-			pid_t pid;
-
-			if (!logfile)
-				logfile = "/var/log/ddsnap.delta.log";
-			pid = daemonize(logfile, pidfile);
-			if (pid == -1)
-				error("Error: could not daemonize\n");
-			if (pid != 0) {
-				trace_on(printf("pid = %lu\n", (unsigned long)pid););
-				return 0;
-			}
-		}
-
-		return ddsnap_delta_server(sock, snapdevstem);
-	}
-		fprintf(stderr, "%s %s: unrecognized delta subcommand: %s.\n", argv[0], command, subcommand);
 				return 1;
 			}
+
+			if (!nobg) {
+				pid_t pid;
+
+				if (!logfile)
+					logfile = "/var/log/ddsnap.delta.log";
+				pid = daemonize(logfile, pidfile);
+				if (pid == -1)
+					error("Error: could not daemonize\n");
+				if (pid != 0) {
+					trace_on(printf("pid = %lu\n", (unsigned long)pid););
+					return 0;
+				}
+			}
+
+			return ddsnap_delta_server(sock, snapdevstem);
+		}
+
+		fprintf(stderr, "%s %s: unrecognized delta subcommand: %s.\n", argv[0], command, subcommand);
+		return 1;
+	}
 
 	fprintf(stderr, "%s: unrecognized subcommand: %s.\n", argv[0], command);
 	
 	return 1;
 }
-
