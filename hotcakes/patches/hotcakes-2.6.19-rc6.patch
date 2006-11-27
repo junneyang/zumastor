@@ -1,7 +1,7 @@
-diff -rup linux-2.6.18-rc6.clean/drivers/md/Kconfig linux-2.6.18-rc6/drivers/md/Kconfig
---- linux-2.6.18-rc6.clean/drivers/md/Kconfig	2006-11-27 13:40:58.000000000 -0800
-+++ linux-2.6.18-rc6/drivers/md/Kconfig	2006-11-27 14:11:26.000000000 -0800
-@@ -249,5 +249,21 @@ config DM_MULTIPATH_EMC
+diff -rup linux-2.6.19-rc6.clean/drivers/md/Kconfig linux-2.6.19-rc6/drivers/md/Kconfig
+--- linux-2.6.19-rc6.clean/drivers/md/Kconfig	2006-11-27 13:44:21.000000000 -0800
++++ linux-2.6.19-rc6/drivers/md/Kconfig	2006-11-27 14:11:56.000000000 -0800
+@@ -261,6 +261,22 @@ config DM_MULTIPATH_EMC
  	---help---
  	  Multipath support for EMC CX/AX series hardware.
  
@@ -23,9 +23,10 @@ diff -rup linux-2.6.18-rc6.clean/drivers/md/Kconfig linux-2.6.18-rc6/drivers/md/
 +
  endmenu
  
-diff -rup linux-2.6.18-rc6.clean/drivers/md/Makefile linux-2.6.18-rc6/drivers/md/Makefile
---- linux-2.6.18-rc6.clean/drivers/md/Makefile	2006-11-27 13:40:58.000000000 -0800
-+++ linux-2.6.18-rc6/drivers/md/Makefile	2006-11-27 14:11:26.000000000 -0800
+ endif
+diff -rup linux-2.6.19-rc6.clean/drivers/md/Makefile linux-2.6.19-rc6/drivers/md/Makefile
+--- linux-2.6.19-rc6.clean/drivers/md/Makefile	2006-11-27 13:44:21.000000000 -0800
++++ linux-2.6.19-rc6/drivers/md/Makefile	2006-11-27 14:11:56.000000000 -0800
 @@ -36,6 +36,8 @@ obj-$(CONFIG_DM_MULTIPATH_EMC)	+= dm-emc
  obj-$(CONFIG_DM_SNAPSHOT)	+= dm-snapshot.o
  obj-$(CONFIG_DM_MIRROR)		+= dm-mirror.o
@@ -35,9 +36,9 @@ diff -rup linux-2.6.18-rc6.clean/drivers/md/Makefile linux-2.6.18-rc6/drivers/md
  
  quiet_cmd_unroll = UNROLL  $@
        cmd_unroll = $(PERL) $(srctree)/$(src)/unroll.pl $(UNROLL) \
-diff -rup linux-2.6.18-rc6.clean/drivers/md/dm-ddraid.c linux-2.6.18-rc6/drivers/md/dm-ddraid.c
---- linux-2.6.18-rc6.clean/drivers/md/dm-ddraid.c	2006-11-27 13:42:54.000000000 -0800
-+++ linux-2.6.18-rc6/drivers/md/dm-ddraid.c	2006-11-27 14:19:50.000000000 -0800
+diff -rup linux-2.6.19-rc6.clean/drivers/md/dm-ddraid.c linux-2.6.19-rc6/drivers/md/dm-ddraid.c
+--- linux-2.6.19-rc6.clean/drivers/md/dm-ddraid.c	2006-11-27 14:22:53.000000000 -0800
++++ linux-2.6.19-rc6/drivers/md/dm-ddraid.c	2006-11-27 14:25:31.000000000 -0800
 @@ -0,0 +1,1621 @@
 +#include <linux/fs.h>
 +#include <linux/slab.h>
@@ -1660,9 +1661,9 @@ diff -rup linux-2.6.18-rc6.clean/drivers/md/dm-ddraid.c linux-2.6.18-rc6/drivers
 +
 +module_init(dm_ddraid_init);
 +module_exit(dm_ddraid_exit);
-diff -rup linux-2.6.18-rc6.clean/drivers/md/dm-ddraid.h linux-2.6.18-rc6/drivers/md/dm-ddraid.h
---- linux-2.6.18-rc6.clean/drivers/md/dm-ddraid.h	2006-11-27 13:42:54.000000000 -0800
-+++ linux-2.6.18-rc6/drivers/md/dm-ddraid.h	2006-11-27 14:19:50.000000000 -0800
+diff -rup linux-2.6.19-rc6.clean/drivers/md/dm-ddraid.h linux-2.6.19-rc6/drivers/md/dm-ddraid.h
+--- linux-2.6.19-rc6.clean/drivers/md/dm-ddraid.h	2006-11-27 14:22:53.000000000 -0800
++++ linux-2.6.19-rc6/drivers/md/dm-ddraid.h	2006-11-27 14:25:31.000000000 -0800
 @@ -0,0 +1,47 @@
 +#define PACKED __attribute__ ((packed))
 +
@@ -1711,9 +1712,9 @@ diff -rup linux-2.6.18-rc6.clean/drivers/md/dm-ddraid.h linux-2.6.18-rc6/drivers
 +
 +// bios submitted before server arrives must be split conservatively (see "bogus")
 +#define MIN_REGION_BITS 12
-diff -rup linux-2.6.18-rc6.clean/drivers/md/dm-ddsnap.c linux-2.6.18-rc6/drivers/md/dm-ddsnap.c
---- linux-2.6.18-rc6.clean/drivers/md/dm-ddsnap.c	2006-11-27 13:42:54.000000000 -0800
-+++ linux-2.6.18-rc6/drivers/md/dm-ddsnap.c	2006-11-27 14:19:50.000000000 -0800
+diff -rup linux-2.6.19-rc6.clean/drivers/md/dm-ddsnap.c linux-2.6.19-rc6/drivers/md/dm-ddsnap.c
+--- linux-2.6.19-rc6.clean/drivers/md/dm-ddsnap.c	2006-11-27 14:22:53.000000000 -0800
++++ linux-2.6.19-rc6/drivers/md/dm-ddsnap.c	2006-11-27 14:25:31.000000000 -0800
 @@ -0,0 +1,1197 @@
 +#include <linux/fs.h>
 +#include <linux/slab.h>
@@ -2912,9 +2913,9 @@ diff -rup linux-2.6.18-rc6.clean/drivers/md/dm-ddsnap.c linux-2.6.18-rc6/drivers
 +module_exit(dm_ddsnap_exit);
 +
 +MODULE_LICENSE("GPL");
-diff -rup linux-2.6.18-rc6.clean/drivers/md/dm-ddsnap.h linux-2.6.18-rc6/drivers/md/dm-ddsnap.h
---- linux-2.6.18-rc6.clean/drivers/md/dm-ddsnap.h	2006-11-27 13:42:54.000000000 -0800
-+++ linux-2.6.18-rc6/drivers/md/dm-ddsnap.h	2006-11-27 14:19:50.000000000 -0800
+diff -rup linux-2.6.19-rc6.clean/drivers/md/dm-ddsnap.h linux-2.6.19-rc6/drivers/md/dm-ddsnap.h
+--- linux-2.6.19-rc6.clean/drivers/md/dm-ddsnap.h	2006-11-27 14:22:53.000000000 -0800
++++ linux-2.6.19-rc6/drivers/md/dm-ddsnap.h	2006-11-27 14:25:31.000000000 -0800
 @@ -0,0 +1,105 @@
 +#define PACKED __attribute__ ((packed))
 +#define MAGIC  0xadbe
@@ -3021,12 +3022,12 @@ diff -rup linux-2.6.18-rc6.clean/drivers/md/dm-ddsnap.h linux-2.6.18-rc6/drivers
 +struct rwmessage { struct head head; struct rw_request body; };
 +struct messagebuf { struct head head; char body[maxbody]; };
 +/* ...decruft me */
-diff -rup linux-2.6.18-rc6.clean/net/socket.c linux-2.6.18-rc6/net/socket.c
---- linux-2.6.18-rc6.clean/net/socket.c	2006-11-27 13:40:59.000000000 -0800
-+++ linux-2.6.18-rc6/net/socket.c	2006-11-27 14:11:26.000000000 -0800
-@@ -2161,6 +2161,12 @@ static long compat_sock_ioctl(struct fil
+diff -rup linux-2.6.19-rc6.clean/net/socket.c linux-2.6.19-rc6/net/socket.c
+--- linux-2.6.19-rc6.clean/net/socket.c	2006-11-27 13:44:22.000000000 -0800
++++ linux-2.6.19-rc6/net/socket.c	2006-11-27 14:11:56.000000000 -0800
+@@ -2252,6 +2252,12 @@ int kernel_sock_ioctl(struct socket *soc
+ 	return err;
  }
- #endif
  
 +/* Cluster devices need these, or better: kernel interfaces */
 +
