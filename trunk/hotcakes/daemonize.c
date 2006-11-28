@@ -2,10 +2,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stddef.h>
+#include <time.h>
 #include <unistd.h>
 #include <errno.h>
 #include <signal.h>
 #include <sys/types.h>
+#include <sys/time.h>
 #include "trace.h"
 #include "daemonize.h"
 
@@ -69,6 +71,19 @@ pid_t daemonize(char const *logfile, char const *pidfile)
 				if (fclose(fp) < 0)
 					warn("error while closing pid file \"%s\" after writing: %s", pidfile, strerror(errno));
 			}
+		}
+
+		if (logfile)
+		{
+			time_t now;
+			char *ctime_str;
+		       
+			now = time(NULL);
+			ctime_str = ctime(&now);
+			if (ctime_str[strlen(ctime_str)-1] == '\n')
+				ctime_str[strlen(ctime_str)-1] = '\0';
+
+			warn("starting at %s", ctime_str);
 		}
 
 		return 0;
