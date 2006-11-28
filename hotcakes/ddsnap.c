@@ -2325,6 +2325,15 @@ int main(int argc, char *argv[])
 				return 1;
 			}
 
+			struct sigaction ign_sa;
+
+			ign_sa.sa_handler = SIG_IGN;
+			sigemptyset(&ign_sa.sa_mask);
+			ign_sa.sa_flags = 0;
+
+			if (sigaction(SIGPIPE, &ign_sa, NULL) == -1)
+				warn("could not disable SIGPIPE: %s", strerror(errno));
+
 			int ret = ddsnap_send_delta(sock, snapid1, snapid2, snapdev1, snapdev2, remsnapid, mode, gzip_level, ds_fd);
 			close(ds_fd);
 			close(sock);
