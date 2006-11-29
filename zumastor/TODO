@@ -1,0 +1,28 @@
+To do:
+
+ - start ddsnap daemons
+
+ - add use counts
+
+ - Hook up snapshot the rest of the way
+    - Create devmapper device on snapshot create
+    - Delete devmapper device on snapshot delete
+
+ - Remote operations
+    - ssh to start downstream listen
+       - confirm downstream holds expected snapshot
+    - ssh to set new downstream snapshot
+    - downstream node kicks upstream on zumastor start via ssh
+
+ - snapshot and replicate commands should wait on ok/err message?
+
+Done:
+
+ - snapshot rotation
+ - init script
+ - snapshot, replication daemons
+ - admin database editing commands
+ - Hook up master snapshot schedule to cron
+ - set up development tree
+ - install/uninstall/develop scripts
+ - create/delete ddsnap sockets

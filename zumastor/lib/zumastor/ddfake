@@ -1,0 +1,40 @@
+# Zumastor Linux Storage Server
+# Copyright (c) 2006 Google Inc.
+# Author: Daniel Phillips <phillips@google.com>
+# Licensed under the GNU GPL version 2
+
+function dmsetup {
+case $1 in
+create)
+	read args
+	echo dmsetup create $2 $args
+	;;
+remove)
+	echo dmsetup remove $2
+	;;
+*)
+	return 1
+	;;
+esac
+}
+
+function ddsnap {
+case $1 in
+status)
+	case $3 in
+	--size)
+		echo 12345
+		;;
+	--list)
+		echo 101 102 103
+		;;
+	*)
+		return 1
+		;;
+	esac
+	;;
+*)
+	return 1
+	;;
+esac
+}
