@@ -7,7 +7,8 @@ enum csnap_codes
 {
 	REPLY_ERROR = 0xbead0000,
 	IDENTIFY,
-	REPLY_IDENTIFY,
+	IDENTIFY_OK,
+	IDENTIFY_ERROR,
 	QUERY_WRITE,
 	REPLY_ORIGIN_WRITE,
 	REPLY_SNAPSHOT_WRITE,
@@ -23,7 +24,8 @@ enum csnap_codes
 	INITIALIZE_SNAPSTORE,
 	NEED_SERVER,
 	CONNECT_SERVER,
-	REPLY_CONNECT_SERVER,
+	CONNECT_SERVER_OK,
+	CONNECT_SERVER_ERROR,
 	CONTROL_SOCKET,
 	SERVER_READY,
 	START_SERVER,
@@ -55,6 +57,8 @@ enum csnap_codes
 enum csnap_error_codes
 {
 	REPLY_ERROR_REFUSED = 0x01,
+	REPLY_ERROR_SIZE_MISMATCH,
+	REPLY_ERROR_OFFSET_MISMATCH,
 	REPLY_ERROR_OTHER,
 };
 
@@ -63,7 +67,10 @@ enum csnap_error_codes
 struct reply_error { uint32_t err; uint32_t trackno; } PACKED;
 struct match_id { uint64_t id; uint64_t mask; } PACKED;
 struct set_id { uint64_t id; } PACKED;
-struct identify { uint64_t id; int32_t snap; uint32_t chunksize_bits; } PACKED;
+struct identify { uint64_t id; uint32_t snap; uint64_t off; uint64_t len; } PACKED; // off, len are in sectors  
+struct identify_ok { uint32_t chunksize_bits; } PACKED;
+struct identify_error { uint32_t err; char msg[]; } PACKED; // !!! why not use reply_error and include msg
+struct connect_server_error { uint32_t err; char msg[]; } PACKED; // !!! why not use reply_error and include msg
 struct create_snapshot { uint32_t snap; } PACKED;
 struct generate_changelist { uint32_t snap1; uint32_t snap2; } PACKED;
 struct snapinfo { uint64_t snap; int8_t prio; uint8_t usecnt; char zero[3]; uint64_t ctime; } PACKED;
