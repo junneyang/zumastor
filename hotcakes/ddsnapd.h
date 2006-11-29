@@ -44,7 +44,8 @@ struct superblock
 		u32 etree_levels;
 		s32 journal_base, journal_next, journal_size;
 		u32 sequence;
-		struct allocation_info {
+		struct allocation_info
+		{
 			sector_t bitmap_base;
 			sector_t chunks;
 			sector_t freechunks;
