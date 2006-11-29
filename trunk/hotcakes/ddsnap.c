@@ -51,18 +51,21 @@
 
 #define MAX_MEM_SIZE (1 << 20)
 
-struct cl_header {
+struct cl_header
+{
 	char magic[MAGIC_SIZE];
 };
 
-struct delta_header {
+struct delta_header
+{
 	char magic[MAGIC_SIZE];
 	u64 chunk_num;
 	u32 chunk_size;
 	u32 mode;
 };
 
-struct delta_extent_header {
+struct delta_extent_header
+{
 	u32 magic_num;
 	u32 setting;
 	u64 data_length;
@@ -108,15 +111,10 @@ static int create_socket(char const *sockname)
 	return sock;
 }
 
-static int parse_snapid(char const *snapstr, int *snapid)
+static int parse_snaptag(char const *snapstr, u32 *snaptag)
 {
 	if (snapstr[0] == '\0')
 		return -1;
-
-	if (strcmp(snapstr, "-1") == 0) {
-		*snapid = -1;
-		return 0;
-	}
 
 	unsigned long num;
 	char *endptr;
@@ -126,10 +124,10 @@ static int parse_snapid(char const *snapstr, int *snapid)
 	if (*endptr != '\0')
 		return -1;
 
-	if (num >= MAX_SNAPSHOTS)
+	if (num >= (u32)~0UL)
 		return -1;
 
-	*snapid = num;
+	*snaptag = num;
 	return 0;
 }
 
@@ -607,7 +605,7 @@ static int ddsnap_generate_delta(u32 mode, int level, char const *changelistname
 	return 0;
 }
 
-static struct change_list *stream_changelist(int serv_fd, int snap1, int snap2)
+static struct change_list *stream_changelist(int serv_fd, u32 snap1, u32 snap2)
 {
 	int err;
 
@@ -669,14 +667,14 @@ static struct change_list *stream_changelist(int serv_fd, int snap1, int snap2)
 	return cl;
 }
 
-static int ddsnap_send_delta(int serv_fd, int snap1, int snap2, char const *snapdev1, char const *snapdev2, int remsnap, u32 mode, int level, int ds_fd)
+static int ddsnap_send_delta(int serv_fd, u32 snap1, u32 snap2, char const *snapdev1, char const *snapdev2, u32 remsnap, u32 mode, int level, int ds_fd)
 {
 	struct change_list *cl;
 
-	trace_on(printf("requesting changelist from snapshot %d to %d\n", snap1, snap2););
+	trace_on(printf("requesting changelist from snapshot %u to %u\n", snap1, snap2););
 
 	if ((cl = stream_changelist(serv_fd, snap1, snap2)) == NULL) {
-		fprintf(stderr, "could not receive change list for snapshots %d and %d\n", snap1, snap2);
+		fprintf(stderr, "could not receive change list for snapshots %u and %u\n", snap1, snap2);
 		return 1;
 	}
 
@@ -713,7 +711,7 @@ static int ddsnap_send_delta(int serv_fd, int snap1, int snap2, char const *snap
 	/* stream delta */
 
 	if (generate_delta_extents(mode, level, cl, ds_fd, snapdev1, snapdev2, TRUE) < 0) {
-		fprintf(stderr, "could not send delta for snapshot devices %s and %s downstream\n", snapdev1, snapdev2);
+		fprintf(stderr, "could not send delta downstream for snapshot devices %s and %s\n", snapdev1, snapdev2);
 		return 1;
 	}
 
@@ -734,7 +732,7 @@ static int ddsnap_send_delta(int serv_fd, int snap1, int snap2, char const *snap
 
 	/* success */
 
-	trace_on(fprintf(stderr, "downstream server successfully applied delta to snapshot %d\n", remsnap););
+	trace_on(fprintf(stderr, "downstream server successfully applied delta to snapshot %u\n", remsnap););
 
 	return 0;
 }
@@ -1061,7 +1059,7 @@ static int list_snapshots(int serv_fd)
 {
 	int err;
 
-	if ((err = outbead(serv_fd, LIST_SNAPSHOTS, struct create_snapshot, 0))) {
+	if ((err = outbead(serv_fd, LIST_SNAPSHOTS, struct create_snapshot, 0))) { /* FIXME: why create_snapshot? */
 		error("%s (%i)", strerror(-err), -err);
 		return 1;
 	}
@@ -1087,7 +1085,7 @@ static int list_snapshots(int serv_fd)
 	if (head.length != sizeof(int32_t) + count * sizeof(struct snapinfo))
 		error("reply length mismatch: expected %u, actual %u", sizeof(int32_t) + count * sizeof(struct snapinfo), head.length);
 
-	struct snapinfo * buffer = (struct snapinfo *)malloc(count * sizeof(struct snapinfo));
+	struct snapinfo *buffer = malloc(count * sizeof(struct snapinfo));
 
 	if (readpipe(serv_fd, buffer, count * sizeof(struct snapinfo)) < 0)
 		return eek();
@@ -1097,10 +1095,10 @@ static int list_snapshots(int serv_fd)
 	int i;
 
 	for (i = 0; i < count; i++) {
-		printf("Snapshot[%d]:\n", i);
-		printf("\ttag= "U64FMT" \t", buffer[i].snap);
-		printf("priority= %d \t", buffer[i].prio);
-		printf("use count= %d \t", buffer[i].usecnt);
+		printf("Snapshot %d:\n", i);
+		printf("\ttag= %u \t", buffer[i].snap);
+		printf("priority= %d \t", (int)buffer[i].prio);
+		printf("use count= %u \t", (unsigned int)buffer[i].usecnt);
 
 		time_t snap_time = (time_t)buffer[i].ctime;
 		char *ctime_str = ctime(&snap_time);
@@ -1113,7 +1111,7 @@ static int list_snapshots(int serv_fd)
 	return 0;
 }
 
-static int ddsnap_generate_changelist(int serv_fd, char const *changelist_filename, int snap1, int snap2)
+static int ddsnap_generate_changelist(int serv_fd, char const *changelist_filename, u32 snap1, u32 snap2)
 {
 	int change_fd = open(changelist_filename, O_CREAT | O_TRUNC | O_WRONLY, S_IRUSR | S_IWUSR);
 
@@ -1123,7 +1121,7 @@ static int ddsnap_generate_changelist(int serv_fd, char const *changelist_filena
 	struct change_list *cl;
 
 	if ((cl = stream_changelist(serv_fd, snap1, snap2)) == NULL) {
-		fprintf(stderr, "could not generate change list between snapshots %d and %d\n", snap1, snap2);
+		fprintf(stderr, "could not generate change list between snapshots %u and %u\n", snap1, snap2);
 		return 1;
 	}
 
@@ -1137,9 +1135,9 @@ static int ddsnap_generate_changelist(int serv_fd, char const *changelist_filena
 	return 0;
 }
 
-static int delete_snapshot(int sock, int snap)
+static int delete_snapshot(int sock, u32 snaptag)
 {
-	if (outbead(sock, DELETE_SNAPSHOT, struct create_snapshot, snap) < 0)
+	if (outbead(sock, DELETE_SNAPSHOT, struct create_snapshot, snaptag) < 0) /* FIXME: why create_snapshot? */
 		return eek();
 
 	struct head head;
@@ -1157,7 +1155,7 @@ static int delete_snapshot(int sock, int snap)
 
 	if (head.code != REPLY_DELETE_SNAPSHOT) {
 		if (head.code == REPLY_ERROR) {
-			fprintf(stderr, "Unable to delete snapshot %d\n", snap);
+			fprintf(stderr, "Unable to delete snapshot %u\n", snaptag);
 			return 1;
 		}
 		error("received unexpected code=%x length=%u", head.code, head.length);
@@ -1166,9 +1164,9 @@ static int delete_snapshot(int sock, int snap)
 	return 0;
 }
 
-static int create_snapshot(int sock, int snap)
+static int create_snapshot(int sock, u32 snaptag)
 {
-	if (outbead(sock, CREATE_SNAPSHOT, struct create_snapshot, snap) < 0)
+	if (outbead(sock, CREATE_SNAPSHOT, struct create_snapshot, snaptag) < 0)
 		return eek();
 
 	struct head head;
@@ -1185,7 +1183,7 @@ static int create_snapshot(int sock, int snap)
 
 	if (head.code != REPLY_CREATE_SNAPSHOT) {
 		if (head.code == REPLY_ERROR) {
-			fprintf(stderr, "Unable to create snapshot %d\n", snap);
+			fprintf(stderr, "Unable to create snapshot %u\n", snaptag);
 			return 1;
 		}
 		error("received unexpected code=%x length=%u", head.code, head.length);
@@ -1194,9 +1192,9 @@ static int create_snapshot(int sock, int snap)
 	return 0;
 }
 
-static int set_priority(int sock, uint32_t tag_val, int8_t pri_val)
+static int set_priority(int sock, u32 snaptag, int8_t pri_val)
 {
-	if (outbead(sock, SET_PRIORITY, struct snapinfo, tag_val, pri_val) < 0)
+	if (outbead(sock, SET_PRIORITY, struct snapinfo, snaptag, pri_val) < 0)
 		return eek();
 
 	struct head head;
@@ -1217,11 +1215,11 @@ static int set_priority(int sock, uint32_t tag_val, int8_t pri_val)
 	return 0;
 }
 
-static int set_usecount(int sock, uint32_t tag_val, const char * op)
+static int set_usecount(int sock, u32 snaptag, const char *op)
 {
 	int usecnt = (strcmp(op, "inc") == 0) ? 1 : ((strcmp(op, "dec") == 0) ? -1 : 0);
 
-	if (outbead(sock, SET_USECOUNT, struct snapinfo, tag_val, 0, usecnt) < 0)
+	if (outbead(sock, SET_USECOUNT, struct snapinfo, snaptag, 0, usecnt) < 0)
 		return eek();
 
 	return 0;
@@ -1284,8 +1282,8 @@ static int ddsnap_delta_server(int lsock, char const *snapdevstem)
 
 			memcpy(&body, message.body, sizeof(body));
 
-			if (body.snapid < -1 || body.snapid >= MAX_SNAPSHOTS) {
-				fprintf(stderr, "invalid snapshot id %d in SEND_DELTA\n", body.snapid);
+			if (body.snap == (u32)~0UL) {
+				fprintf(stderr, "invalid snapshot %u in SEND_DELTA\n", body.snap);
 				outbead(csock, REPLY_ERROR, struct reply_error, REPLY_ERROR_OTHER, 0);
 				goto cleanup_connection;
 			}
@@ -1303,7 +1301,7 @@ static int ddsnap_delta_server(int lsock, char const *snapdevstem)
 				outbead(csock, REPLY_ERROR, struct reply_error, REPLY_ERROR_OTHER, 0);
 				goto cleanup_connection;
 			}
-			sprintf(remotedev, "%s%d", snapdevstem, body.snapid);
+			sprintf(remotedev, "%s%u", snapdevstem, body.snap);
 
 			/* FIXME: verify snapshot exists */
 
@@ -1344,22 +1342,22 @@ static int ddsnap_delta_server(int lsock, char const *snapdevstem)
 	return 0;
 }
 
-static struct status *get_snap_status(struct status_message *message, int snap)
+static struct status *get_snap_status(struct status_message *message, unsigned int snaptag)
 {
 	struct status *status;
 
 	status = (struct status *)(message->status_data +
-					snap * (sizeof(struct status) +
+					snaptag * (sizeof(struct status) +
 					message->num_columns * sizeof(status->chunk_count[0])));
 
 	return status;
 }
 
-static int ddsnap_get_status(int serv_fd, int snapid, int verbose)
+static int ddsnap_get_status(int serv_fd, u32 snaptag, int verbose)
 {
 	int err;
 
-	if ((err = outbead(serv_fd, STATUS_REQUEST, struct status_request, snapid))) {
+	if ((err = outbead(serv_fd, STATUS_REQUEST, struct status_request, snaptag))) {
 		error("%s (%i)", strerror(-err), -err);
 		return 1;
 	}
@@ -1434,7 +1432,7 @@ static int ddsnap_get_status(int serv_fd, int snapid, int verbose)
 	for (row = 0; row < reply->status_count; row++) {
 		snap_status = get_snap_status(reply, row);
 
-		printf("%6d", snap_status->snapid);
+		printf("%6u", snap_status->snap);
 
 		time = (time_t)snap_status->ctime;
 		ctime_str = ctime(&time);
@@ -1462,7 +1460,7 @@ static int ddsnap_get_status(int serv_fd, int snapid, int verbose)
 	 * degree of sharing
 	 */
 
-	if (snapid < 0) {
+	if (snaptag == (u32)~0UL) {
 		u64 *column_totals;
 
 		if (!(column_totals = malloc(sizeof(u64) * reply->num_columns)))
@@ -1598,40 +1596,40 @@ int main(int argc, char *argv[])
 
 	struct poptOption deltaOptions[] = {
 		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &noOptions, 0,
-		  "Create changelist\n\t Function: Create a changelist given 2 snapshots\n\t Usage: delta changelist <sockname> <changelist> <snapshot1> <snapshot2>" , NULL },
+		  "Create changelist\n\t Function: Create a changelist given 2 snapshots\n\t Usage: delta changelist <sockname> <changelist> <snapshot1> <snapshot2>", NULL },
 		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &cdOptions, 0,
-		  "Create delta\n\t Function: Create a delta file given a changelist and 2 snapshots\n\t Usage: delta create [OPTION...] <changelist> <deltafile> <snapshot1> <snapshot2>\n" , NULL },
+		  "Create delta\n\t Function: Create a delta file given a changelist and 2 snapshots\n\t Usage: delta create [OPTION...] <changelist> <deltafile> <snapshot1> <snapshot2>\n", NULL },
 		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &noOptions, 0,
-		  "Apply delta\n\t Function: Apply a delta file to a volume\n\t Usage: delta apply <deltafile> <dev>" , NULL },
+		  "Apply delta\n\t Function: Apply a delta file to a volume\n\t Usage: delta apply <deltafile> <dev>", NULL },
 		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &cdOptions, 0,
-		  "Send delta\n\t Function: Send a delta file to a downstream server\n\t Usage: delta send [OPTION...] <sockname> <snapshot1> <snapshot2> <snapdev1> <snapdev2> <remsnapshot> <host>[:<port>]\n" , NULL },
+		  "Send delta\n\t Function: Send a delta file to a downstream server\n\t Usage: delta send [OPTION...] <sockname> <snapshot1> <snapshot2> <snapdev1> <snapdev2> <remsnapshot> <host>[:<port>]\n", NULL },
 		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &serverOptions, 0,
-		  "Listen\n\t Function: Listen for a delta arriving from upstream\n\t Usage: delta listen [OPTION...] <snapdevstem> [<host>[:<port>]]" , NULL },
+		  "Listen\n\t Function: Listen for a delta arriving from upstream\n\t Usage: delta listen [OPTION...] <snapdevstem> [<host>[:<port>]]", NULL },
 		POPT_TABLEEND
 	};
 
 	poptContext mainCon;
 	struct poptOption mainOptions[] = {
 		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &initOptions, 0,
-		  "Initialize\n\t Function: Initialize a snapshot storage volume\n\t Usage: initialize [OPTION...] <dev/snapshot> <dev/origin> [dev/meta]" , NULL },
+		  "Initialize\n\t Function: Initialize a snapshot storage volume\n\t Usage: initialize [OPTION...] <dev/snapshot> <dev/origin> [dev/meta]", NULL },
 		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &serverOptions, 0,
-		  "Agent Server\n\t Function: Start the snapshot agent\n\t Usage: agent [OPTION...] <agent_socket>" , NULL },
+		  "Agent Server\n\t Function: Start the snapshot agent\n\t Usage: agent [OPTION...] <agent_socket>", NULL },
 		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &serverOptions, 0,
-		  "Snapshot Server\n\t Function: Start the snapshot server\n\t Usage: server [OPTION...] <dev/snapshot> <dev/origin> [dev/meta] <agent_socket> <server_socket>" , NULL },
+		  "Snapshot Server\n\t Function: Start the snapshot server\n\t Usage: server [OPTION...] <dev/snapshot> <dev/origin> [dev/meta] <agent_socket> <server_socket>", NULL },
 		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &noOptions, 0,
-		  "Create snapshot\n\t Function: Create a snapshot\n\t Usage: create <sockname> <snapshot>" , NULL },
+		  "Create snapshot\n\t Function: Create a snapshot\n\t Usage: create <sockname> <snapshot>", NULL },
 		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &noOptions, 0,
-		  "Delete snapshot\n\t Function: Delete a snapshot\n\t Usage: delete <sockname> <snapshot>" , NULL },
+		  "Delete snapshot\n\t Function: Delete a snapshot\n\t Usage: delete <sockname> <snapshot>", NULL },
 		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &noOptions, 0,
-		  "List snapshots\n\t Function: Return list of snapshots currently held\n\t Usage: list <sockname>" , NULL },
+		  "List snapshots\n\t Function: Return list of snapshots currently held\n\t Usage: list <sockname>", NULL },
 		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &noOptions, 0,
-		  "Priority\n\t Function: Set the priority of a snapshot\n\t Usage: priority <sockname> <snap_tag> <new_priority_value>" , NULL },
+		  "Priority\n\t Function: Set the priority of a snapshot\n\t Usage: priority <sockname> <snap_tag> <new_priority_value>", NULL },
 		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &noOptions, 0,
-		  "Usecount\n\t Function: Change the use count of a snapshot\n\t Usage: usecount <sockname> <snap_tag> <inc|dec>" , NULL },
+		  "Usecount\n\t Function: Change the use count of a snapshot\n\t Usage: usecount <sockname> <snap_tag> <inc|dec>", NULL },
 		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &stOptions, 0,
-		  "Get statistics\n\t Function: Report snapshot usage statistics\n\t Usage: status [OPTION...] <sockname> [<snapshot>]" , NULL },
+		  "Get statistics\n\t Function: Report snapshot usage statistics\n\t Usage: status [OPTION...] <sockname> [<snapshot>]", NULL },
 		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &deltaOptions, 0,
-		  "Delta\n\t Usage: delta [OPTION...] <subcommand> " , NULL},
+		  "Delta\n\t Usage: delta [OPTION...] <subcommand> ", NULL},
 		{ "version", 'V', POPT_ARG_NONE, NULL, 0, "Show version", NULL },
 		POPT_AUTOHELP
 		POPT_TABLEEND
@@ -1775,7 +1773,7 @@ int main(int argc, char *argv[])
 # ifdef MKDDSNAP_TEST
 		init_snapstore(sb, js_bytes, bs_bits);
 		create_snapshot(sb, 0);
-		
+	
 		int i;
 		for (i = 0; i < 100; i++) {
 			make_unique(sb, i, 0);
@@ -1974,17 +1972,21 @@ int main(int argc, char *argv[])
 			return 1;
 		}
 
-		int snapid;
+		u32 snaptag;
 
-		if (parse_snapid(argv[3], &snapid) < 0) {
-			fprintf(stderr, "%s: invalid snapshot id %s\n", argv[0], argv[3]);
-			return 1;
-		}
+		if (strcmp(argv[3], "-1") == 0)
+			snaptag = ~0UL; /* FIXME: we need a better way to represent the origin */
+		else 
+			if (parse_snaptag(argv[3], &snaptag) < 0) {
+				fprintf(stderr, "%s: invalid snapshot %s\n", argv[0], argv[3]);
+				return 1;
+			}
 
 		int sock = create_socket(argv[2]);
 
-		int ret = create_snapshot(sock, snapid);
+		int ret = create_snapshot(sock, snaptag);
 		close(sock);
+
 		return ret;
 	}
 	if (strcmp(command, "delete") == 0) {
@@ -1993,16 +1995,19 @@ int main(int argc, char *argv[])
 			return 1;
 		}
 
-		int snapid;
+		u32 snaptag;
 
-		if (parse_snapid(argv[3], &snapid) < 0) {
-			fprintf(stderr, "%s: invalid snapshot id %s\n", argv[0], argv[3]);
-			return 1;
-		}
+		if (strcmp(argv[3], "-1") == 0)
+			snaptag = ~0UL; /* FIXME: we need a better way to represent the origin */
+		else 
+			if (parse_snaptag(argv[3], &snaptag) < 0) {
+				fprintf(stderr, "%s: invalid snapshot %s\n", argv[0], argv[3]);
+				return 1;
+			}
 
 		int sock = create_socket(argv[2]);
 
-		int ret = delete_snapshot(sock, snapid);
+		int ret = delete_snapshot(sock, snaptag);
 		close(sock);
 		return ret;
 	}
@@ -2024,16 +2029,16 @@ int main(int argc, char *argv[])
 			return 1;
 		}
 
-		int snapid;
+		u32 snaptag;
 
-		if (parse_snapid(argv[3], &snapid) < 0) {
-			fprintf(stderr, "%s: invalid snapshot id %s\n", argv[0], argv[3]);
+		if (parse_snaptag(argv[3], &snaptag) < 0) {
+			fprintf(stderr, "%s: invalid snapshot %s\n", argv[0], argv[3]);
 			return 1;
 		}
 
 		int sock = create_socket(argv[2]);
 
-		int ret = set_priority(sock, snapid, atoi(argv[4]));
+		int ret = set_priority(sock, snaptag, atoi(argv[4]));
 		close(sock);
 		return ret;
 	}
@@ -2043,16 +2048,16 @@ int main(int argc, char *argv[])
 			return 1;
 		}
 
-		int snapid;
+		u32 snaptag;
 
-		if (parse_snapid(argv[3], &snapid) < 0) {
-			fprintf(stderr, "%s: invalid snapshot id %s\n", argv[0], argv[3]);
+		if (parse_snaptag(argv[3], &snaptag) < 0) {
+			fprintf(stderr, "%s: invalid snapshot %s\n", argv[0], argv[3]);
 			return 1;
 		}
 
 		int sock = create_socket(argv[2]);
 
-		int ret = set_usecount(sock, snapid, argv[4]);
+		int ret = set_usecount(sock, snaptag, argv[4]);
 		close(sock);
 		return ret;
 	}
@@ -2077,10 +2082,10 @@ int main(int argc, char *argv[])
 			return 1;
 		}
 
-		char const *sockname, *snapidstr;
+		char const *sockname, *snaptagstr;
 
-		sockname  = poptGetArg(cdCon);
-		snapidstr = poptGetArg(cdCon);
+		sockname   = poptGetArg(cdCon);
+		snaptagstr = poptGetArg(cdCon);
 
 		if (sockname == NULL)
 			cdUsage(cdCon, 1, argv[0], "Must specify socket name to get-status\n");
@@ -2089,20 +2094,20 @@ int main(int argc, char *argv[])
 
 		poptFreeContext(cdCon);
 
-		int snapid;
+		u32 snaptag;
 
-		if (snapidstr) {
-			if (parse_snapid(snapidstr, &snapid) < 0 || snapid < 0) {
-				fprintf(stderr, "%s: invalid snapshot id %s\n", argv[0], snapidstr);
+		if (snaptagstr) {
+			if (parse_snaptag(snaptagstr, &snaptag) < 0) {
+				fprintf(stderr, "%s: invalid snapshot %s\n", argv[0], snaptagstr);
 				return 1;
 			}
 		} else {
-			snapid = -2; /* meaning "all snapshots" */
+			snaptag = ~0UL; /* meaning "all snapshots" */
 		}
 
 		int sock = create_socket(sockname);
 
-		int ret = ddsnap_get_status(sock, snapid, verb);
+		int ret = ddsnap_get_status(sock, snaptag, verb);
 		close(sock);
 
 		return ret;
@@ -2143,21 +2148,21 @@ int main(int argc, char *argv[])
 				return 1;
 			}
 
-			int snapid1, snapid2;
+			u32 snaptag1, snaptag2;
 
-			if (parse_snapid(argv[5], &snapid1) < 0) {
-				fprintf(stderr, "%s %s: invalid snapshot id %s\n", argv[0], argv[1], argv[5]);
+			if (parse_snaptag(argv[5], &snaptag1) < 0) {
+				fprintf(stderr, "%s %s: invalid snapshot %s\n", argv[0], argv[1], argv[5]);
 				return 1;
 			}
 
-			if (parse_snapid(argv[6], &snapid2) < 0) {
-				fprintf(stderr, "%s %s: invalid snapshot id %s\n", argv[0], argv[1], argv[6]);
+			if (parse_snaptag(argv[6], &snaptag2) < 0) {
+				fprintf(stderr, "%s %s: invalid snapshot %s\n", argv[0], argv[1], argv[6]);
 				return 1;
 			}
 
 			int sock = create_socket(argv[3]);
 
-			int ret = ddsnap_generate_changelist(sock, argv[4], snapid1, snapid2);
+			int ret = ddsnap_generate_changelist(sock, argv[4], snaptag1, snaptag2);
 			close(sock);
 			return ret;
 		}
@@ -2270,15 +2275,15 @@ int main(int argc, char *argv[])
 
 			trace_on(fprintf(stderr, "xd=%d raw=%d test=%d opt_comp=%d mode=%u gzip_level=%d\n", xd, raw, test, opt_comp, mode, gzip_level););
 
-			char const *sockname, *snapid1str, *snapid2str, *snapdev1, *snapdev2, *snapidremstr, *hoststr;
+			char const *sockname, *snaptag1str, *snaptag2str, *snapdev1, *snapdev2, *snaptagremstr, *hoststr;
 
-			sockname  = poptGetArg(cdCon);
-			snapid1str = poptGetArg(cdCon);
-			snapid2str = poptGetArg(cdCon);
-			snapdev1 = poptGetArg(cdCon);
-			snapdev2 = poptGetArg(cdCon);
-			snapidremstr = poptGetArg(cdCon);
-			hoststr = poptGetArg(cdCon);
+			sockname      = poptGetArg(cdCon);
+			snaptag1str   = poptGetArg(cdCon);
+			snaptag2str   = poptGetArg(cdCon);
+			snapdev1      = poptGetArg(cdCon);
+			snapdev2      = poptGetArg(cdCon);
+			snaptagremstr = poptGetArg(cdCon);
+			hoststr       = poptGetArg(cdCon);
 
 			if (hoststr == NULL)
 				cdUsage(cdCon, 1, argv[0], "Not enough arguments to send-delta\n");
@@ -2300,20 +2305,20 @@ int main(int argc, char *argv[])
 				port = DEFAULT_REPLICATION_PORT;
 			}
 
-			int snapid1, snapid2, remsnapid;
+			u32 snaptag1, snaptag2, remsnaptag;
 
-			if (parse_snapid(snapid1str, &snapid1) < 0) {
-				fprintf(stderr, "%s %s: invalid snapshot id %s\n", argv[0], argv[1], snapid1str);
+			if (parse_snaptag(snaptag1str, &snaptag1) < 0) {
+				fprintf(stderr, "%s %s: invalid snapshot %s\n", argv[0], argv[1], snaptag1str);
 				return 1;
 			}
 
-			if (parse_snapid(snapid2str, &snapid2) < 0) {
-				fprintf(stderr, "%s %s: invalid snapshot id %s\n", argv[0], argv[1], snapid2str);
+			if (parse_snaptag(snaptag2str, &snaptag2) < 0) {
+				fprintf(stderr, "%s %s: invalid snapshot %s\n", argv[0], argv[1], snaptag2str);
 				return 1;
 			}
 
-			if (parse_snapid(snapidremstr, &remsnapid) < 0) {
-				fprintf(stderr, "%s %s: invalid snapshot id %s\n", argv[0], argv[1], snapidremstr);
+			if (parse_snaptag(snaptagremstr, &remsnaptag) < 0) {
+				fprintf(stderr, "%s %s: invalid snapshot %s\n", argv[0], argv[1], snaptagremstr);
 				return 1;
 			}
 
@@ -2334,7 +2339,7 @@ int main(int argc, char *argv[])
 			if (sigaction(SIGPIPE, &ign_sa, NULL) == -1)
 				warn("could not disable SIGPIPE: %s", strerror(errno));
 
-			int ret = ddsnap_send_delta(sock, snapid1, snapid2, snapdev1, snapdev2, remsnapid, mode, gzip_level, ds_fd);
+			int ret = ddsnap_send_delta(sock, snaptag1, snaptag2, snapdev1, snapdev2, remsnaptag, mode, gzip_level, ds_fd);
 			close(ds_fd);
 			close(sock);
 
