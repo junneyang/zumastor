@@ -42,7 +42,7 @@ int connect_clients(struct context *context)
 			error("server socket name, %s, is too long", server->address);
 		if ((sock = socket(AF_UNIX, SOCK_STREAM, 0)) < 0)
 			error("Can't get socket: %s", strerror(errno)); 
-		trace_on(printf("server socket name: %s\n", server->address););
+		trace(printf("server socket name: %s\n", server->address););
 		strncpy(addr.sun_path, server->address, sizeof(addr.sun_path));
 		if (connect(sock, (struct sockaddr *)&addr, addr_len) == -1) {
 			// this really sucks: if the address is wrong, we silently wait for
@@ -78,6 +78,7 @@ int try_to_instantiate(struct context *context)
 static int incoming(struct context *context, struct client *client)
 {
 	int err;
+	char * err_msg;
 	struct messagebuf message;
 	int sock = client->sock;
 	struct server *server = NULL;
@@ -97,12 +98,12 @@ static int incoming(struct context *context, struct client *client)
 		memcpy(&server->header, message.body, sizeof(struct server_head));
 		if (server->address)
 			free(server->address);
-		printf("socket name length: %d\n", server->header.length);
+		trace(warn("socket name length: %d\n", server->header.length););
 		if (!(server->address = (char *)malloc(server->header.length)))
 			error("unable to allocate space for server address");
 		if ((err = readpipe(sock, server->address, server->header.length)))
 			goto pipe_error;
-		printf("server socket name %s\n", server->address);
+		trace(warn("server socket name %s\n", server->address););
 		context->serv = sock; // !!! refuse more than one
 		client->type = SERVER_CON;
 		goto instantiate;
@@ -120,16 +121,22 @@ static int incoming(struct context *context, struct client *client)
 		 * If there's no local server, don't do anything: instantiation
 		 * will be attempted when/if the local server shows up.
 		 */
-		trace_on(printf("NEED SERVER is being called\n"););
+		trace(printf("NEED SERVER is being called\n"););
 		if (have_address(&context->active)) {
-			trace_on(printf("Calling connect_clients\n"););
+			trace(printf("Calling connect_clients\n"););
 			if (connect_clients(context) == 0)
-			    trace_on(printf("connected\n"););
+			    trace(printf("connected\n"););
 			break;
 		}
 		break;
-	case REPLY_CONNECT_SERVER:
+	case CONNECT_SERVER_OK:
 		warn("Everything connected properly, all is well");
+		break;
+	case CONNECT_SERVER_ERROR:
+		err = ((struct connect_server_error *)message.body)->err;
+		err_msg = ((struct connect_server_error *)message.body)->msg;
+		err_msg[message.head.length - (sizeof(err) + 1)] = '\0';
+		warn("ERROR: %s, all is NOT well", err_msg);
 		break;
 	default:
 		warn("Unknown message %x", message.head.code);

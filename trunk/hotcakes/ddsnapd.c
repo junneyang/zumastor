@@ -2081,7 +2081,8 @@ int init_snapstore(struct superblock *sb, u32 js_bytes, u32 bs_bits)
 	sb->metadata->chunks = size >> sb->image.chunksize_bits;
 	if ((error = fd_size(sb->orgdev, &size)) < 0)
 		error("Error %i: %s determining origin volume size", errno, strerror(-errno));
-	sb->image.orgchunks = size >> sb->image.chunksize_bits;
+	sb->image.orgsectors = size >> SECTOR_BITS;
+	sb->image.orgoffset  = 0; //!!! FIXME: shouldn't always assume offset starts at 0
 
 	u32 chunk_size = 1 << sb->image.chunksize_bits, js_chunks = DIVROUND(js_bytes, chunk_size);
 	trace_on(printf("chunk_size is %u & js_chunks is %u\n", chunk_size, js_chunks););
@@ -2491,14 +2492,45 @@ static int incoming(struct superblock *sb, struct client *client)
 	}
 	case IDENTIFY:
 	{
-		int tag = ((struct identify *)message.body)->snap;
-
-		client->snap =  (tag == -1) ? tag : tag_snapnum(sb, tag);
+		u32 err = 0; /* success */
+		char err_msg[MAX_ERRMSG_SIZE];
+		u32 tag      = ((struct identify *)message.body)->snap;
+		sector_t off = ((struct identify *)message.body)->off;
+		sector_t len = ((struct identify *)message.body)->len;
+		unsigned int error_len;
+		
 		client->id = ((struct identify *)message.body)->id;
+		client->snap =  (tag == (u32)~0UL) ? tag : tag_snapnum(sb, tag);
+		
 		trace(fprintf(stderr, "got identify request, setting id="U64FMT" snap=%i, sending chunksize_bits=%u\n", client->id, client->snap, sb->image.chunksize_bits););
-		warn("client id %Li, snapshot %i (snapnum %i)", client->id, tag, client->snap);
-		outbead(sock, REPLY_IDENTIFY, struct identify, 0, 0, sb->image.chunksize_bits); // return another structure?
+		warn("client id %lli, snapshot %i (snapnum %i)", client->id, tag, client->snap);
+
+		if (len != sb->image.orgsectors) {
+			snprintf(err_msg, MAX_ERRMSG_SIZE, "volume size mismatch for snapshot %u", tag);
+			err_msg[MAX_ERRMSG_SIZE-1] = '\0'; // make sure it's null terminated
+			err = REPLY_ERROR_SIZE_MISMATCH;
+			goto identify_error;
+		}
+		if (off != sb->image.orgoffset) {
+			snprintf(err_msg, MAX_ERRMSG_SIZE, "volume offset mismatch for snapshot %u", tag);
+			err_msg[MAX_ERRMSG_SIZE-1] = '\0'; // make sure it's null terminated
+			err = REPLY_ERROR_OFFSET_MISMATCH;
+			goto identify_error;
+		}
+		
+		if (outbead(sock, IDENTIFY_OK, struct identify_ok, 
+				 .chunksize_bits = sb->image.chunksize_bits) < 0)
+			warn("unable to reply to IDENTIFY message");
 		break;
+
+	identify_error:
+		error_len = sizeof(struct identify_error) + strlen(err_msg) + 1;	  
+		if (outhead(sock, IDENTIFY_ERROR, error_len) < 0 ||
+			writepipe(sock, &err, sizeof(struct identify_error)) < 0 ||
+			writepipe(sock, err_msg, error_len - sizeof(struct identify_error)) < 0)
+			warn("unable to reply to IDENTIFY message with error");
+		break;
+		
 	}
 	case UPLOAD_LOCK:
 		break;
@@ -2511,7 +2543,8 @@ static int incoming(struct superblock *sb, struct client *client)
 		if (create_snapshot(sb, ((struct create_snapshot *)message.body)->snap) < 0)
 			goto reply_error;
 		save_state(sb);
-		outbead(sock, REPLY_CREATE_SNAPSHOT, struct { });
+		if (outbead(sock, REPLY_CREATE_SNAPSHOT, struct { }) < 0)
+			warn("unable to reply to create snapshot message");
 		break;
 	}
 	case DELETE_SNAPSHOT:
@@ -2519,7 +2552,8 @@ static int incoming(struct superblock *sb, struct client *client)
 		if (delete_snapshot(sb, ((struct create_snapshot *)message.body)->snap) < 0)
 			goto reply_error;
 		save_state(sb);
-		outbead(sock, REPLY_DELETE_SNAPSHOT, struct { });
+		if (outbead(sock, REPLY_DELETE_SNAPSHOT, struct { }) < 0)
+			warn("unable to reply to delete snapshot message");
 		break;
 	}
 	case INITIALIZE_SNAPSTORE:
@@ -2582,10 +2616,12 @@ static int incoming(struct superblock *sb, struct client *client)
 		}
 		snap_info->prio = prio;
 	skip_set_prio:
-		outbead(sock, REPLY_SET_PRIORITY, struct { });
+		if (outbead(sock, REPLY_SET_PRIORITY, struct { }) < 0)
+			warn("unable to reply to set priority message");
 		break;
 	set_prio_error:
-		outbead(sock, REPLY_ERROR, struct {});
+		if (outbead(sock, REPLY_ERROR, struct {}) < 0)
+			warn("unable to send error for set priority message");
 		break;
 	}
 	case SET_USECOUNT:
@@ -2647,7 +2683,8 @@ static int incoming(struct superblock *sb, struct client *client)
 
 		close(change_fd);
 
-		outbead(sock, REPLY_GENERATE_CHANGE_LIST, struct { });
+		if (outbead(sock, REPLY_GENERATE_CHANGE_LIST, struct { }) < 0)
+			warn("unable to reply to generate change list message");
 		break;
 
 	generate_error_free:
@@ -2658,7 +2695,8 @@ static int incoming(struct superblock *sb, struct client *client)
 
 	generate_error:
 		trace(warn("%s", err_msg););
-		outbead(sock, REPLY_ERROR, struct { });
+		if (outbead(sock, REPLY_ERROR, struct { }) < 0)
+			warn("unable to send reply error for generating change list message\n");
 		break;
 	}
 	case STREAM_CHANGE_LIST:
@@ -2682,10 +2720,12 @@ static int incoming(struct superblock *sb, struct client *client)
 			goto stream_error;
 
 		trace_on(printf("sending stream header\n"););
-		outbead(sock, REPLY_STREAM_CHANGE_LIST, struct changelist_stream, cl->count, sb->image.chunksize_bits);
+		if (outbead(sock, REPLY_STREAM_CHANGE_LIST, struct changelist_stream, cl->count, sb->image.chunksize_bits) < 0)
+			warn("unable to send reply to stream change list message");
 
 		trace_on(printf("streaming "U64FMT" chunk addresses\n", cl->count););
-		writepipe(sock, cl->chunks, cl->count * sizeof(cl->chunks[0]));
+		if (writepipe(sock, cl->chunks, cl->count * sizeof(cl->chunks[0])) < 0)
+			warn("unable to send chunks for streaming change list");
 
 		free_change_list(cl);
 
@@ -2693,7 +2733,8 @@ static int incoming(struct superblock *sb, struct client *client)
 
 	stream_error:
 		trace(warn("%s", err_msg););
-		outbead(sock, REPLY_ERROR, struct { });
+		if (outbead(sock, REPLY_ERROR, struct { }) < 0)
+			warn("unable to send error for streaming change list message");
 		break;
 	}
 	case STATUS_REQUEST:
@@ -2822,8 +2863,9 @@ static int incoming(struct superblock *sb, struct client *client)
 
 		/* send it */
 
-		outhead(sock, STATUS_MESSAGE, reply_len);
-		writepipe(sock, reply, reply_len);
+		if (outhead(sock, STATUS_MESSAGE, reply_len) < 0 ||
+			writepipe(sock, reply, reply_len) < 0)
+			warn("unable to send status message");
 
 		free(reply);
 
@@ -2831,7 +2873,8 @@ static int incoming(struct superblock *sb, struct client *client)
 
 	status_error:
 		trace(warn("%s", err_msg););
-		outbead(sock, REPLY_ERROR, struct { });
+		if (outbead(sock, REPLY_ERROR, struct { }) < 0)
+			warn("unable to send error for status message");
 		break;
 	}
 	case SHUTDOWN_SERVER:
@@ -2839,7 +2882,8 @@ static int incoming(struct superblock *sb, struct client *client)
 
 	default:
 	reply_error:
-		outbead(sock, REPLY_ERROR, struct { }); // wrong!!!
+		if (outbead(sock, REPLY_ERROR, struct { }) < 0) // wrong!!!
+			warn("unable to send generic error message");
 	}
 
 #ifdef SIMULATE_CRASH
@@ -2954,7 +2998,7 @@ int snap_server_setup(const char *agent_sockname, const char *server_sockname, i
 	trace(warn("Established agent control connection"););
 
 	struct server_head server_head = { .type = AF_UNIX, .length = (strlen(server_sockname) + 1) };
-	printf("server socket name is %s and length is %d\n", server_sockname, server_head.length);	
+	trace(warn("server socket name is %s and length is %d\n", server_sockname, server_head.length););
 	if (writepipe(*agentfd, &(struct head){ SERVER_READY, sizeof(struct server_head) }, sizeof(struct head)) < 0 ||
 	    writepipe(*agentfd, &server_head, sizeof(server_head)) < 0 || 
 	    writepipe(*agentfd, server_sockname, server_head.length) < 0)

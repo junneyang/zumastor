@@ -148,6 +148,7 @@ typedef u64 chunk_t;
 #define REPORT_BIT 1
 #define RECOVER_FLAG (1 << 2)
 #define FINISH_FLAG (1 << 3)
+#define READY_FLAG (1 << 4)
 #define NUM_BUCKETS 64
 #define MASK_BUCKETS (NUM_BUCKETS - 1)
 
@@ -494,6 +495,7 @@ static int incoming(struct dm_target *target)
 	struct file *sock;
 	struct task_struct *task = current;
 	int err, length;
+	char * err_msg;
 	u32 chunksize_bits;
 
 	daemonize_properly("ddsnap-clnt", info->snap);
@@ -514,7 +516,7 @@ connect:
 		if ((err = readpipe(sock, &message.head, sizeof(message.head))))
 			goto socket_error;
 		length = message.head.length;
-		if (length > maxbody)
+		if (length > maxbody) //!!! FIXME: shouldn't limit message sizes
 			goto message_too_long;
 		trace(warn("%x/%u", message.head.code, length);)
 		if ((err = readpipe(sock, &message.body, length)))
@@ -541,22 +543,46 @@ connect:
 			to_snap = 1; 
 			break;
 
-		case REPLY_IDENTIFY:
-			chunksize_bits = ((struct identify *)message.body)->chunksize_bits;
+		case IDENTIFY_OK:
+			chunksize_bits = ((struct identify_ok *)message.body)->chunksize_bits;
 			trace_on(warn("identify succeeded. chunksize %u", chunksize_bits););
+			info->flags |= READY_FLAG;
 			info->chunksize_bits = chunksize_bits;
 			info->chunkshift     = chunksize_bits - SECTOR_SHIFT;
 			target->split_io = 1 << info->chunkshift; // !!! lose this as soon as possible
-			/* set usecount */
+
 			if (outbead(sock, SET_USECOUNT, struct snapinfo, info->snap, 0, 1) < 0) 
-				warn("unable to send message to snapshot server");
+				warn("unable to send USECOUNT message to snapshot server");
+
 			up(&info->server_out_sem);
-			outbead(info->control_socket, REPLY_CONNECT_SERVER, struct { });
+			if (outbead(info->control_socket, CONNECT_SERVER_OK, struct { }) < 0)
+				warn("unable to send CONNECT_SERVER_OK message to agent\n");
 			continue;
+			
+		case IDENTIFY_ERROR:
+			err     = ((struct identify_error *)message.body)->err; 
+			err_msg = ((struct identify_error *)message.body)->msg;
+			length -= sizeof(err);
+			err_msg[length - 1] = '\0';
+
+			warn("unable to identify snapshot device with id %d, error: %s", 
+			     info->snap, err_msg);
+
+			message.head.code = CONNECT_SERVER_ERROR;
+			message.head.length = length + sizeof(err);
+			if (writepipe(info->control_socket, &message.head, sizeof(message.head)) < 0)
+				warn("can't send msg head");
+			if (writepipe(info->control_socket, &err, sizeof(err)) < 0) 
+				warn("can't send out err");
+			if (writepipe(info->control_socket, err_msg, length) < 0)
+				warn("unable to send message CONNECT_SERVER_ERROR to agent\n");
+			continue;
+			
 		case REPLY_ERROR:	
 			trace_on(warn("failed i/o"););
 			failed_io = 1;
 			break;
+			
 		default: 
 			warn("Unknown message %x. sending reply error back to server", message.head.code);
 			continue;
@@ -800,7 +826,7 @@ static int control(struct dm_target *target)
 			goto socket_error;
 		trace(warn("got message header code %x", message.head.code);)
 		length = message.head.length;
-		if (length > maxbody)
+		if (length > maxbody) //!!! FIXME: shouldn't limit message sizes
 			goto message_too_long;
 		trace(warn("%x/%u", message.head.code, length);)
 		if ((err = readpipe(sock, &message.body, length)))
@@ -832,7 +858,12 @@ static int control(struct dm_target *target)
 			put_unused_fd(sock_fd);
 			sys_close(fd);
 			up(&info->server_in_sem);
-			outbead(info->sock, IDENTIFY, struct identify, .id = info->id, .snap = info->snap);
+			if (outbead(info->sock, IDENTIFY, struct identify, 
+						.id = info->id, .snap = info->snap, 
+						.off = target->begin, .len = target->len) < 0) {
+				warn("unable to send IDENTIFY message");
+				goto out;
+			}
 			up(&info->recover_sem); /* worker uploads locks now */
 			break;
 		}
@@ -877,11 +908,13 @@ static int ddsnap_map(struct dm_target *target, struct bio *bio, union map_info 
 	chunk_t chunk;
 	unsigned id;
 
-	bio->bi_bdev = info->orgdev->bdev;
-
-	/* linear mapping */
-	/* return 1; */
+	if (!(info->flags & READY_FLAG)) {
+		warn("snapshot device with id %d is not ready", info->snap);
+//		bio->bi_end_io(bio, 0, EIO); // !!! passing 0 bytes done, correct?
+		return -1;
+	}
 	
+	bio->bi_bdev = info->orgdev->bdev;
 	if (bio_data_dir(bio) == READ && !is_snapshot(info))
 		return 1;
 

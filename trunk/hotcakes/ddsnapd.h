@@ -7,6 +7,8 @@
 #include "sock.h"
 #include "trace.h"
 
+#define MAX_ERRMSG_SIZE 128
+
 #define SECTORS_PER_BLOCK 7
 #define CHUNK_SIZE 4096
 #define DEFAULT_JOURNAL_SIZE (100 * CHUNK_SIZE)
@@ -25,7 +27,7 @@ struct superblock
 		char magic[8];
 		u64 create_time;
 		sector_t etree_root;
-		sector_t orgchunks;
+		sector_t orgoffset, orgsectors;
 		u64 flags;
 		u32 blocksize_bits, chunksize_bits;
 		u64 deleting;
