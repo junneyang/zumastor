@@ -1,0 +1,27 @@
+# Zumastor Linux Storage Server
+# Copyright (c) 2006 Google Inc.
+# Author: Daniel Phillips <phillips@google.com>
+# Licensed under the GNU GPL version 2
+
+function device_name {
+	vol=$1
+	id=$2
+	if [ $id != -1 ]; then vol=$vol\($id\); fi
+	echo $vol
+}
+
+function create_device {
+	vol=$1
+	id=$2
+	info=$VOLUMES/$vol
+	sock=/etc/zumastor/sockets/$vol
+	size=$(ddsnap status $sock --size) || return 1
+	sdev=$info/device/snapstore
+	odev=$info/device/origin
+	name=$(device_name $vol $id)
+	echo 0 $size ddsnap $sdev $odev $sock $id | dmsetup create $name
+}
+
+function remove_device {
+	dmsetup remove $(device_name $1 $2)
+}

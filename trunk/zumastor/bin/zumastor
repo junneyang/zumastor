@@ -1,0 +1,228 @@
+#!/bin/bash
+# Zumastor Linux Storage Server
+# Copyright (c) 2006 Google Inc.
+# Author: Daniel Phillips <phillips@google.com>
+# Licensed under the GNU GPL version 2
+
+. /lib/zumastor/common
+. /lib/zumastor/ddfake
+
+function new_snapshot {
+	vol=$1
+	kind=$2
+	master=$VOLUMES/$vol/master
+	sock=/etc/zumastor/sockets/$vol
+	file=$master/schedule/$kind
+
+	read max <$file
+	echo new snapshot $vol $kind max=$max
+	echo $kind snapshots limit: $max
+	read next <$master/next
+	echo next = $next
+	echo $(( next+1 )) >$master/next
+	file=$master/snapshots/$kind
+
+	read -a snapshots <$file
+	echo snapshots: ${snapshots[@]}
+	num=${#snapshots[@]}
+	snapshots[$num]=$next
+	echo ddsnap create $next $sock
+	create_device $vol $next
+
+	if [[ $num -ge $max ]]; then
+		oldest=${snapshots[0]}
+		remove_device $vol $oldest
+		echo ddsnap delete $oldest $sock
+		unset snapshots[0]
+	fi
+	echo snapshots: ${snapshots[@]}
+	echo ${snapshots[@]} >$file
+
+	create_device $1 123
+}
+
+function run_master {
+	vol=$1
+	fifo=$VOLUMES/$vol/master/trigger
+	test -r $fifo || return 1
+	touch /var/run/zumastor/cron/$vol || exit 1
+	while true; do
+#		xargs -n1 <$fifo echo snapshot $vol || echo error $?
+#		read $snap <$fifo || exit 1
+		kind=$(cat <$fifo) || exit 1
+		new_snapshot $vol $kind
+	done
+}
+
+function run_target {
+	vol=$1
+	host=$2
+	fifo=$VOLUMES/$vol/targets/$host/trigger
+	test -r $fifo || return 1
+	while true; do
+		xargs -n1 <$fifo echo replicate $vol $host || echo error $?
+	done
+}
+
+function stop_master {
+	vol=$1
+	rm /var/run/zumastor/cron/$vol
+	pkill -f "zumastor start master $vol"
+}
+
+function stop_target {
+	vol=$1
+	host=$2
+	pkill -f "zumastor start target $vol $host"
+}
+
+function define_volume {
+	vol=$1
+	odev=$2
+	sdev=$3
+	path=$VOLUMES/$vol
+	if test -z "$odev"; then return 1; fi
+	if test -z "$sdev"; then return 1; fi
+	mkdir $path || return 1
+	mkdir $path/device || return 1
+	ln -sf $odev $path/device/origin  || return 1
+	ln -sf $sdev $path/device/snapstore || return 1
+	mkdir $path/targets
+	mkfifo /var/run/zumastor/sockets/$vol
+}
+
+function forget_master {
+	vol=$1
+	path=$VOLUMES/$vol
+	if test -e $path/master; then
+		stop_master $vol
+		rm -r $path/master
+	fi
+}
+
+function forget_volume {
+	vol=$1
+	path=$VOLUMES/$vol
+	rm /var/run/zumastor/sockets/$vol
+	rmdir $path/targets
+	rm -r $path/device
+	forget_master $vol
+	rmdir $path
+}
+
+function define_target {
+	vol=$1
+	host=$2
+	path=$VOLUMES/$vol/targets/$host
+	mkdir $path || return 1
+	mkfifo $path/trigger || return 1
+	zumastor start target $vol $host
+}
+
+function forget_target {
+	vol=$1
+	host=$2
+	path=$VOLUMES/$vol/targets/$host
+	rm -r $path
+}
+
+function set_master {
+	vol=$1
+	path=$VOLUMES/$vol
+	rm -rf $path/source # need to prompt
+	mkdir $path/master || return 1
+	mkdir $path/master/schedule || return 1
+	# next part is wrong, need to parse x=n form, take default if not present
+	echo $2 >$path/master/schedule/hourly || return 1
+	echo $3 >$path/master/schedule/daily || return 1
+	echo $4 >$path/master/schedule/weekly || return 1
+	echo 0 >$path/master/next || return 1
+	mkdir $path/master/snapshots || return 1
+	touch $path/master/snapshots/hourly || return 1
+	touch $path/master/snapshots/daily || return 1
+	touch $path/master/snapshots/weekly || return 1
+	mkfifo $path/master/trigger || return 1
+	zumastor start master $vol
+}
+
+function set_source {
+	vol=$1
+	host=$2
+	path=$VOLUMES/$vol
+	forget_master $vol
+	mkdir $path/source || return 1
+	mkdir $path/source/$host
+}
+
+VOLUMES=/var/lib/zumastor/volumes
+
+test -x $VOLUMES || (echo Cannot find zumastor database; exit 1)
+
+case $1 in
+define)
+	case $2 in
+	volume)
+		define_volume $3 $4 $5
+		exit ;;
+	target)
+		define_target $3 $4
+		exit ;;
+	master)
+		set_master $3 $4 $5 $6&
+		exit ;;
+	source)
+		set_source $3 $4&
+		exit ;;
+	esac
+	;;
+forget)
+	case $2 in
+	volume)
+		forget_volume $3
+		exit ;;
+	target)
+		forget_target $3 $4
+		exit ;;
+	esac
+	;;
+start)
+	case $2 in
+	master)
+		run_master $3 &
+		exit ;;
+	target)
+		run_target $3 $4 &
+		exit ;;
+	esac
+	;;
+stop)
+	case $2 in
+	master)
+		stop_master $3 &
+		exit ;;
+	target)
+		stop_target $3 $4 &
+		exit ;;
+	esac
+	;;
+snapshot)
+	vol=$2
+	kind=$3
+	echo $kind >$VOLUMES/$vol/master/trigger
+	exit ;;
+replicate)
+	vol=$2
+	host=$3
+	snap=$4
+	echo replicate $vol\($snap\) to $host
+	exit ;;
+status)
+echo status
+	tree -F $2 $VOLUMES
+	tree -F $2 /var/run/zumastor
+	exit ;;
+esac
+
+echo "Error: $@"
+echo "Usage: $0 ..."
+exit 2

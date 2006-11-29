@@ -1,0 +1,71 @@
+#!/bin/bash
+# Zumastor Linux Storage Server
+# Copyright (c) 2006 Google Inc.
+# Author: Daniel Phillips <phillips@google.com>
+# Licensed under the GNU GPL version 2
+
+. /lib/lsb/init-functions
+. /lib/zumastor/common
+. /lib/zumastor/ddfake
+
+function start_zumastor {
+	echo Starting zumastor
+	sockets=/etc/zumastor/sockets
+
+	for vol in $(ls $VOLUMES) ; do
+		mkfifo $sockets/$vol || return 1
+		list=$(ddsnap status $sockets/$vol --list) || return 1
+		for id in $list ; do
+			create_device $vol $id || return 1
+		done
+		if test -x $VOLUMES/$vol/master; then
+			zumastor start master $vol
+		fi
+		for host in $(ls $VOLUMES/$vol/targets) ; do
+			zumastor start target $vol $host
+		done
+	done
+}
+
+function stop_zumastor {
+	echo Stopping zumastor
+	sockets=/etc/zumastor/sockets
+
+	for vol in $(ls $VOLUMES) ; do
+		for host in $(ls $VOLUMES/$vol/targets) ; do
+			zumastor stop target $vol $host
+		done
+		if test -x $VOLUMES/$vol/master; then
+			zumastor stop master $vol
+		fi
+		list=$(ddsnap status $sockets/$vol --list)
+		for id in $list ; do
+			remove_device $vol $id
+		done
+		rm $sockets/$vol
+	done
+}
+
+VOLUMES=/var/lib/zumastor/volumes
+
+test -x $VOLUMES || exit 1
+
+case $1 in
+start)
+	start_zumastor
+	;;
+stop)
+	stop_zumastor
+	;;
+restart|force-reload)
+	stop_zumastor || exit
+	start_zumastor
+	;;
+status)
+	exit 0
+	;;
+*)
+	echo "Usage: $0 {start|stop|restart|force-reload}"
+	exit 2
+	;;
+esac

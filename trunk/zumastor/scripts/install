@@ -1,0 +1,10 @@
+cp bin/zumastor /bin/
+cp -a lib/zumastor /lib/
+cp -a var/lib/zumastor /var/lib/
+cp -a var/run/zumastor /var/run/
+
+cp -a etc/cron.hourly/zumastor /etc/cron.hourly/
+cp -a etc/cron.daily/zumastor /etc/cron.daily/
+cp -a etc/cron.weekly/zumastor /etc/cron.weekly/
+cp etc/init.d/zumastor /etc/init.d/
+cp -a etc/zumastor /etc/

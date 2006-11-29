@@ -1,0 +1,41 @@
+read foo <foo
+echo $(( ++foo ))
+echo $foo >foo
+exit
+
+read -a foo <test2
+
+num=${#foo[@]}
+
+echo num = ${#foo[@]}
+
+foo[$num]=bar
+
+if [[ $num -ge 3 ]]; then
+	unset foo[0]
+fi
+
+echo foo len = ${#foo[@]}
+echo foo 0 = ${foo[0]}
+echo foo 1 = ${foo[1]}
+echo foo 2 = ${foo[2]}
+echo foo 3 = ${foo[3]}
+echo foo 4 = ${foo[4]}
+echo foo 5 = ${foo[5]}
+
+echo ${foo[@]}
+unset foo[0]
+echo ${foo[@]}
+echo ${foo[@]} >foo
+echo ${foo[0]}
+echo ${#foo[@]}
+x=3
+echo $(( $x+1 ))
+
+if [[ x -lt 5 ]]; then
+  echo less than 5
+fi
+
+if [[ x -gt 3 ]]; then
+  echo more than 5
+fi
