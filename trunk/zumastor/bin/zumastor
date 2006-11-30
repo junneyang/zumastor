@@ -78,8 +78,8 @@ function stop_target {
 
 function define_volume {
 	vol=$1
-	odev=$2
-	sdev=$3
+	sdev=$2
+	odev=$3
 	path=$VOLUMES/$vol
 	test -n "$odev" || return 1
 	test -n "$sdev" || return 1
