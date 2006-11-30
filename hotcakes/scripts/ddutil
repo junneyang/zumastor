@@ -16,8 +16,7 @@ dev_meta=
 
 # device mapper devices
 map_path=/dev/mapper
-map_origin=vol
-map_snap_stem=snap
+map_stem=snap
 
 # Unix domain sockets
 # FIXME: use a safer location
@@ -86,8 +85,8 @@ usage_status()
     echo "$@status [<option>...] [<snapshot>]"
     echo "    -v, --verbose             Print all sharing statistics"
     echo "    --last                    Print the newest snapshot id"
-    echo "    --list                    Print all active snapshot ids"
-    echo "    --size                    Print the size of the origin device"
+    echo "    -l, --list                Print all active snapshot ids"
+    echo "    -s, --size                Print the size of the origin device"
 }
 
 usage_delta_changelist()
@@ -295,7 +294,7 @@ case "${subcommand}" in
     status)
         minargs='0'
         maxargs='1'
-        shortopts='v'
+        shortopts='vls'
         longopts='verbose,last,list,size'
         ;;
 
@@ -413,8 +412,8 @@ fi
 
 case "${subcommand}" in
     initialize)
-        if dmsetup ls 2> /dev/null | egrep "^${map_origin}	" > /dev/null; then
-            echo "$0: snapshot origin device ${map_origin} already in use" >& 2
+        if dmsetup ls 2> /dev/null | egrep "^${map_stem}	" > /dev/null; then
+            echo "$0: snapshot origin device ${map_stem} already in use" >& 2
             exit 5
         fi
 
@@ -439,19 +438,19 @@ case "${subcommand}" in
         originsize="`expr 2 '*' \"${originblocks}\"`"
 
         if [ X"$1" = X"-1" ]; then
-            if dmsetup ls 2> /dev/null | egrep "^${map_origin}	" > /dev/null; then
-                echo "$0: snapshot origin device ${map_origin} already in use" >& 2
+            if dmsetup ls 2> /dev/null | egrep "^${map_stem}	" > /dev/null; then
+                echo "$0: snapshot origin device ${map_stem} already in use" >& 2
                 exit 5
             fi
             echo 0 "${originsize}" ddsnap "${dev_snapstore}" "${dev_origin}" "${agent_sockpath}" "$1" |
-                dmsetup create "${map_origin}"
+                dmsetup create "${map_stem}"
             if [ $? -ne 0 ]; then
                 echo "$0: dmsetup failed to create origin mapping" >& 2
                 exit 5
             fi
         else
-            if dmsetup ls 2> /dev/null | egrep "^${map_snap_stem}$1	" > /dev/null; then
-                echo "$0: snapshot device ${map_snap_stem}$1 already in use" >& 2
+            if dmsetup ls 2> /dev/null | egrep "^${map_stem}$1	" > /dev/null; then
+                echo "$0: snapshot device ${map_stem}$1 already in use" >& 2
                 exit 5
             fi
             if ! ddsnap ${subcommand} ${suboptions} "${ddsnapd_sockpath}" "$1"; then
@@ -459,7 +458,7 @@ case "${subcommand}" in
                 exit 5
             fi
             echo 0 "${originsize}" ddsnap "${dev_snapstore}" "${dev_origin}" "${agent_sockpath}" "$1" |
-                dmsetup create "${map_snap_stem}$1"
+                dmsetup create "${map_stem}$1"
             if [ $? -ne 0 ]; then
                 echo "$0: dmsetup failed to create snapshot $1 mapping" >& 2
                 exit 5
@@ -469,9 +468,9 @@ case "${subcommand}" in
 
     delete)
         if [ X"$1" = X"-1" ]; then
-            dmsetup remove "${map_origin}"
+            dmsetup remove "${map_stem}"
         else
-            dmsetup remove "${map_snap_stem}$1"
+            dmsetup remove "${map_stem}$1"
             ddsnap ${subcommand} ${suboptions} "${ddsnapd_sockpath}" "$@"
         fi
         ;;
@@ -485,15 +484,15 @@ case "${subcommand}" in
         ;;
 
     delta\ apply)
-        ddsnap ${subcommand} ${suboptions} "$1" "${map_path}/${map_snap_stem}$2" "${map_path}/${map_origin}"
+        ddsnap ${subcommand} ${suboptions} "$1" "${map_path}/${map_stem}$2" "${map_path}/${map_stem}"
         ;;
 
     delta\ send)
-        ddsnap ${subcommand} ${suboptions} "${ddsnapd_sockpath}" "$1" "$2" "${map_path}/${map_snap_stem}$1" "${map_path}/${map_snap_stem}$2" "$3" "$4"
+        ddsnap ${subcommand} ${suboptions} "${ddsnapd_sockpath}" "$1" "$2" "${map_path}/${map_stem}$1" "${map_path}/${map_stem}$2" "$3" "$4"
         ;;
 
     delta\ listen)
-        ddsnap ${subcommand} ${suboptions} -l "${ddsnap_delta_log}" -p "${ddsnap_delta_pid}" "${map_path}/${map_snap_stem}" "${map_path}/${map_origin}" "$@"
+        ddsnap ${subcommand} ${suboptions} -l "${ddsnap_delta_log}" -p "${ddsnap_delta_pid}" "${map_path}/${map_stem}" "${map_path}/${map_stem}" "$@"
         ;;
 
     agent)
