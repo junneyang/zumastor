@@ -8,7 +8,7 @@
 #define CHUNK_ARRAY_INIT 1024
 
 
-struct change_list *init_change_list(u32 chunksize_bits)
+struct change_list *init_change_list(u32 chunksize_bits, u32 src_snap, u32 tgt_snap)
 {
 	struct change_list *cl;
 
@@ -18,6 +18,8 @@ struct change_list *init_change_list(u32 chunksize_bits)
 	cl->count = 0;
 	cl->length = CHUNK_ARRAY_INIT;
 	cl->chunksize_bits = chunksize_bits;
+	cl->src_snap = src_snap;
+	cl->tgt_snap = tgt_snap;
 	cl->chunks = malloc(cl->length * sizeof(u64));
 
 	if (cl->chunks == NULL) {
@@ -56,4 +58,3 @@ void free_change_list(struct change_list *cl)
 		free(cl->chunks);
 	free(cl);
 }
-

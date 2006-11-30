@@ -896,7 +896,7 @@ static chunk_t alloc_chunk(struct superblock *sb)
 		err_msg = "unable to find a snapshot candidate to remove. Failing I/O.";
 		if (!cand_delete)
 			goto unable_to_delete; /* no snapshot to delete */
-		warn("snapshot store full, releasing snapshot %i", cand_delete->tag);
+		warn("snapshot store full, releasing snapshot %u", cand_delete->tag);
 		err_msg = "unable to release snapshot";
 		if (delete_snapshot(sb, cand_delete->tag))
 			goto unable_to_delete;
@@ -1043,13 +1043,13 @@ static void gen_changelist_leaf(struct superblock *sb, struct eleaf *leaf, void 
 		}
 }
 
-static struct change_list *gen_changelist_tree(struct superblock *sb, int snapshot1, int snapshot2)
+static struct change_list *gen_changelist_tree(struct superblock *sb, struct snapshot const *snapshot1, struct snapshot const *snapshot2)
 {
 	struct gen_changelist gcl;
 
-	gcl.mask1 = 1ULL << snapshot1;
-	gcl.mask2 = 1ULL << snapshot2;
-	if ((gcl.cl = init_change_list(sb->image.chunksize_bits)) == NULL)
+	gcl.mask1 = 1ULL << snapshot1->bit;
+	gcl.mask2 = 1ULL << snapshot2->bit;
+	if ((gcl.cl = init_change_list(sb->image.chunksize_bits, snapshot1->tag, snapshot2->tag)) == NULL)
 		return NULL;
 
 	traverse_tree_chunks(sb, gen_changelist_leaf, NULL, &gcl);
@@ -1387,7 +1387,7 @@ static int create_snapshot(struct superblock *sb, unsigned snaptag)
 	return -EFULL;
 
 create:
-	trace_on(printf("Create snapshot %i (internal %i)\n", snaptag, i););
+	trace_on(printf("Create snapshot %u (internal %i)\n", snaptag, i););
 	snapshot = sb->image.snaplist + sb->image.snapshots++;
 	*snapshot = (struct snapshot){ .tag = snaptag, .bit = i, .ctime = time(NULL) };
 	sb->snapmask |= (1ULL << i);
@@ -2503,7 +2503,7 @@ static int incoming(struct superblock *sb, struct client *client)
 		client->snap =  (tag == (u32)~0UL) ? tag : tag_snapnum(sb, tag);
 		
 		trace(fprintf(stderr, "got identify request, setting id="U64FMT" snap=%i, sending chunksize_bits=%u\n", client->id, client->snap, sb->image.chunksize_bits););
-		warn("client id %lli, snapshot %i (snapnum %i)", client->id, tag, client->snap);
+		warn("client id %llu, snapshot %u (snapnum %i)", client->id, tag, client->snap);
 
 		if (len != sb->image.orgsectors) {
 			snprintf(err_msg, MAX_ERRMSG_SIZE, "volume size mismatch for snapshot %u", tag);
@@ -2642,7 +2642,7 @@ static int incoming(struct superblock *sb, struct client *client)
 	}
 	case GENERATE_CHANGE_LIST:
 	{
-		int snap1 = ((struct generate_changelist *)message.body)->snap1,
+		unsigned int snap1 = ((struct generate_changelist *)message.body)->snap1,
 			snap2 = ((struct generate_changelist *)message.body)->snap2;
 		char const *err_msg;
 
@@ -2661,9 +2661,9 @@ static int incoming(struct superblock *sb, struct client *client)
 
 		struct change_list *cl;
 
-		trace_on(printf("generating changelist from snapshots %d and %d\n", snap1, snap2););
+		trace_on(printf("generating changelist from snapshots %u and %u\n", snap1, snap2););
 		err_msg = "unable to generate changelist";
-		if ((cl = gen_changelist_tree(sb, snapshot1->bit, snapshot2->bit)) == NULL)
+		if ((cl = gen_changelist_tree(sb, snapshot1, snapshot2)) == NULL)
 			goto generate_error_close;
 
 		err_msg = "unable to write to changelist file";
@@ -2701,7 +2701,7 @@ static int incoming(struct superblock *sb, struct client *client)
 	}
 	case STREAM_CHANGE_LIST:
 	{
-		int snap1 = ((struct stream_changelist *)message.body)->snap1,
+		unsigned int snap1 = ((struct stream_changelist *)message.body)->snap1,
 			snap2 = ((struct stream_changelist *)message.body)->snap2;
 		char const *err_msg;
 
@@ -2714,9 +2714,9 @@ static int incoming(struct superblock *sb, struct client *client)
 
 		struct change_list *cl;
 
-		trace_on(printf("generating changelist from snapshots %d and %d\n", snap1, snap2););
+		trace_on(printf("generating changelist from snapshots %u and %u\n", snap1, snap2););
 		err_msg = "unable to generate changelist";
-		if ((cl = gen_changelist_tree(sb, snapshot1->bit, snapshot2->bit)) == NULL)
+		if ((cl = gen_changelist_tree(sb, snapshot1, snapshot2)) == NULL)
 			goto stream_error;
 
 		trace_on(printf("sending stream header\n"););
@@ -2764,10 +2764,10 @@ static int incoming(struct superblock *sb, struct client *client)
 		unsigned int num_columns = num_rows;
 		unsigned int status_count;
 
-		if (request.snapid >= 0) {
+		if (request.snap != (u32)~0UL) {
 			status_count = 0;
 			for (snapnum = 0; snapnum < sb->image.snapshots; snapnum++)
-				if (snaplist[snapnum].tag == request.snapid) {
+				if (snaplist[snapnum].tag == request.snap) {
 					status_count = 1;
 					break;
 				}
@@ -2803,7 +2803,7 @@ static int incoming(struct superblock *sb, struct client *client)
 
 			printf("snapshots:\n");
 			for (snapnum = 0; snapnum < sb->image.snapshots; snapnum++)
-				printf(" %2d: bit=%d, idtag=%d\n", snapnum, sb->image.snaplist[snapnum].bit, sb->image.snaplist[snapnum].tag);
+				printf(" %2d: bit=%d, idtag=%u\n", snapnum, sb->image.snaplist[snapnum].bit, sb->image.snaplist[snapnum].tag);
 			printf("\n");
 
 			for (row = 0; row < num_rows; row++) {
@@ -2844,13 +2844,13 @@ static int incoming(struct superblock *sb, struct client *client)
 
 		row = 0;
 		for (snapnum = 0; snapnum < sb->image.snapshots; snapnum++) {
-			if (request.snapid >= 0 && snaplist[snapnum].tag != request.snapid)
+			if (request.snap != (u32)~0UL && snaplist[snapnum].tag != request.snap)
 				continue;
 
 			snap_status = get_snap_status(reply, row);
 
 			snap_status->ctime = snaplist[snapnum].ctime;
-			snap_status->snapid = snaplist[snapnum].tag;
+			snap_status->snap = snaplist[snapnum].tag;
 
 			for (col = 0; col < num_columns; col++)
 				snap_status->chunk_count[col] = share_table[snaplist[snapnum].bit][col];
@@ -3087,7 +3087,7 @@ int snap_server(struct superblock *sb, int listenfd, int getsigfd, int agentfd)
 
 				trace_off(printf("event on socket %i = %x\n", client->sock, pollvec[others+i].revents););
 				if ((result = incoming(sb, client)) == -1) {
-					warn("Client %Li disconnected", client->id);
+					warn("Client %llu disconnected", client->id);
 					save_state(sb); // !!! just for now
 					close(client->sock);
 					free(client);
