@@ -109,7 +109,7 @@ usage_delta_create()
 
 usage_delta_apply()
 {
-    echo "$@delta apply <deltafile> <snapshot>"
+    echo "$@delta apply <deltafile>"
 }
 
 usage_delta_send()
@@ -299,8 +299,8 @@ case "${subcommand}" in
         ;;
 
     priority|usecount|delta\ apply)
-        minargs='2'
-        maxargs='2'
+        minargs='1'
+        maxargs='1'
         shortopts=''
         longopts=''
         ;;
@@ -484,15 +484,15 @@ case "${subcommand}" in
         ;;
 
     delta\ apply)
-        ddsnap ${subcommand} ${suboptions} "$1" "${map_path}/${map_stem}$2" "${map_path}/${map_stem}"
+        ddsnap ${subcommand} ${suboptions} "$1" "${map_path}/${map_stem}"
         ;;
 
     delta\ send)
-        ddsnap ${subcommand} ${suboptions} "${ddsnapd_sockpath}" "$1" "$2" "${map_path}/${map_stem}$1" "${map_path}/${map_stem}$2" "$3" "$4"
+        ddsnap ${subcommand} ${suboptions} "${ddsnapd_sockpath}" "$1" "$2" "${map_path}/${map_stem}" "$3" "$4"
         ;;
 
     delta\ listen)
-        ddsnap ${subcommand} ${suboptions} -l "${ddsnap_delta_log}" -p "${ddsnap_delta_pid}" "${map_path}/${map_stem}" "${map_path}/${map_stem}" "$@"
+        ddsnap ${subcommand} ${suboptions} -l "${ddsnap_delta_log}" -p "${ddsnap_delta_pid}" "${map_path}/${map_stem}" "$@"
         ;;
 
     agent)
