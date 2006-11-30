@@ -189,23 +189,28 @@ static struct change_list *read_changelist(int cl_fd)
 
 static int write_changelist(int change_fd, struct change_list const *cl)
 {
-	struct cl_header clh = { };
+	struct cl_header clh;
+	int err;
 
 	strncpy(clh.magic, CHANGELIST_MAGIC_ID, sizeof(clh.magic));
 
-	if (fdwrite(change_fd, &clh, sizeof(clh)) < 0)
-		error("unable to write magic information to changelist file");
+	if ((err = fdwrite(change_fd, &clh, sizeof(clh))) < 0) {
+		warn("unable to write magic information to changelist file: %s", strerror(-err));
+		return -1;
+	}
 
 	if (fdwrite(change_fd, &cl->chunksize_bits, sizeof(cl->chunksize_bits)) < 0)
 		error("unable to write chunk size to changelist file");
 
-	if (fdwrite(change_fd, cl->chunks, cl->count * sizeof(cl->chunks[0])) < 0)
-		error("unable to write changelist file");
+	if ((err = fdwrite(change_fd, cl->chunks, cl->count * sizeof(cl->chunks[0]))) < 0) {
+		warn("unable to write changelist file: %s", strerror(-err));
+		return -1;
+	}
 
 	u64 marker = -1;
 
-	if (fdwrite(change_fd, &marker, sizeof(marker)) < 0)
-		error("unable to write changelist marker");
+	if ((err = fdwrite(change_fd, &marker, sizeof(marker))) < 0)
+		error("unable to write changelist marker: %s", strerror(-err));
 
 	return 0;
 }
@@ -265,7 +270,6 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 
 	/* Chunk address followed by CHUNK_SIZE bytes of chunk data */
 	for (chunk_num = 0; chunk_num < cl->count;) {
-
 		extent_addr = cl->chunks[chunk_num] << cl->chunksize_bits;
 
 		if (chunk_num == (cl->count - 1) )
@@ -278,6 +282,9 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 		comp_size = extent_size + 12 + (extent_size >> 9);
 		ext2_comp_size = comp_size;
 
+		trace_off(if (progress) printf("\n"););
+		trace_off(printf("extent starting at chunk %llu (chunk address 0x%016llx, byte offset 0x%016llx), %llu chunks (%llu bytes)\n", chunk_num, cl->chunks[chunk_num], extent_addr, num_of_chunks, extent_size););
+
 		extent_data1    = malloc(extent_size);
 		extent_data2    = malloc(extent_size);
 		delta_data      = malloc(extent_size);
@@ -287,7 +294,7 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 		if (!extent_data1 || !extent_data2 || !delta_data || !comp_delta || !ext2_comp_delta)
 			goto gen_alloc_error;
 		
-		trace_off(if (progress) printf("\n"); printf("Reading data to calculate delta for "U64FMT" chunk extent with start address "U64FMT"\n", num_of_chunks, extent_addr););
+		trace_off(printf("reading data to calculate delta\n"););
 
 		/* read in and generate the necessary chunk information */
 		if ((err = diskread(snapdev1, extent_data1, extent_size, extent_addr)) < 0)
@@ -303,7 +310,7 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 
 			/* If delta is larger than chunk_size, we want to just copy over the raw chunk */
 			if (ret == BUFFER_SIZE_ERROR) {
-				trace_off(printf("Buffer size error\n"););
+				trace_off(printf("buffer size error\n"););
 				memcpy(delta_data, extent_data2, extent_size);
 				delta_size = extent_size;
 			} else if (ret < 0)
@@ -323,11 +330,11 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 //					printf("checksum of delta_test does not match check_sum of extent_data2");
 				
 				if (memcmp(delta_test, extent_data2, extent_size) != 0) {
-					trace_off(printf("\nGenerated delta does not match extent on disk.\n"););
+					trace_off(printf("generated delta does not match extent on disk.\n"););
 					memcpy(delta_data, extent_data2, extent_size);
 					delta_size = extent_size;
 				}
-				trace_off(printf("\nAble to generate delta\n"););
+				trace_off(printf("able to generate delta\n"););
 				free(delta_test);
 			}
 		}
@@ -342,7 +349,7 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 		if (comp_ret == Z_STREAM_ERROR)
 			goto gen_compstream_error;
 
-		trace_off(printf("Set up delta extent header\n"););
+		trace_off(printf("set up delta extent header\n"););
 		deh.check_sum = checksum((const unsigned char *) extent_data2, extent_size);
 		deh.extent_addr = extent_addr;
 		deh.num_of_chunks = num_of_chunks;
@@ -351,7 +358,7 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 		deh.data_length = delta_size;
 
 		if (mode == OPT_COMP) {
-			trace_off(printf("Within opt_comp mode\n"););
+			trace_off(printf("within opt_comp mode\n"););
 
 			int ext2_comp_ret = compress2(ext2_comp_delta, (unsigned long *) &ext2_comp_size, extent_data2, extent_size, level);
 
@@ -375,7 +382,7 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 		}
 
 		/* write the chunk header and chunk delta data to the delta file*/
-		trace_off(printf("Writing chunk "U64FMT" at "U64FMT" to delta\n", chunk_num, extent_addr););
+		trace_off(printf("writing delta for extent starting at chunk "U64FMT", address "U64FMT"\n", chunk_num, extent_addr););
 		if ((err = fdwrite(deltafile, &deh, sizeof(deh))) < 0)
 			goto gen_writehead_error;
 
@@ -388,10 +395,8 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 					goto gen_writedata_error;
 			}
 		} else {
-			if ((err = fdwrite(deltafile, delta_data, delta_size)) < 0) {
-				printf("Delta_data was not written properly to deltafile.\n");
-				goto out_error;
-			}
+			if ((err = fdwrite(deltafile, delta_data, delta_size)) < 0)
+				goto gen_writedata_error;
 		}
 
                 if (mode == TEST) {
@@ -410,8 +415,12 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 		chunk_num = chunk_num + num_of_chunks;
 
 		if (progress) {
+#ifdef DEBUG_GEN
+			printf("Generating chunk "U64FMT"/"U64FMT" ("U64FMT"%%)\n", chunk_num, cl->count, (chunk_num * 100) / cl->count);
+#else
 			printf("\rGenerating chunk "U64FMT"/"U64FMT" ("U64FMT"%%)", chunk_num, cl->count, (chunk_num * 100) / cl->count);
 			fflush(stdout);
+#endif
 		}
 	}
 
@@ -434,90 +443,84 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 
 	/* error messages */
 
-out_error:
-	close(snapdev1);
-	close(snapdev2);
-
-	return -1; /* FIXME: use named error */
-
 gen_open1_error:
-	warn("could not open snapshot device \"%s\" for reading: %s\n", dev1name, strerror(-err));
+	warn("could not open snapshot device \"%s\" for reading: %s", dev1name, strerror(-err));
 	goto gen_cleanup;
 
 gen_open2_error:
-	warn("could not open snapshot device \"%s\" for reading: %s\n", dev2name, strerror(-err));
+	warn("could not open snapshot device \"%s\" for reading: %s", dev2name, strerror(-err));
 	goto gen_close1_cleanup;
 
 gen_alloc_error:
 	err = -ENOMEM;
 	if (progress)
 		printf("\n");
-	warn("memory allocation failed while generating a "U64FMT" chunk extent starting at offset "U64FMT": %s\n", num_of_chunks, extent_addr, strerror(-err));
+	warn("memory allocation failed while generating a "U64FMT" chunk extent starting at offset "U64FMT": %s", num_of_chunks, extent_addr, strerror(-err));
 	goto gen_closeall_cleanup;
 
 gen_readsnap1_error:
 	if (progress)
 		printf("\n");
-	warn("read of "U64FMT" chunk extent starting at offset "U64FMT" in snapshot device \"%s\" failed: %s\n", num_of_chunks, extent_addr, dev1name, strerror(-err));
+	warn("read of "U64FMT" chunk extent starting at offset "U64FMT" in snapshot device \"%s\" failed: %s", num_of_chunks, extent_addr, dev1name, strerror(-err));
 	goto gen_free_cleanup;
 
 gen_readsnap2_error:
 	if (progress)
 		printf("\n");
-	warn("read of "U64FMT" chunk extent starting at offset "U64FMT" in snapshot device \"%s\" failed: %s\n", num_of_chunks, extent_addr, dev2name, strerror(-err));
+	warn("read of "U64FMT" chunk extent starting at offset "U64FMT" in snapshot device \"%s\" failed: %s", num_of_chunks, extent_addr, dev2name, strerror(-err));
 	goto gen_free_cleanup;
 
 gen_create_error:
 	err = -ERANGE;
 	if (progress)
 		printf("\n");
-	warn("unable to create delta for "U64FMT" chunk extent starting at offset "U64FMT"\n", num_of_chunks, extent_addr);
+	warn("unable to create delta for "U64FMT" chunk extent starting at offset "U64FMT, num_of_chunks, extent_addr);
 	goto gen_free_cleanup;
 
 gen_applytest_error:
 	err = -ERANGE;
 	if (progress)
 		printf("\n");
-	warn("test application of delta for "U64FMT" chunk extent starting at offset "U64FMT" failed\n", num_of_chunks, extent_addr);
+	warn("test application of delta for "U64FMT" chunk extent starting at offset "U64FMT" failed", num_of_chunks, extent_addr);
 	goto gen_free_cleanup;
 
 gen_compmem_error:
 	err = -ENOMEM;
 	if (progress)
 		printf("\n");
-	warn("not enough buffer memory for compression of delta for "U64FMT" chunk extent starting at offset "U64FMT"\n", num_of_chunks, extent_addr);
+	warn("not enough buffer memory for compression of delta for "U64FMT" chunk extent starting at offset "U64FMT, num_of_chunks, extent_addr);
 	goto gen_free_cleanup;
 
 gen_compbuf_error:
 	err = -ERANGE;
 	if (progress)
 		printf("\n");
-	warn("not enough room in the output buffer for compression of delta for "U64FMT" chunk extent starting at offset "U64FMT"\n", num_of_chunks, extent_addr);
+	warn("not enough room in the output buffer for compression of delta for "U64FMT" chunk extent starting at offset "U64FMT, num_of_chunks, extent_addr);
 	goto gen_free_cleanup;
 
 gen_compstream_error:
 	err = -ERANGE;
 	if (progress)
 		printf("\n");
-	warn("invalid compression parameter level=%d delta_size=%llu in delta for "U64FMT" chunk extent starting at offset "U64FMT"\n", level, delta_size, num_of_chunks, extent_addr);
+	warn("invalid compression parameter level=%d delta_size=%llu in delta for "U64FMT" chunk extent starting at offset "U64FMT, level, delta_size, num_of_chunks, extent_addr);
 	goto gen_free_cleanup;
 
 gen_writehead_error:
 	if (progress)
 		printf("\n");
-	warn("unable to write delta header for "U64FMT" chunk extent starting at offset "U64FMT": %s\n", num_of_chunks, extent_addr, strerror(-err));
+	warn("unable to write delta header for "U64FMT" chunk extent starting at offset "U64FMT": %s", num_of_chunks, extent_addr, strerror(-err));
 	goto gen_free_cleanup;
 
 gen_writedata_error:
 	if (progress)
 		printf("\n");
-	warn("unable to write delta data for "U64FMT" chunk extent starting at offset "U64FMT": %s\n", num_of_chunks, extent_addr, strerror(-err));
+	warn("unable to write delta data for "U64FMT" chunk extent starting at offset "U64FMT": %s", num_of_chunks, extent_addr, strerror(-err));
 	goto gen_free_cleanup;
 
 gen_writetest_error:
 	if (progress)
 		printf("\n");
-	warn("unable to write delta test data for "U64FMT" chunk extent starting at offset "U64FMT": %s\n", num_of_chunks, extent_addr, strerror(-err));
+	warn("unable to write delta test data for "U64FMT" chunk extent starting at offset "U64FMT": %s", num_of_chunks, extent_addr, strerror(-err));
 	goto gen_free_cleanup;
 
 
@@ -571,14 +574,14 @@ static int ddsnap_generate_delta(u32 mode, int level, char const *changelistname
 {
 	int clfile = open(changelistname, O_RDONLY);
 	if (clfile < 0) {
-		fprintf(stderr, "Could not open changelist file \"%s\" for reading.\n", changelistname);
+		warn("could not open changelist file \"%s\" for reading: %s", changelistname, strerror(errno));
 		return 1;
 	}
 
 	struct change_list *cl;
 
 	if ((cl = read_changelist(clfile)) == NULL) {
-		fprintf(stderr, "Unable to parse changelist file %s.\n", changelistname);
+		warn("unable to parse changelist file \"%s\"", changelistname);
 		close(clfile);
 		return 1;
 	}
@@ -587,15 +590,15 @@ static int ddsnap_generate_delta(u32 mode, int level, char const *changelistname
 
 	int deltafile = open(deltaname, O_CREAT|O_WRONLY|O_TRUNC, S_IRWXU);
 	if (deltafile < 0) {
-		fprintf(stderr, "Could not create delta file \"%s\"\n", deltaname);
+		warn("could not create delta file \"%s\": %s", deltaname, strerror(errno));
 		free_change_list(cl);
 		return 1;
 	}
 
 	if (generate_delta(mode, level, cl, deltafile, dev1name, dev2name) < 0) {
+		warn("could not write delta file \"%s\"", deltaname);
 		close(deltafile);
 		free_change_list(cl);
-		fprintf(stderr, "Could not write delta file \"%s\"\n", deltaname);
 		return 1;
 	}
 
@@ -605,11 +608,11 @@ static int ddsnap_generate_delta(u32 mode, int level, char const *changelistname
 	return 0;
 }
 
-static struct change_list *stream_changelist(int serv_fd, u32 snap1, u32 snap2)
+static struct change_list *stream_changelist(int serv_fd, u32 src_snap, u32 tgt_snap)
 {
 	int err;
 
-	if ((err = outbead(serv_fd, STREAM_CHANGE_LIST, struct stream_changelist, snap1, snap2))) {
+	if ((err = outbead(serv_fd, STREAM_CHANGE_LIST, struct stream_changelist, src_snap, tgt_snap))) {
 		error("%s (%i)", strerror(-err), -err);
 		return NULL;
 	}
@@ -621,8 +624,13 @@ static struct change_list *stream_changelist(int serv_fd, u32 snap1, u32 snap2)
 
 	trace_on(printf("reply = %x\n", head.code););
 
-	if (head.code != REPLY_STREAM_CHANGE_LIST)
+	if (head.code != REPLY_STREAM_CHANGE_LIST) {
+		if (head.code == REPLY_ERROR) {
+			fprintf(stderr, "Unable to obtain changelist between snapshot %u and %u\n", src_snap, tgt_snap);
+			return NULL;
+		}
 		error("received unexpected code=%x length=%u", head.code, head.length);
+	}
 
 	struct changelist_stream cl_head;
 
@@ -667,14 +675,14 @@ static struct change_list *stream_changelist(int serv_fd, u32 snap1, u32 snap2)
 	return cl;
 }
 
-static int ddsnap_send_delta(int serv_fd, u32 snap1, u32 snap2, char const *snapdev1, char const *snapdev2, u32 remsnap, u32 mode, int level, int ds_fd)
+static int ddsnap_send_delta(int serv_fd, u32 src_snap, u32 tgt_snap, char const *snapdev1, char const *snapdev2, u32 remsnap, u32 mode, int level, int ds_fd)
 {
 	struct change_list *cl;
 
-	trace_on(printf("requesting changelist from snapshot %u to %u\n", snap1, snap2););
+	trace_on(printf("requesting changelist from snapshot %u to %u\n", src_snap, tgt_snap););
 
-	if ((cl = stream_changelist(serv_fd, snap1, snap2)) == NULL) {
-		fprintf(stderr, "could not receive change list for snapshots %u and %u\n", snap1, snap2);
+	if ((cl = stream_changelist(serv_fd, src_snap, tgt_snap)) == NULL) {
+		fprintf(stderr, "could not receive change list for snapshots %u and %u\n", src_snap, tgt_snap);
 		return 1;
 	}
 
@@ -783,7 +791,7 @@ static int apply_delta_extents(int deltafile, u32 mode, u32 chunk_size, u64 chun
 
 		extent_addr = deh.extent_addr;
 
-		trace_off(printf("data length is %Lu (buffer is %Lu)\n", deh.data_length, extent_size););
+		trace_off(printf("extent data length is %llu (extent buffer is %llu)\n", deh.data_length, extent_size););
 
 		if (deh.compress == TRUE) {
 			if ((err = fdread(deltafile, comp_delta, deh.data_length)) < 0)
@@ -792,10 +800,6 @@ static int apply_delta_extents(int deltafile, u32 mode, u32 chunk_size, u64 chun
 			if ((err = fdread(deltafile, delta_data, deh.data_length)) < 0)
 				goto apply_deltaread_error;
 		}
-
-		trace_off(printf("reading "U64FMT" chunk extent data starting at chunk "U64FMT"/offset "U64FMT" from \"%s\"\n", deh.num_of_chunks, chunk_num, extent_addr, devname););
-		if ((err = diskread(snapdev, extent_data, extent_size, extent_addr)) < 0)
-			goto apply_devread_error;
 
 		if (deh.compress == TRUE) {
 			trace_off(printf("data was compressed \n"););
@@ -818,13 +822,18 @@ static int apply_delta_extents(int deltafile, u32 mode, u32 chunk_size, u64 chun
 			if (uncomp_size == extent_size)
 				memcpy(updated, delta_data, extent_size);
 			else {
+				if ((err = diskread(snapdev, extent_data, extent_size, extent_addr)) < 0)
+					goto apply_devread_error;
+
+				trace_off(printf("read %llx chunk delta extent data starting at chunk "U64FMT"/offset "U64FMT" from \"%s\"\n", deh.num_of_chunks, chunk_num, extent_addr, devname););
+
 				int apply_ret = apply_delta_chunk(extent_data, updated, delta_data, extent_size, uncomp_size);
 				trace_off(printf("apply_ret %d\n", apply_ret););
 				if (apply_ret < 0)
 					goto apply_chunk_error;
 			}
 
-			if (deh.check_sum != checksum((const unsigned char *) updated, extent_size)) {
+			if (deh.check_sum != checksum((const unsigned char *)updated, extent_size)) {
 				if (mode != TEST)
 					goto apply_checksum_error;
 
@@ -836,10 +845,10 @@ static int apply_delta_extents(int deltafile, u32 mode, u32 chunk_size, u64 chun
 					goto apply_testread_error;
 				if ((err = fdread(deltafile, up_extent2, extent_size)) < 0)
 					goto apply_testread_error;
-				int c1_chk_sum = checksum((const unsigned char *) extent_data, extent_size);
+				int c1_chk_sum = checksum((const unsigned char *)extent_data, extent_size);
 
 				/* sanity check: does the checksum of upstream extent1 = checksum of downstream extent1? */
-				if (c1_chk_sum != checksum((const unsigned char *) up_extent1, extent_size)) {
+				if (c1_chk_sum != checksum((const unsigned char *)up_extent1, extent_size)) {
 					printf("check_sum of extent1 doesn't match for address "U64FMT"\n", extent_addr);
 					if (deh.data_length == extent_size)
 						memcpy(updated, delta_data, extent_size);
@@ -1005,18 +1014,18 @@ static int apply_delta(int deltafile, char const *devname)
 	struct delta_header dh;
 
 	if (fdread(deltafile, &dh, sizeof(dh)) < 0) {
-		fprintf(stderr, "Not a proper delta file (too short).\n");
+		warn("not a proper delta file (too short)\n");
 		return -1; /* FIXME: use named error */
 	}
 
 	/* Make sure it's a proper delta file */
 	if (strncmp(dh.magic, DELTA_MAGIC_ID, MAGIC_SIZE) != 0) {
-		fprintf(stderr, "Not a proper delta file (wrong magic in header).\n");
+		warn("not a proper delta file (wrong magic in header)\n");
 		return -1; /* FIXME: use named error */
 	}
 
 	if (dh.chunk_size == 0) {
-		fprintf(stderr, "Not a proper delta file (zero chunk size).\n");
+		warn("not a proper delta file (zero chunk size)\n");
 		return -1; /* FIXME: use named error */
 	}
 
@@ -1046,9 +1055,8 @@ static int ddsnap_apply_delta(char const *deltaname, char const *devname)
 
 	char test;
 
-	if (read(deltafile, &test, 1) == 1) {
-		fprintf(stderr, "Extra data at end of delta file\n");
-	}
+	if (read(deltafile, &test, 1) == 1)
+		fprintf(stderr, "Extra data at end of delta file \"%s\"\n", deltaname);
 
 	close(deltafile);
 
@@ -1059,7 +1067,7 @@ static int list_snapshots(int serv_fd)
 {
 	int err;
 
-	if ((err = outbead(serv_fd, LIST_SNAPSHOTS, struct create_snapshot, 0))) { /* FIXME: why create_snapshot? */
+	if ((err = outbead(serv_fd, LIST_SNAPSHOTS, struct create_snapshot, 0))) {
 		error("%s (%i)", strerror(-err), -err);
 		return 1;
 	}
@@ -1096,7 +1104,7 @@ static int list_snapshots(int serv_fd)
 
 	for (i = 0; i < count; i++) {
 		printf("Snapshot %d:\n", i);
-		printf("\ttag= %u \t", buffer[i].snap);
+		printf("\ttag= %u \t", (unsigned int)buffer[i].snap);
 		printf("priority= %d \t", (int)buffer[i].prio);
 		printf("use count= %u \t", (unsigned int)buffer[i].usecnt);
 
@@ -1111,7 +1119,7 @@ static int list_snapshots(int serv_fd)
 	return 0;
 }
 
-static int ddsnap_generate_changelist(int serv_fd, char const *changelist_filename, u32 snap1, u32 snap2)
+static int ddsnap_generate_changelist(int serv_fd, char const *changelist_filename, u32 src_snap, u32 tgt_snap)
 {
 	int change_fd = open(changelist_filename, O_CREAT | O_TRUNC | O_WRONLY, S_IRUSR | S_IWUSR);
 
@@ -1120,8 +1128,8 @@ static int ddsnap_generate_changelist(int serv_fd, char const *changelist_filena
 
 	struct change_list *cl;
 
-	if ((cl = stream_changelist(serv_fd, snap1, snap2)) == NULL) {
-		fprintf(stderr, "could not generate change list between snapshots %u and %u\n", snap1, snap2);
+	if ((cl = stream_changelist(serv_fd, src_snap, tgt_snap)) == NULL) {
+		fprintf(stderr, "could not generate change list between snapshots %u and %u\n", src_snap, tgt_snap);
 		return 1;
 	}
 
@@ -1225,7 +1233,7 @@ static int set_usecount(int sock, u32 snaptag, const char *op)
 	return 0;
 }
 
-static int ddsnap_delta_server(int lsock, char const *snapdevstem)
+static int ddsnap_delta_server(int lsock, char const *devstem)
 {
 	for (;;) {
 		int csock;
@@ -1241,13 +1249,12 @@ static int ddsnap_delta_server(int lsock, char const *snapdevstem)
 
 		if ((pid = fork()) < 0) {
 			fprintf(stderr, "unable to fork to service connection: %s\n", strerror(errno));
-			goto cleanup_connection;
+			goto cleanup_client;
 		}
 
 		if (pid != 0) {
 			/* parent -- wait for another connection */
-			close(csock);
-			continue;
+			goto cleanup_client;
 		}
 
 		trace_on(fprintf(stderr, "processing\n"););
@@ -1259,15 +1266,15 @@ static int ddsnap_delta_server(int lsock, char const *snapdevstem)
 
 		if ((err = readpipe(csock, &message.head, sizeof(message.head))) < 0) {
 			fprintf(stderr, "error reading upstream message header: %s\n", strerror(-err));
-			goto cleanup_connection;
+			goto end_connection;
 		}
 		if (message.head.length > maxbody) {
-			fprintf(stderr, "message body too long %d\n", message.head.length);
-			goto cleanup_connection;
+			fprintf(stderr, "message body too long %u\n", message.head.length);
+			goto end_connection;
 		}
 		if ((err = readpipe(csock, &message.body, message.head.length)) < 0) {
 			fprintf(stderr, "error reading upstream message body: %s\n", strerror(-err));
-			goto cleanup_connection;
+			goto end_connection;
 		}
 
 		struct send_delta body;
@@ -1277,31 +1284,31 @@ static int ddsnap_delta_server(int lsock, char const *snapdevstem)
 			if (message.head.length < sizeof(body)) {
 				fprintf(stderr, "incomplete SEND_DELTA request sent by client\n");
 				outbead(csock, REPLY_ERROR, struct reply_error, REPLY_ERROR_OTHER, 0);
-				goto cleanup_connection;
+				goto end_connection;
 			}
 
 			memcpy(&body, message.body, sizeof(body));
 
-			if (body.snap == (u32)~0UL) {
-				fprintf(stderr, "invalid snapshot %u in SEND_DELTA\n", body.snap);
+			if (body.snapid == (u32)~0UL) {
+				fprintf(stderr, "invalid snapshot %u in SEND_DELTA\n", body.snapid);
 				outbead(csock, REPLY_ERROR, struct reply_error, REPLY_ERROR_OTHER, 0);
-				goto cleanup_connection;
+				goto end_connection;
 			}
 
 			if (body.chunk_size == 0) {
 				fprintf(stderr, "invalid chunk size %u in SEND_DELTA\n", body.chunk_size);
 				outbead(csock, REPLY_ERROR, struct reply_error, REPLY_ERROR_OTHER, 0);
-				goto cleanup_connection;
+				goto end_connection;
 			}
 
 			char *remotedev;
 
-			if (!(remotedev = malloc(strlen(snapdevstem)+32+1))) {
-				fprintf(stderr, "incomplete SEND_DELTA request sent by client\n");
+			if (!(remotedev = malloc(strlen(devstem)+32+1))) {
+				fprintf(stderr, "unable to allocate device name\n");
 				outbead(csock, REPLY_ERROR, struct reply_error, REPLY_ERROR_OTHER, 0);
-				goto cleanup_connection;
+				goto end_connection;
 			}
-			sprintf(remotedev, "%s%u", snapdevstem, body.snap);
+			sprintf(remotedev, "%s%u", devstem, body.snapid);
 
 			/* FIXME: verify snapshot exists */
 
@@ -1314,28 +1321,31 @@ static int ddsnap_delta_server(int lsock, char const *snapdevstem)
 			/* retrieve it */
 
 			if (apply_delta_extents(csock, body.delta_mode, body.chunk_size, body.chunk_count, remotedev, TRUE) < 0) {
-				fprintf(stderr, "unable to apply upstream delta to device %s\n", remotedev);
+				fprintf(stderr, "unable to apply upstream delta to device \"%s\"\n", remotedev);
 				outbead(csock, REPLY_ERROR, struct reply_error, REPLY_ERROR_OTHER, 0);
-				goto cleanup_connection;
+				goto end_connection;
 			}
 
 			/* success */
 
 			outbead(csock, SEND_DELTA_DONE, struct {});
-			trace_on(fprintf(stderr, "applied streamed delta to %s\n", remotedev););
+			trace_on(fprintf(stderr, "applied streamed delta to \"%s\"\n", remotedev););
 			fprintf(stderr, "closing connection\n");
 			close(csock);
 			exit(0);
 
 		default:
-			fprintf(stderr, "unexpected message type sent to snapshot replication server %d\n", message.head.code);
+			fprintf(stderr, "unexpected message type sent to snapshot replication server %x\n", message.head.code);
 			outbead(csock, REPLY_ERROR, struct reply_error, REPLY_ERROR_OTHER, 0);
-			fprintf(stderr, "closing connection\n");
-			close(csock);
-			exit(1);
+			goto end_connection;
 		}
 
-	cleanup_connection:
+	end_connection:
+		fprintf(stderr, "closing connection\n");
+		close(csock);
+		exit(1);
+
+	cleanup_client:
 		close(csock);
 	}
 
@@ -1432,7 +1442,7 @@ static int ddsnap_get_status(int serv_fd, u32 snaptag, int verbose)
 	for (row = 0; row < reply->status_count; row++) {
 		snap_status = get_snap_status(reply, row);
 
-		printf("%6u", snap_status->snap);
+		printf("%6u", snap_status->snapid);
 
 		time = (time_t)snap_status->ctime;
 		ctime_str = ctime(&time);
@@ -1604,7 +1614,7 @@ int main(int argc, char *argv[])
 		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &cdOptions, 0,
 		  "Send delta\n\t Function: Send a delta file to a downstream server\n\t Usage: delta send [OPTION...] <sockname> <snapshot1> <snapshot2> <snapdev1> <snapdev2> <remsnapshot> <host>[:<port>]\n", NULL },
 		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &serverOptions, 0,
-		  "Listen\n\t Function: Listen for a delta arriving from upstream\n\t Usage: delta listen [OPTION...] <snapdevstem> [<host>[:<port>]]", NULL },
+		  "Listen\n\t Function: Listen for a delta arriving from upstream\n\t Usage: delta listen [OPTION...] <devstem> [<host>[:<port>]]", NULL },
 		POPT_TABLEEND
 	};
 
@@ -1749,7 +1759,7 @@ int main(int argc, char *argv[])
 
 		poptFreeContext(initCon);
 		
-		trace_off(printf("js_bytes was %d & bs_bits was %d\n", js_bytes, bs_bits););
+		trace_off(printf("js_bytes was %u & bs_bits was %u\n", js_bytes, bs_bits););
 
 		if (bs_str != NULL) {
 			bs_bits = strtobits(bs_str);
@@ -1768,12 +1778,12 @@ int main(int argc, char *argv[])
 			}
 		}
 
-		trace_off(printf("js_bytes is %d & bs_bits is %d\n", js_bytes, bs_bits););
+		trace_off(printf("js_bytes is %u & bs_bits is %u\n", js_bytes, bs_bits););
 
 # ifdef MKDDSNAP_TEST
 		init_snapstore(sb, js_bytes, bs_bits);
 		create_snapshot(sb, 0);
-	
+		
 		int i;
 		for (i = 0; i < 100; i++) {
 			make_unique(sb, i, 0);
@@ -1986,7 +1996,6 @@ int main(int argc, char *argv[])
 
 		int ret = create_snapshot(sock, snaptag);
 		close(sock);
-
 		return ret;
 	}
 	if (strcmp(command, "delete") == 0) {
@@ -2346,7 +2355,7 @@ int main(int argc, char *argv[])
 			return ret;
 		}
 		if (strcmp(subcommand, "listen") == 0) {
-			char const *snapdevstem;
+			char const *devstem;
 			char const *hostspec;
 
 			struct poptOption options[] = {
@@ -2356,7 +2365,7 @@ int main(int argc, char *argv[])
 			};
 
 			poptContext dsCon = poptGetContext(NULL, argc-2, (const char **)&(argv[2]), options, 0);
-			poptSetOtherOptionHelp(dsCon, "<snapdevstem> <host>[:<port>]");
+			poptSetOtherOptionHelp(dsCon, "<devstem> <host>[:<port>]");
 
 			char dsOpt = poptGetNextOpt(dsCon);
 
@@ -2366,8 +2375,8 @@ int main(int argc, char *argv[])
 				return 1;
 			}
 
-			snapdevstem = poptGetArg(dsCon);
-			if (snapdevstem == NULL) {
+			devstem = poptGetArg(dsCon);
+			if (devstem == NULL) {
 				fprintf(stderr, "%s %s: snapshot device stem must be specified\n", command, subcommand);
 				poptPrintUsage(dsCon, stderr, 0);
 				poptFreeContext(dsCon);
@@ -2423,7 +2432,7 @@ int main(int argc, char *argv[])
 				}
 			}
 
-			return ddsnap_delta_server(sock, snapdevstem);
+			return ddsnap_delta_server(sock, devstem);
 		}
 
 		fprintf(stderr, "%s %s: unrecognized delta subcommand: %s.\n", argv[0], command, subcommand);
