@@ -1426,6 +1426,41 @@ static int ddsnap_delta_server(int lsock, char const *devstem)
 	return 0;
 }
 
+static u64 get_origin_sectors(int serv_fd)
+{
+	int err;
+
+	if ((err = outbead(serv_fd, REQUEST_ORIGIN_SECTORS, struct {}))) {
+		error("%s (%i)", strerror(-err), -err);
+		return 0;
+	}
+
+	struct head head;
+
+	if ((err = readpipe(serv_fd, &head, sizeof(head))) < 0)
+		error("%s (%i)", strerror(-err), -err);
+
+	trace_on(printf("reply = %x\n", head.code););
+
+	if (head.code != ORIGIN_SECTORS) {
+		if (head.code == REPLY_ERROR) {
+			warn("unable to obtain origin sectors");
+			return 0;
+		}
+		error("received unexpected code=%x length=%u", head.code, head.length);
+	}
+
+	struct origin_sectors body;
+
+	if (head.length != sizeof(body))
+		error("reply length mismatch: expected %u, actual %u", sizeof(body), head.length);
+
+	if ((err = readpipe(serv_fd, &body, sizeof(body))) < 0)
+		error("%s (%i)", strerror(-err), -err);
+
+	return body.count;
+}
+
 static struct status *get_snap_status(struct status_message *message, unsigned int snaptag)
 {
 	struct status *status;
@@ -1489,6 +1524,7 @@ static int ddsnap_get_status(int serv_fd, u32 snaptag, int verbose)
 		printf("Free metadata: %llu\n", reply->meta.free);
 	}
 
+	printf("Origin size: %llu\n", get_origin_sectors(serv_fd) << SECTOR_BITS);
 	printf("Write density: %g\n", (double)reply->write_density/(double)0xffffffff);
 
 	time_t time = (time_t)reply->ctime;
@@ -2228,10 +2264,10 @@ int main(int argc, char *argv[])
 
 			int sock = create_socket(argv[2]);
 
-			int ret = 1; /* FIXME: use new snapshot server code */
+			printf("%llu\n", get_origin_sectors(sock));
 			close(sock);
 
-			return ret;
+			return 0;
 		} else {
 			char const *sockname, *snaptagstr;
 

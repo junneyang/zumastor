@@ -52,6 +52,8 @@ enum csnap_codes
 	SEND_DELTA_DONE,
 	STATUS_REQUEST,
 	STATUS_MESSAGE,
+	REQUEST_ORIGIN_SECTORS,
+	ORIGIN_SECTORS,
 };
 
 enum csnap_error_codes
@@ -82,6 +84,7 @@ struct status_request { uint32_t snap; } PACKED;
 struct overall_status { uint32_t chunksize_bits; uint64_t used; uint64_t free; } PACKED;
 struct status { uint64_t ctime; uint32_t snap; uint64_t chunk_count[]; } PACKED;
 struct status_message { uint64_t ctime; struct overall_status meta; struct overall_status store; uint32_t write_density; uint32_t status_count; uint32_t num_columns; char status_data[]; } PACKED;
+struct origin_sectors { uint64_t count; } PACKED;
 
 
 typedef uint16_t shortcount; /* !!! what is this all about */
