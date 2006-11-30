@@ -20,6 +20,9 @@ esac
 
 function ddsnap {
 case $1 in
+create|delete)
+	echo "$@"
+	;;
 status)
 	case $3 in
 	--size)

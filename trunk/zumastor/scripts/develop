@@ -1,3 +1,5 @@
+#!/bin/sh
+
 ln -s $(pwd)/bin/zumastor /bin/zumastor
 ln -s $(pwd)/lib/zumastor /lib/zumastor
 ln -s $(pwd)/var/lib/zumastor /var/lib/zumastor
