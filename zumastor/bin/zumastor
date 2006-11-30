@@ -11,28 +11,28 @@ function new_snapshot {
 	vol=$1
 	kind=$2
 	master=$VOLUMES/$vol/master
-	sock=/etc/zumastor/sockets/$vol
-	file=$master/schedule/$kind
+	sock=/etc/zumastor/servers/$vol
 
+	file=$master/schedule/$kind
 	read max <$file
 	echo new snapshot $vol $kind max=$max
 	echo $kind snapshots limit: $max
 	read next <$master/next
 	echo next = $next
 	echo $(( next+1 )) >$master/next
-	file=$master/snapshots/$kind
 
+	file=$master/snapshots/$kind
 	read -a snapshots <$file
 	echo snapshots: ${snapshots[@]}
 	num=${#snapshots[@]}
 	snapshots[$num]=$next
-	echo ddsnap create $next $sock
+	ddsnap create $sock $next
 	create_device $vol $next
 
 	if [[ $num -ge $max ]]; then
 		oldest=${snapshots[0]}
 		remove_device $vol $oldest
-		echo ddsnap delete $oldest $sock
+		ddsnap delete $sock $oldest
 		unset snapshots[0]
 	fi
 	echo snapshots: ${snapshots[@]}
@@ -48,8 +48,8 @@ function run_master {
 	touch /var/run/zumastor/cron/$vol || exit 1
 	while true; do
 #		xargs -n1 <$fifo echo snapshot $vol || echo error $?
-#		read $snap <$fifo || exit 1
-		kind=$(cat <$fifo) || exit 1
+		read kind <$fifo || exit 1
+#		kind=$(cat <$fifo) || exit 1
 		new_snapshot $vol $kind
 	done
 }
@@ -81,14 +81,14 @@ function define_volume {
 	odev=$2
 	sdev=$3
 	path=$VOLUMES/$vol
-	if test -z "$odev"; then return 1; fi
-	if test -z "$sdev"; then return 1; fi
+	test -n "$odev" || return 1
+	test -n "$sdev" || return 1
 	mkdir $path || return 1
 	mkdir $path/device || return 1
 	ln -sf $odev $path/device/origin  || return 1
 	ln -sf $sdev $path/device/snapstore || return 1
-	mkdir $path/targets
-	mkfifo /var/run/zumastor/sockets/$vol
+	mkdir $path/targets || return 1
+	start_volume $vol || return 1
 }
 
 function forget_master {
@@ -103,10 +103,10 @@ function forget_master {
 function forget_volume {
 	vol=$1
 	path=$VOLUMES/$vol
-	rm /var/run/zumastor/sockets/$vol
 	rmdir $path/targets
 	rm -r $path/device
 	forget_master $vol
+	stop_volume $vol
 	rmdir $path
 }
 
@@ -116,7 +116,7 @@ function define_target {
 	path=$VOLUMES/$vol/targets/$host
 	mkdir $path || return 1
 	mkfifo $path/trigger || return 1
-	zumastor start target $vol $host
+	zumastor start target $vol $host || return 1
 }
 
 function forget_target {

@@ -10,11 +10,11 @@
 
 function start_zumastor {
 	echo Starting zumastor
-	sockets=/etc/zumastor/sockets
+	servers=/etc/zumastor/servers
 
 	for vol in $(ls $VOLUMES) ; do
-		mkfifo $sockets/$vol || return 1
-		list=$(ddsnap status $sockets/$vol --list) || return 1
+		start_volume $vol || return 1
+		list=$(ddsnap status $servers/$vol --list) || return 1
 		for id in $list ; do
 			create_device $vol $id || return 1
 		done
@@ -29,7 +29,7 @@ function start_zumastor {
 
 function stop_zumastor {
 	echo Stopping zumastor
-	sockets=/etc/zumastor/sockets
+	servers=/etc/zumastor/servers
 
 	for vol in $(ls $VOLUMES) ; do
 		for host in $(ls $VOLUMES/$vol/targets) ; do
@@ -38,11 +38,11 @@ function stop_zumastor {
 		if test -x $VOLUMES/$vol/master; then
 			zumastor stop master $vol
 		fi
-		list=$(ddsnap status $sockets/$vol --list)
+		list=$(ddsnap status $servers/$vol --list)
 		for id in $list ; do
 			remove_device $vol $id
 		done
-		rm $sockets/$vol
+		stop_volume $vol || return 1
 	done
 }
 

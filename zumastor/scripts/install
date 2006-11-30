@@ -1,3 +1,5 @@
+#!/bin/sh
+
 cp bin/zumastor /bin/
 cp -a lib/zumastor /lib/
 cp -a var/lib/zumastor /var/lib/
