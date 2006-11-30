@@ -2873,8 +2873,20 @@ static int incoming(struct superblock *sb, struct client *client)
 
 	status_error:
 		trace(warn("%s", err_msg););
-		if (outbead(sock, REPLY_ERROR, struct { }) < 0)
-			warn("unable to send error for status message");
+
+		int err;
+
+		if ((err = outbead(sock, REPLY_ERROR, struct { })) < 0)
+			warn("unable to send error for status message: %s", strerror(-err));
+		break;
+	}
+	case REQUEST_ORIGIN_SECTORS:
+	{
+		int err;
+
+		if ((err = outbead(sock, ORIGIN_SECTORS, struct origin_sectors, sb->image.orgsectors)) < 0)
+			warn("unable to send origin sectors message: %s", strerror(-err));
+
 		break;
 	}
 	case SHUTDOWN_SERVER:
