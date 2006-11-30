@@ -1690,7 +1690,7 @@ int main(int argc, char *argv[])
 		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &cdOptions, 0,
 		  "Create delta\n\t Function: Create a delta file given a changelist and 2 snapshots\n\t Usage: delta create [OPTION...] <changelist> <deltafile> <snapshot1> <snapshot2>\n", NULL },
 		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &noOptions, 0,
-		  "Apply delta\n\t Function: Apply a delta file to a volume\n\t Usage: delta apply <deltafile> <dev>", NULL },
+		  "Apply delta\n\t Function: Apply a delta file to a volume\n\t Usage: delta apply <deltafile> <devstem>", NULL },
 		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &cdOptions, 0,
 		  "Send delta\n\t Function: Send a delta file to a downstream server\n\t Usage: delta send [OPTION...] <sockname> <snapshot1> <snapshot2> <devstem> <remsnapshot> <host>[:<port>]\n", NULL },
 		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &serverOptions, 0,
@@ -2114,7 +2114,7 @@ int main(int argc, char *argv[])
 	}
 	if (strcmp(command, "priority") == 0) {
 		if (argc != 5) {
-			printf("usage: %s set-priority <sockname> <snap_tag> <new_priority_value>\n", argv[0]);
+			printf("usage: %s priority <sockname> <snap_tag> <new_priority_value>\n", argv[0]);
 			return 1;
 		}
 
@@ -2133,7 +2133,7 @@ int main(int argc, char *argv[])
 	}
 	if (strcmp(command, "usecount") == 0) {
 		if (argc != 5) {
-			printf("usage: %s set-usecount <sockname> <snap_tag> <inc|dec>\n", argv[0]);
+			printf("usage: %s usecount <sockname> <snap_tag> <inc|dec>\n", argv[0]);
 			return 1;
 		}
 
