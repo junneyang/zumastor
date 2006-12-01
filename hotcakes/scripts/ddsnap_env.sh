@@ -11,7 +11,7 @@ LOGICAL_VOL_NAME=vol
 SNAPSHOT_VOL_NAME=snap
 SERVER_SOCK_NAME=/server
 AGENT_SOCK_NAME=/control
-SIZE_LOGICAL_VOL=$(( 2 * $(egrep $(echo $ORIGIN_PHYS_DEV | sed -e 's@^.*/@@') /proc/partitions | awk '{print $3}'))) 
+SIZE_LOGICAL_VOL=$(${DDSNAP_HOME}/ddsnap status ${SERVER_SOCK_NAME} --size | tail -n 1)
 REMOTE_HOST=victory
 MAX_SNAPSHOTS=64 # just for test purposes.. max can be 64 
 

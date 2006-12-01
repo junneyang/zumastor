@@ -184,27 +184,25 @@ dd-create:
 dd-delete:
 	./ddsnap delete /tmp/server 0
 
- 
-origin: 
-	echo 0 $$((2 * $$(egrep $$(echo $(origindev) | sed -e 's@^.*/@@')'$$' /proc/partitions | awk '{print $$3}'))) ddsnap /dev/test-snapstore /dev/test-origin /tmp/control -1 | sudo /sbin/dmsetup create vol
+origin:
+        echo 0 $$(./ddsnap status /tmp/server --size | tail -n 1) ddsnap /dev/test-snapstore /dev/test-origin /tmp/control -1 | sudo /sbin/dmsetup create vol
 .PHONY: origin
 
 snap0:
-	sudo ./ddsnap create /tmp/server 0
-	echo 0 $$((2 * $$(egrep $$(echo $(origindev) | sed -e 's@^.*/@@')'$$' /proc/partitions | awk '{print $$3}'))) ddsnap /dev/test-snapstore /dev/test-origin /tmp/control 0 | sudo /sbin/dmsetup create snapshot0
+        sudo ./ddsnap create /tmp/server 0
+        echo 0 $$(./ddsnap status /tmp/server --size | tail -n 1) ddsnap /dev/test-snapstore /dev/test-origin /tmp/control 0 | sudo /sbin/dmsetup create snapshot0
 .PHONY: snap0
 
 snap1:
-	sudo ./ddsnap create /tmp/server 1
-	echo 0 $$((2 * $$(egrep $$(echo $(origindev) | sed -e 's@^.*/@@')'$$' /proc/partitions | awk '{print $$3}'))) ddsnap /dev/test-snapstore /dev/test-origin /tmp/control 1 | sudo /sbin/dmsetup create snapshot1
+        sudo ./ddsnap create /tmp/server 1
+        echo 0 $$(./ddsnap status /tmp/server --size | tail -n 1) ddsnap /dev/test-snapstore /dev/test-origin /tmp/control 1 | sudo /sbin/dmsetup create snapshot1
 .PHONY: snap1
 
 snap2:
-	sudo ./ddsnap create /tmp/server 2
-	echo 0 $$((2 * $$(egrep $$(echo $(origindev) | sed -e 's@^.*/@@')'$$' /proc/partitions | awk '{print $$3}'))) ddsnap /dev/test-snapstore /dev/test-origin /tmp/control 2 | sudo /sbin/dmsetup create snapshot2
+        sudo ./ddsnap create /tmp/server 2
+        echo 0 $$(./ddsnap status /tmp/server --size | tail -n 1) ddsnap /dev/test-snapstore /dev/test-origin /tmp/control 2 | sudo /sbin/dmsetup create snapshot2
 .PHONY: snap2
-
-
+ 
 list:
 	sudo ./ddsnap list /tmp/server
 .PHONY: list
