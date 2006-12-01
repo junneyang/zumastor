@@ -1072,7 +1072,6 @@ static int apply_delta(int deltafile, char const *devstem)
 
 	int err;
 	char *dev1name;
-	char *dev2name;
 
 	if (!(dev1name = malloc(strlen(devstem) + 32))) {
 		warn("unable to allocate memory for dev1name\n");
@@ -1080,20 +1079,11 @@ static int apply_delta(int deltafile, char const *devstem)
 	}
 	sprintf(dev1name, "%s%u", devstem, dh.src_snap);
 
-	if (!(dev2name = malloc(strlen(devstem) + 32))) {
-		warn("unable to allocate memory for dev2name\n");
-		free(dev1name);
-		return -ENOMEM;
-	}
-	sprintf(dev2name, "%s%u", devstem, dh.tgt_snap);
-
-	if ((err = apply_delta_extents(deltafile, dh.mode, dh.chunk_size, dh.chunk_num, dev1name, dev2name, TRUE)) < 0) {
-		free(dev2name);
+	if ((err = apply_delta_extents(deltafile, dh.mode, dh.chunk_size, dh.chunk_num, dev1name, devstem, TRUE)) < 0) {
 		free(dev1name);
 		return err;
 	}
 
-	free(dev2name);
 	free(dev1name);
 
 	return 0;
