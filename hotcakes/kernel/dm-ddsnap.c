@@ -495,7 +495,7 @@ static int incoming(struct dm_target *target)
 	struct file *sock;
 	struct task_struct *task = current;
 	int err, length;
-	char * err_msg;
+	char *err_msg;
 	u32 chunksize_bits;
 
 	daemonize_properly("ddsnap-clnt", info->snap);
@@ -985,18 +985,19 @@ static void ddsnap_destroy(struct dm_target *target)
 		return;
 	/* unset the usecount for this device */
 	warn("Unsetting usecount info");
-	if (outbead(info->sock, SET_USECOUNT, struct snapinfo, info->snap, 0, -1) < 0) 
+	if (info->sock && outbead(info->sock, SET_USECOUNT, struct snapinfo, info->snap, 0, -1) < 0) 
 		warn("unable to send message to snapshot server");
 	/* Unblock helper threads */
 	info->flags |= FINISH_FLAG;
+	warn("Unblocking helper threads");
 	up(&info->server_in_sem); // unblock incoming thread
 	up(&info->server_out_sem); // unblock io request threads
 	up(&info->recover_sem); // unblock worker recovery
 	
-	warn("closing socket connection");
+	warn("closing socket connections");
 	if (info->sock && (err = shutdown_socket(info->sock)))
 		warn("server socket shutdown error %i", err);
-	if (info->sock && (err = shutdown_socket(info->control_socket)))
+	if (info->control_socket && (err = shutdown_socket(info->control_socket)))
 		warn("control socket shutdown error %i", err);
 
 	up(&info->more_work_sem);
