@@ -43,8 +43,9 @@ enum csnap_codes
 	REPLY_GENERATE_CHANGE_LIST,
 	SET_PRIORITY,
 	REPLY_SET_PRIORITY,
-	SET_USECOUNT,
-	REPLY_SET_USECOUNT,
+	USECOUNT,
+	USECOUNT_ERROR,
+	USECOUNT_OK,
 	STREAM_CHANGE_LIST,
 	REPLY_STREAM_CHANGE_LIST,
 	SEND_DELTA,
@@ -61,12 +62,16 @@ enum csnap_error_codes
 	REPLY_ERROR_REFUSED = 0x01,
 	REPLY_ERROR_SIZE_MISMATCH,
 	REPLY_ERROR_OFFSET_MISMATCH,
+	REPLY_ERROR_INVALID_SNAPSHOT,
+	REPLY_ERROR_USECOUNT,
 	REPLY_ERROR_OTHER,
 };
 
 #define ID_BITS 16
 
 struct reply_error { uint32_t err; uint32_t trackno; } PACKED;
+struct usecount_ok { uint16_t usecount; } PACKED;
+struct usecount_error { uint32_t err; char msg[]; } PACKED;
 struct match_id { uint64_t id; uint64_t mask; } PACKED;
 struct set_id { uint64_t id; } PACKED;
 struct identify { uint64_t id; uint32_t snap; uint64_t off; uint64_t len; } PACKED; // off, len are in sectors  
@@ -75,7 +80,8 @@ struct identify_error { uint32_t err; char msg[]; } PACKED; // !!! why not use r
 struct connect_server_error { uint32_t err; char msg[]; } PACKED; // !!! why not use reply_error and include msg
 struct create_snapshot { uint32_t snap; } PACKED;
 struct generate_changelist { uint32_t snap1; uint32_t snap2; } PACKED;
-struct snapinfo { uint32_t snap; int8_t prio; uint8_t usecnt; char zero[3]; uint64_t ctime; } PACKED;
+struct snapinfo { uint32_t snap; int8_t prio; uint16_t usecnt; char zero[3]; uint64_t ctime; } PACKED;
+struct usecount_info { uint32_t snap; int32_t usecnt_dev; } PACKED;
 struct snaplist { uint32_t count; struct snapinfo snapshots[]; } PACKED;
 struct stream_changelist { uint32_t snap1; uint32_t snap2; } PACKED;
 struct changelist_stream { uint64_t chunk_count; uint32_t chunksize_bits; } PACKED;

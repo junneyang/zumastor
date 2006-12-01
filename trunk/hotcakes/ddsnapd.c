@@ -1703,11 +1703,13 @@ static void reply(fd_t sock, struct messagebuf *message)
 	writepipe(sock, &message->head, message->head.length + sizeof(message->head));
 }
 
+#define USING 1
 struct client
 {
 	u64 id;
 	fd_t sock;
 	int snap;
+	u32 flags; 
 };
 
 struct pending
@@ -2501,9 +2503,31 @@ static int incoming(struct superblock *sb, struct client *client)
 		
 		client->id = ((struct identify *)message.body)->id;
 		client->snap =  (tag == (u32)~0UL) ? tag : tag_snapnum(sb, tag);
+		client->flags = USING;
 		
 		trace(fprintf(stderr, "got identify request, setting id="U64FMT" snap=%i, sending chunksize_bits=%u\n", client->id, client->snap, sb->image.chunksize_bits););
 		warn("client id %llu, snapshot %u (snapnum %i)", client->id, tag, client->snap);
+
+		struct snapshot * snap_info;
+		if (client->snap != -1) {
+
+			if (!(snap_info = valid_snaptag(sb, client->snap))) {
+				warn("Snapshot id %u is not a valid snapshot\n", client->snap);
+				snprintf(err_msg, MAX_ERRMSG_SIZE, "Snapshot id %u is not a valid snapshot", client->snap);
+				err_msg[MAX_ERRMSG_SIZE-1] = '\0'; // make sure it's null terminated
+				err = REPLY_ERROR_INVALID_SNAPSHOT;
+				goto identify_error;
+			}
+			u32 new_usecnt = snap_info->usecnt + 1;
+			if (new_usecnt < snap_info->usecnt) {
+				snprintf(err_msg, MAX_ERRMSG_SIZE, "Usecount overflow.");
+				err_msg[MAX_ERRMSG_SIZE-1] = '\0'; // make sure it's null terminated
+				err = REPLY_ERROR_USECOUNT;
+				goto identify_error;
+			}
+			
+			snap_info->usecnt = new_usecnt;
+		}
 
 		if (len != sb->image.orgsectors) {
 			snprintf(err_msg, MAX_ERRMSG_SIZE, "volume size mismatch for snapshot %u", tag);
@@ -2624,20 +2648,56 @@ static int incoming(struct superblock *sb, struct client *client)
 			warn("unable to send error for set priority message");
 		break;
 	}
-	case SET_USECOUNT:
+	case USECOUNT:
 	{
-		u32 snap = ((struct snapinfo *)message.body)->snap; /* FIXME: u64 in struct, s32 elsewhere */
-		s8 usecnt  = ((struct snapinfo *)message.body)->usecnt;
+		u32 snap = ((struct usecount_info *)message.body)->snap; /* FIXME: u64 in struct, s32 elsewhere */
+		int32_t usecnt_dev  = ((struct usecount_info *)message.body)->usecnt_dev;
+		int32_t new_usecnt = 0;
+		unsigned int err_len;
+		uint32_t err = 0;
+		char err_msg[MAX_ERRMSG_SIZE];
+
 		struct snapshot * snap_info;
-		if (snap == -1)
-			goto set_usecnt_error; /* not really an error though */
+		if (snap == -1) {
+			snprintf(err_msg, MAX_ERRMSG_SIZE, "Setting the usecount of the origin.");
+			err_msg[MAX_ERRMSG_SIZE-1] = '\0';
+			err = REPLY_ERROR_INVALID_SNAPSHOT;
+			goto usecnt_error; /* not really an error though */
+		}
+
 		if (!(snap_info = valid_snaptag(sb, snap))) {
 			warn("Snapshot id %u is not a valid snapshot\n", snap);
-			goto set_usecnt_error;
+			snprintf(err_msg, MAX_ERRMSG_SIZE, "Snapshot id %u is not a valid snapshot.", snap);
+			err_msg[MAX_ERRMSG_SIZE-1] = '\0';
+			err = REPLY_ERROR_INVALID_SNAPSHOT;
+			goto usecnt_error;
 		}
-		usecnt += snap_info->usecnt;
-		snap_info->usecnt = usecnt > 0 ? usecnt : 0;
-	set_usecnt_error:
+		new_usecnt = usecnt_dev + snap_info->usecnt;
+
+		if (((new_usecnt >> 16) != 0) && (usecnt_dev >= 0)) {
+			snprintf(err_msg, MAX_ERRMSG_SIZE, "Usecount overflow.");
+			err_msg[MAX_ERRMSG_SIZE-1] = '\0';
+			err = REPLY_ERROR_USECOUNT;
+			goto usecnt_error;
+		}
+		if (((new_usecnt >> 16) != 0) && (usecnt_dev < 0)) {
+			snprintf(err_msg, MAX_ERRMSG_SIZE, "Usecount underflow.");
+			err_msg[MAX_ERRMSG_SIZE-1] = '\0';
+			err = REPLY_ERROR_USECOUNT;
+			goto usecnt_error;
+		}
+		
+		snap_info->usecnt = new_usecnt;
+		if (outbead(sock, USECOUNT_OK, struct usecount_ok, .usecount = snap_info->usecnt) < 0)
+			warn("unable to reply to USECOUNT message");
+		break;
+
+	usecnt_error:
+		err_len = sizeof(struct usecount_error) + strlen(err_msg) + 1;
+                if (outhead(sock, USECOUNT_ERROR, err_len) < 0 ||
+		    writepipe(sock, &err, sizeof(struct usecount_error)) < 0 ||
+		    writepipe(sock, err_msg, err_len - sizeof(struct usecount_error)) < 0)
+			warn("unable to reply to USECOUNT message with error");
 		break;
 	}
 	case GENERATE_CHANGE_LIST:
@@ -3100,6 +3160,21 @@ int snap_server(struct superblock *sb, int listenfd, int getsigfd, int agentfd)
 				trace_off(printf("event on socket %i = %x\n", client->sock, pollvec[others+i].revents););
 				if ((result = incoming(sb, client)) == -1) {
 					warn("Client %llu disconnected", client->id);
+
+					if (client->flags == USING) {
+						struct snapshot * snap_info;
+						if (client->snap != -1) {							
+							if (!(snap_info = valid_snaptag(sb, client->snap)))
+								warn("Snapshot id %u is not a valid snapshot\n", client->snap);
+							u32 new_usecnt = snap_info->usecnt - 1;
+							if (new_usecnt < 0) {
+								warn("Usecount underflow.");
+								new_usecnt = 0;
+							}
+							snap_info->usecnt = new_usecnt;
+						}
+					}
+
 					save_state(sb); // !!! just for now
 					close(client->sock);
 					free(client);
