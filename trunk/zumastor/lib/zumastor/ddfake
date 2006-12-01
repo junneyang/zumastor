@@ -20,7 +20,7 @@ esac
 
 function ddsnap {
 case $1 in
-create|delete)
+create|delete|server|agent)
 	echo "$@"
 	;;
 status)
@@ -30,6 +30,9 @@ status)
 		;;
 	--list)
 		echo 101 102 103
+		;;
+	--last)
+		echo 103
 		;;
 	*)
 		return 1
