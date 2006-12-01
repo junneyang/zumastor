@@ -1139,8 +1139,6 @@ static int list_snapshots(int serv_fd, int verbose, int onlylast)
 	if (readpipe(serv_fd, &head, sizeof(head)) < 0)
 		return eek();
 
-	trace_on(printf("reply = %x\n", head.code););
-
 	if (head.code != SNAPSHOT_LIST)
 		error("received unexpected code=%x length=%u", head.code, head.length);
 
@@ -1179,7 +1177,7 @@ static int list_snapshots(int serv_fd, int verbose, int onlylast)
 
 			printf("creation time= %s\n", ctime_str);
 		} else {
-			printf("%d ", i);
+			printf("%u ", buffer[i].snap);
 		}
 	}
 
@@ -1244,6 +1242,8 @@ static int delete_snapshot(int sock, u32 snaptag)
 
 static int create_snapshot(int sock, u32 snaptag)
 {
+	trace_on(printf("sending snapshot create request %u\n", snaptag););
+
 	if (outbead(sock, CREATE_SNAPSHOT, struct create_snapshot, snaptag) < 0)
 		return eek();
 
@@ -1257,7 +1257,7 @@ static int create_snapshot(int sock, u32 snaptag)
 	if (readpipe(sock, buf, head.length) < 0)
 		return eek();
 
-	trace_on(printf("reply = %x\n", head.code););
+	trace_on(printf("snapshot create got reply = %x\n", head.code););
 
 	if (head.code != REPLY_CREATE_SNAPSHOT) {
 		if (head.code == REPLY_ERROR) {
@@ -1440,8 +1440,6 @@ static u64 get_origin_sectors(int serv_fd)
 	if ((err = readpipe(serv_fd, &head, sizeof(head))) < 0)
 		error("%s (%i)", strerror(-err), -err);
 
-	trace_on(printf("reply = %x\n", head.code););
-
 	if (head.code != ORIGIN_SECTORS) {
 		if (head.code == REPLY_ERROR) {
 			warn("unable to obtain origin sectors");
@@ -1487,8 +1485,6 @@ static int ddsnap_get_status(int serv_fd, u32 snaptag, int verbose)
 		error("received incomplete packet header");
 		return 1;
 	}
-
-	trace_on(printf("reply = %x\n", head.code););
 
 	if (head.code != STATUS_MESSAGE)
 		error("received unexpected code=%x length=%u", head.code, head.length);
