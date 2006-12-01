@@ -78,7 +78,7 @@ int try_to_instantiate(struct context *context)
 static int incoming(struct context *context, struct client *client)
 {
 	int err;
-	char * err_msg;
+	char *err_msg;
 	struct messagebuf message;
 	int sock = client->sock;
 	struct server *server = NULL;
@@ -139,7 +139,7 @@ static int incoming(struct context *context, struct client *client)
 		warn("ERROR: %s, all is NOT well", err_msg);
 		break;
 	default:
-		warn("Unknown message %x", message.head.code);
+		warn("Agent received unknown message type %x, length %u", message.head.code, message.head.length);
 		break;
 	}
 	return 0;
