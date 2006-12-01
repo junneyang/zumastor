@@ -15,7 +15,7 @@ SYNOPSIS
     ddsnap delete <sockname> <snapshot>
     ddsnap list <sockname>
     ddsnap priority <sockname> <snap_tag> <new_priority_value>
-    ddsnap usecount <sockname> <snap_tag> <inc|dec>
+    ddsnap usecount <sockname> <snap_tag> <diff_amount>
     ddsnap status [-v|--verbose] <sockname> [<snapshot>]
     ddsnap delta changelist <sockname> <changelist> <snapshot1> <snapshot2>
     ddsnap delta create [-x|--xdelta] [-r|--raw] [-t|--test] [-o|--optcomp] [-g|--gzip compression_level] <changelist> <deltafile> <snapshot1> <snapshot2>
@@ -94,8 +94,8 @@ COMMANDS
     priority <sockname> <snap_tag> <new_priority_value>
     	Sets the priority of the snapshot with the given sockname and snap_tag to the given priority_value.
 
-    usecount <sockname> <snap_tag> <inc|dec>
-      	Change the use count of the snapshot with the given sockname and snap_tag.
+    usecount <sockname> <snap_tag> <diff_amount>
+      	Change the use count of the snapshot with the given sockname and snap_tag by adding diff_amount to current snapshot usecount.
 
     status [-v|--verbose] <sockname> [<snapshot>]
 	Report snapshot usage statistics.
@@ -152,22 +152,26 @@ SEE ALSO
     ddraid(8), ddraidd(8), ddraid.agent(8), dmsetup(8)
     zumastor project page: http://code.google.com/p/zumastor/
 
+FUTURE ADDITIONS
+	In the future, we will go further in the direction of hiding the device names, by coming up with a proper library API for creating the virtual devices so we don't need the clumsy dmsetup command
+any more or the even more clumsy libdevmapper interface, or worse yet, the devmapper ioctl interface.  Our library interface might even offer the option of creating a virtual device with no name, it just gives the program a FD for a device that we set (somehow) to be a virtual origin or snapshot.  No device name ever appears on the filesystem.  I have some misgivings about this idea because we then invite the situation where we can have multiple virtual devices on the same host, referring to the same snapshot.  This ought to work for fine for our ddsnap and ddraid devices because they are designed as cluster devices, but I dunno.  I'm still mulliing over the right thing to do there.  This is just to let everybody know that the deficiencies of the current scheme are known, they are being thought about, and for now the result is some visible warts.
+
 BUGS
-           Please report bugs at http://code.google.com/p/zumastor or mail them to zumastor@googlegroups.com.
+    Please report bugs at http://code.google.com/p/zumastor or mail them to zumastor@googlegroups.com.
 
 VERSION
-           This man page is current for version 0.2 of ddsnap.
+    This man page is current for version 0.2 of ddsnap.
 
 AUTHORS
-    	   Man page written by Jane Chiu.  Original ddsnap snapshots coded by Daniel Phillips.  Remote replication originally coded by Jane Chiu and Robert Nelson.  Additional coding by Ross Combs.
+    Man page written by Jane Chiu.  Original ddsnap snapshots coded by Daniel Phillips.  Remote replication originally coded by Jane Chiu and Robert Nelson.  Additional coding by Ross Combs.
 
 CREDITS
-           ddsnap is distributed under the GNU public license, version 2.  See the file COPYING for details.
+    ddsnap is distributed under the GNU public license, version 2.  See the file COPYING for details.
 
     This program uses zlib compression library and popt library.  Many people sent patches, lent machines, gave advice and were generally helpful.
 
 THANKS
-          Thanks to Google, Red Hat and Sistina Software for supporting this work.  Special thanks to: Mike Todd, Joseph Dries, Douglas Merril and Matthew O'Keefe.
+    Thanks to Google, Red Hat and Sistina Software for supporting this work.  Special thanks to: Mike Todd, Joseph Dries, Douglas Merril and Matthew O'Keefe.
 
-	  The home page of ddsnap is http://code.google.com/p/zumastor.  This site may cover questions unanswered by this manual page.
+    The home page of ddsnap is http://code.google.com/p/zumastor.  This site may cover questions unanswered by this manual page.
     Mailing lists for support and development are available at zumastor@googlegroups.com

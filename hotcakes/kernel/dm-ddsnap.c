@@ -983,10 +983,6 @@ static void ddsnap_destroy(struct dm_target *target)
 	trace(warn("%p", target);)
 	if (!info)
 		return;
-	/* unset the usecount for this device */
-	warn("Unsetting usecount info");
-	if (info->sock && outbead(info->sock, SET_USECOUNT, struct snapinfo, info->snap, 0, -1) < 0) 
-		warn("unable to send message to snapshot server");
 	/* Unblock helper threads */
 	info->flags |= FINISH_FLAG;
 	warn("Unblocking helper threads");

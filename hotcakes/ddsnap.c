@@ -1293,13 +1293,31 @@ static int set_priority(int sock, u32 snaptag, int8_t pri_val)
 	return 0;
 }
 
-static int set_usecount(int sock, u32 snaptag, const char *op)
+static int usecount(int sock, u32 snaptag, int32_t usecnt_dev)
 {
-	int usecnt = (strcmp(op, "inc") == 0) ? 1 : ((strcmp(op, "dec") == 0) ? -1 : 0);
-
-	if (outbead(sock, SET_USECOUNT, struct snapinfo, snaptag, 0, usecnt) < 0)
+	if (outbead(sock, USECOUNT, struct usecount_info, snaptag, usecnt_dev) < 0)
 		return eek();
 
+	struct head head;
+	unsigned maxbuf = 500;
+	char buf[maxbuf];
+
+	if (readpipe(sock, &head, sizeof(head)) < 0)
+		return eek();
+	assert(head.length < maxbuf); // !!! don't die
+	if (readpipe(sock, buf, head.length) < 0)
+		return eek();
+
+	trace_on(printf("reply = %x\n", head.code););
+
+	if (head.code == USECOUNT_ERROR) {
+		struct usecount_error *usecnt_err = (struct usecount_error *) buf;
+		usecnt_err->msg[(head.length-(sizeof(struct usecount_error)))-1] = '\0';
+		error("received unexpected code: %s", usecnt_err->msg);
+	}
+
+	printf("New usecount: %hu\n", ((struct usecount_ok *) buf)->usecount);
+ 
 	return 0;
 }
 
@@ -1747,7 +1765,7 @@ int main(int argc, char *argv[])
 		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &noOptions, 0,
 		  "Priority\n\t Function: Set the priority of a snapshot\n\t Usage: priority <sockname> <snap_tag> <new_priority_value>", NULL },
 		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &noOptions, 0,
-		  "Usecount\n\t Function: Change the use count of a snapshot\n\t Usage: usecount <sockname> <snap_tag> <inc|dec>", NULL },
+		  "Usecount\n\t Function: Change the use count of a snapshot\n\t Usage: usecount <sockname> <snap_tag> <diff_amount>", NULL },
 		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &stOptions, 0,
 		  "Get statistics\n\t Function: Report snapshot usage statistics\n\t Usage: status [OPTION...] <sockname> [<snapshot>]", NULL },
 		{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &deltaOptions, 0,
@@ -2090,7 +2108,7 @@ int main(int argc, char *argv[])
 	}
 	if (strcmp(command, "create") == 0) {
 		if (argc != 4) {
-			printf("Usage: %s create-snap <sockname> <snapshot>\n", argv[0]);
+			printf("Usage: %s create <sockname> <snapshot>\n", argv[0]);
 			return 1;
 		}
 
@@ -2112,7 +2130,7 @@ int main(int argc, char *argv[])
 	}
 	if (strcmp(command, "delete") == 0) {
 		if (argc != 4) {
-			printf("Usage: %s delete-snap <sockname> <snapshot>\n", argv[0]);
+			printf("Usage: %s delete <sockname> <snapshot>\n", argv[0]);
 			return 1;
 		}
 
@@ -2165,7 +2183,7 @@ int main(int argc, char *argv[])
 	}
 	if (strcmp(command, "usecount") == 0) {
 		if (argc != 5) {
-			printf("usage: %s usecount <sockname> <snap_tag> <inc|dec>\n", argv[0]);
+			printf("usage: %s usecount <sockname> <snap_tag> <diff_amount>\n", argv[0]);
 			return 1;
 		}
 
@@ -2178,7 +2196,7 @@ int main(int argc, char *argv[])
 
 		int sock = create_socket(argv[2]);
 
-		int ret = set_usecount(sock, snaptag, argv[4]);
+		int ret = usecount(sock, snaptag, atoi(argv[4]));
 		close(sock);
 		return ret;
 	}

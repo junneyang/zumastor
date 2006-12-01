@@ -11,7 +11,7 @@ A few main points:
        /join #hotcakes
 
   * Email us and volunteer to help with things!  Our gmail names are on the
-    main project page -- http://code.google.com/p/hotcakes/
+    main project page -- http://code.google.com/p/zumastor/
 
 
 Get started!
@@ -62,6 +62,7 @@ Starting the agent, server, and origin volume:
 		# README test values
 		origindev=/dev/sda7
 		snapstoredev=/dev/sda8
+    - cat /proc/partitions will assist you in the process of determining which one are your devices.
 
   - The following command will setup the symlinks, load modules,  and get you
     ready to start the ddsnap-agent and ddsnapd server.
@@ -96,7 +97,7 @@ Creating a snapshot, changelist, and delta:
 
   - We will first create a test snapshot.
 
-       sudo ./ddsnap create-snapshot /tmp/server 0 
+       sudo ./ddsnap create /tmp/server 0 
 
        echo 0 29302496 ddsnap /dev/test-snapstore /dev/test-origin \
           /tmp/control 0 | sudo dmsetup create snapshot0
@@ -108,8 +109,16 @@ Creating a snapshot, changelist, and delta:
 
        echo $((2 * `grep sda7 /proc/partitions | awk '{print $3}'`))
 
+       or
+ 
+       echo 0 $$((2 * $$(egrep $$(echo $(origindev) | sed -e 's@^.*/@@')'$$' /proc/partitions | awk '{print $$3}'))) ddsnap /dev/test-snapstore /dev/test-origin /tmp/control 0 | sudo /sbin/dmsetup create snapshot0
+
     There should now be a /dev/mapper/snapshot0 device that reflects the newly 
     made snapshot. 
+
+    - You can double check with 
+
+      sudo dmsetup ls
 
   - In order for snapshots to be helpful, we have to change the disk in some
     way. Write a few files to disk or use the devspam utility included with
@@ -125,6 +134,10 @@ Creating a snapshot, changelist, and delta:
 
        echo 0 29302496 ddsnap /dev/test-snapstore /dev/test-origin \
           /tmp/control 1 | sudo dmsetup create snapshot1
+
+       or
+
+       echo 0 $$((2 * $$(egrep $$(echo $(origindev) | sed -e 's@^.*/@@')'$$' /proc/partitions | awk '{print $$3}'))) ddsnap /dev/test-snapstore /dev/test-origin /tmp/control 1 | sudo /sbin/dmsetup create snapshot1
 
   - To create a delta, we will first create a changelist for the snapshots.
 
