@@ -551,7 +551,7 @@ connect:
 			info->chunkshift     = chunksize_bits - SECTOR_SHIFT;
 			target->split_io = 1 << info->chunkshift; // !!! lose this as soon as possible
 
-			if (outbead(sock, SET_USECOUNT, struct snapinfo, info->snap, 0, 1) < 0) 
+			if (outbead(sock, USECOUNT, struct snapinfo, info->snap, 0, 1) < 0) 
 				warn("unable to send USECOUNT message to snapshot server");
 
 			up(&info->server_out_sem);
