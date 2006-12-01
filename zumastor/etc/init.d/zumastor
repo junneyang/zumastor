@@ -12,6 +12,11 @@ function start_zumastor {
 	echo Starting zumastor
 	servers=/etc/zumastor/servers
 
+	if ! [ -d /var/run/zumastor ]; then
+		mkdir -p /var/run/zumastor/agents || return 1
+		mkdir -p /var/run/zumastor/servers || return 1
+		mkdir -p /var/run/zumastor/cron || return 1
+	fi
 	for vol in $(ls $VOLUMES) ; do
 		start_volume $vol || return 1
 		list=$(ddsnap status $servers/$vol --list) || return 1

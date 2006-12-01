@@ -37,8 +37,6 @@ function new_snapshot {
 	fi
 	echo snapshots: ${snapshots[@]}
 	echo ${snapshots[@]} >$file
-
-	create_device $1 123
 }
 
 function run_master {
@@ -49,7 +47,6 @@ function run_master {
 	while true; do
 #		xargs -n1 <$fifo echo snapshot $vol || echo error $?
 		read kind <$fifo || exit 1
-#		kind=$(cat <$fifo) || exit 1
 		new_snapshot $vol $kind
 	done
 }
@@ -217,7 +214,6 @@ replicate)
 	echo replicate $vol\($snap\) to $host
 	exit ;;
 status)
-echo status
 	tree -F $2 $VOLUMES
 	tree -F $2 /var/run/zumastor
 	exit ;;

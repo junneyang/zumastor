@@ -19,8 +19,8 @@ function start_volume {
 	server=/var/run/zumastor/servers/$vol
 	mkfifo $agent
 	mkfifo $server
-	echo ddsnap agent $agent || return 1
-	echo ddsnap server $sdev $odev $agent $server || return 1
+	ddsnap agent -l /var/log/zumastor/${vol}-agent.log $agent || return 1
+	ddsnap server -l /var/log/zumastor/${vol}-server.log $sdev $odev $agent $server || return 1
 }
 
 function stop_volume {
