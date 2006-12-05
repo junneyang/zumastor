@@ -916,9 +916,9 @@ static int ddsnap_map(struct dm_target *target, struct bio *bio, union map_info 
 	unsigned id;
 
 	if (!(info->flags & READY_FLAG)) {
-		warn("snapshot device with id %d is not ready", info->snap);
-//		bio->bi_end_io(bio, 0, EIO); // !!! passing 0 bytes done, correct?
-		return -1;
+		if (printk_ratelimit())
+			warn("snapshot device with id %d is not ready", info->snap);
+		return -EIO;
 	}
 	
 	bio->bi_bdev = info->orgdev->bdev;
