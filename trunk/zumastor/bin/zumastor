@@ -78,6 +78,7 @@ function define_volume {
 	odev=$2
 	sdev=$3
 	path=$VOLUMES/$vol
+	sock=/etc/zumastor/servers/$vol
 	test -n "$odev" || return 1
 	test -n "$sdev" || return 1
 	mkdir $path || return 1
@@ -85,14 +86,17 @@ function define_volume {
 	ln -sf $odev $path/device/origin  || return 1
 	ln -sf $sdev $path/device/snapstore || return 1
 	mkdir $path/targets || return 1
+	# FIXME: check to see if there are any snapshots in the snapshot store and initialize here
 	start_volume $vol || return 1
+	ddsnap create $sock -1 || return 1
+	create_device $vol -1 || return 1
 }
 
 function forget_master {
 	vol=$1
 	path=$VOLUMES/$vol
+	stop_master $vol
 	if test -e $path/master; then
-		stop_master $vol
 		rm -r $path/master
 	fi
 }
@@ -100,8 +104,12 @@ function forget_master {
 function forget_volume {
 	vol=$1
 	path=$VOLUMES/$vol
+	sock=/etc/zumastor/servers/$vol
+	# FIXME: cleanup snapshots, snapshot devices, and any target or master daemons here
 	rmdir $path/targets
 	rm -r $path/device
+	remove_device $vol -1
+	ddsnap remove $sock -1
 	forget_master $vol
 	stop_volume $vol
 	rmdir $path

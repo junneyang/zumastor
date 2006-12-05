@@ -3,18 +3,21 @@
 # Author: Daniel Phillips <phillips@google.com>
 # Licensed under the GNU GPL version 2
 
-function device_name {
+function volume_name {
 	vol=$1
 	id=$2
-	if [ $id != -1 ]; then vol=$vol\($id\); fi
-	echo $vol
+	if [ X$id = X-1 ]; then
+		echo $vol
+	else
+		echo $vol\($id\)
+	fi
 }
 
 function start_volume {
 	vol=$1
 	info=$VOLUMES/$vol
-	sdev=$info/device/snapstore
-	odev=$info/device/origin
+	sdev=$(readlink $info/device/snapstore)
+	odev=$(readlink $info/device/origin)
 	agent=/var/run/zumastor/agents/$vol
 	server=/var/run/zumastor/servers/$vol
 	agentlog=/var/log/zumastor/${vol}-agent.log
@@ -23,20 +26,21 @@ function start_volume {
 	mkfifo $server
 	ddsnap agent -l $agentlog $agent || return 1
 	ddsnap server -l $serverlog $sdev $odev $agent $server || return 1
+	sleep .5 # FIXME: wait until device is ready or timeout
 }
 
 function stop_volume {
 	vol=$1
 	info=$VOLUMES/$vol
-	sdev=$info/device/snapstore
-	odev=$info/device/origin
+	sdev=$(readlink $info/device/snapstore)
+	odev=$(readlink $info/device/origin)
 	agent=/var/run/zumastor/agents/$vol
 	server=/var/run/zumastor/servers/$vol
 	agentlog=/var/log/zumastor/${vol}-agent.log
 	serverlog=/var/log/zumastor/${vol}-server.log
 	pkill -f "ddsnap server -l $serverlog $sdev $odev $agent $server"
 	pkill -f "ddsnap agent -l $agentlog $agent"
-	rm -f $agent $server
+	rm $agent $server
 }
 
 function create_device {
@@ -45,12 +49,21 @@ function create_device {
 	info=$VOLUMES/$vol
 	sock=/etc/zumastor/servers/$vol
 	size=$(ddsnap status $sock --size) || return 1
-	sdev=$info/device/snapstore
-	odev=$info/device/origin
-	name=$(device_name $vol $id)
-	echo 0 $size ddsnap $sdev $odev $sock $id | dmsetup create $name
+	sdev=$(readlink $info/device/snapstore)
+	odev=$(readlink $info/device/origin)
+	name=$(volume_name $vol $id)
+	mount=/var/run/zumastor/mount/$name
+	echo 0 $size ddsnap $sdev $odev $sock $id | dmsetup create $name || return 1
+	test -d $mount || mkdir $mount || return 1
+	mount -o ro /dev/mapper/$name $mount
 }
 
 function remove_device {
-	dmsetup remove $(device_name $1 $2)
+	vol=$1
+	id=$2
+	name=$(volume_name $vol $id)
+	mount=/var/run/zumastor/mount/$name
+	umount $mount
+	rmdir $mount
+	dmsetup remove $name || return 1
 }
