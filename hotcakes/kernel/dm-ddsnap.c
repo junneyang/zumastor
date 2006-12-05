@@ -1,3 +1,4 @@
+#include <linux/version.h>
 #include <linux/fs.h>
 #include <linux/slab.h>
 #include <linux/mm.h>
@@ -39,44 +40,53 @@
 
 /* Useful gizmos */
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,19)
 static int rwpipe(struct file *file, const void *buffer, unsigned int count,
-	ssize_t (*op)(struct kiocb *, const char *, size_t, loff_t), int mode)
+        ssize_t (*op)(struct kiocb *, const struct iovec *, unsigned long, loff_t), int mode)
+#else
+static int rwpipe(struct file *file, const void *buffer, unsigned int count,
+                        ssize_t (*op)(struct kiocb *, const char *, size_t, loff_t), int mode)
+#endif
 {
-	struct kiocb iocb;
-	mm_segment_t oldseg;
-	int err = 0;
-	trace_off(warn("%s %i bytes", mode == FMODE_READ? "read": "write", count);)
-	if (!(file->f_mode & mode))
-		return -EBADF;
-	if (!op)
-		return -EINVAL;
-	init_sync_kiocb(&iocb, file); // new in 2.5 (hmm)
-	iocb.ki_pos = file->f_pos;
-	oldseg = get_fs();
-	set_fs(get_ds());
+        struct kiocb iocb;
+        mm_segment_t oldseg;
+        int err = 0;
+        trace_off(warn("%s %i bytes", mode == FMODE_READ? "read": "write", count);)
+        if (!(file->f_mode & mode))
+                return -EBADF;
+        if (!op)
+                return -EINVAL;
+        init_sync_kiocb(&iocb, file); // new in 2.5 (hmm)
+        iocb.ki_pos = file->f_pos;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,19)
+        iocb.ki_left = count;
+#endif
 
-	while (count) {
-		int chunk = (*op)(&iocb, buffer, count, iocb.ki_pos);
-		if (chunk == -ERESTARTSYS) {
-			warn("got a ERESTARTSYS"); /* should never get here */
-			continue;
-		}
-		if (chunk <= 0) {
-			err = chunk? chunk: -EPIPE;
-			break;
-		}
-		BUG_ON(chunk > count);
-		count -= chunk;
-		buffer += chunk;
-	}
-	set_fs(oldseg);
-	file->f_pos = iocb.ki_pos;
-	return err;
+        oldseg = get_fs();
+        set_fs(get_ds());
+        while (count) {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,19)
+                int chunk = (*op)(&iocb, &(struct iovec){ .iov_base = buffer, .iov_len = count },
+                                        1, iocb.ki_pos);
+#else
+                int chunk = (*op)(&iocb, buffer, count, iocb.ki_pos);
+#endif
+                if (chunk <= 0) {
+                        err = chunk? chunk: -EPIPE;
+                        break;
+                }
+                BUG_ON(chunk > count);
+                count -= chunk;
+                buffer += chunk;
+        }
+        set_fs(oldseg);
+        file->f_pos = iocb.ki_pos;
+        return err;
 }
 
 static inline int readpipe(struct file *file, void *buffer, unsigned int count)
 {
-	return rwpipe(file, buffer, count, (void *)file->f_op->aio_read, FMODE_READ);
+	return rwpipe(file, buffer, count, file->f_op->aio_read, FMODE_READ);
 }
 
 static inline int writepipe(struct file *file, void *buffer, unsigned int count)
