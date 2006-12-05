@@ -3,44 +3,49 @@
 # Author: Daniel Phillips <phillips@google.com>
 # Licensed under the GNU GPL version 2
 
-function dmsetup {
-case $1 in
-create)
-	read args
-	echo dmsetup create $2 $args
-	;;
-remove)
-	echo dmsetup remove $2
-	;;
-*)
-	return 1
-	;;
-esac
-}
+# if enabled, don't run the actual commands
+if [ X"$DDFAKE" = X"yes" ]; then
 
-function ddsnap {
-case $1 in
-create|delete|server|agent)
-	echo "$@"
-	;;
-status)
-	case $3 in
-	--size)
-		echo 12345
+function dmsetup {
+	case $1 in
+	create)
+		read args
+		echo dmsetup create $2 $args
 		;;
-	--list)
-		echo 101 102 103
-		;;
-	--last)
-		echo 103
+	remove)
+		echo dmsetup remove $2
 		;;
 	*)
 		return 1
 		;;
 	esac
-	;;
-*)
-	return 1
-	;;
-esac
 }
+
+function ddsnap {
+	case $1 in
+	create|delete|server|agent)
+		echo ddsnap "$@"
+		;;
+	status)
+		case $3 in
+		--size)
+			echo 12345
+			;;
+		--list)
+			echo 101 102 103
+			;;
+		--last)
+			echo 103
+			;;
+		*)
+			return 1
+			;;
+		esac
+		;;
+	*)
+		return 1
+		;;
+	esac
+}
+
+fi
