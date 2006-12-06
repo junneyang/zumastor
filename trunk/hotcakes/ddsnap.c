@@ -2439,7 +2439,7 @@ int main(int argc, char *argv[])
 			};
 
 			cdCon = poptGetContext(NULL, argc-2, (const char **)&(argv[2]), options, 0);
-			poptSetOtherOptionHelp(cdCon, "<sockname> <snapshot1> <snapshot2> <snapdev1> <snapdev2> <remsnapshot> <host>[:<port>]");
+			poptSetOtherOptionHelp(cdCon, "<sockname> <snapshot1> <snapshot2> <snapstem> <remsnapshot> <host>[:<port>]");
 
 			char c;
 
