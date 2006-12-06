@@ -8,20 +8,24 @@
 . /lib/zumastor/ddfake
 
 function new_snapshot {
-	vol=$1
-	kind=$2
-	master=$VOLUMES/$vol/master
-	sock=/etc/zumastor/servers/$vol
+	local -r vol=$1
+	local -r kind=$2
+	local -r master=$VOLUMES/$vol/master
+	local -r sock=/etc/zumastor/servers/$vol
+	local -r file=$master/snapshots/$kind
+	local -ar snapshots
+	local max
+	local next
+	local num
+	local oldest
 
-	file=$master/schedule/$kind
-	read max <$file
+	read max <$master/schedule/$kind
 	echo new snapshot $vol $kind max=$max
 	echo $kind snapshots limit: $max
 	read next <$master/next
 	echo next = $next
 	echo $(( next+1 )) >$master/next
 
-	file=$master/snapshots/$kind
 	read -a snapshots <$file
 	echo snapshots: ${snapshots[@]}
 	num=${#snapshots[@]}
@@ -40,21 +44,23 @@ function new_snapshot {
 }
 
 function run_master {
-	vol=$1
-	fifo=$VOLUMES/$vol/master/trigger
+	local -r vol=$1
+	local -r fifo=$VOLUMES/$vol/master/trigger
+	local kind
+
 	test -r $fifo || return 1
-	touch /var/run/zumastor/cron/$vol || exit 1
+	touch /var/run/zumastor/cron/$vol || return 1
 	while true; do
-#		xargs -n1 <$fifo echo snapshot $vol || echo error $?
-		read kind <$fifo || exit 1
+		read kind <$fifo || return 1
 		new_snapshot $vol $kind
 	done
 }
 
 function run_target {
-	vol=$1
-	host=$2
-	fifo=$VOLUMES/$vol/targets/$host/trigger
+	local -r vol=$1
+	local -r host=$2
+	local -r fifo=$VOLUMES/$vol/targets/$host/trigger
+
 	test -r $fifo || return 1
 	while true; do
 		xargs -n1 <$fifo echo replicate $vol $host || echo error $?
@@ -62,23 +68,26 @@ function run_target {
 }
 
 function stop_master {
-	vol=$1
+	local -r vol=$1
+
 	rm /var/run/zumastor/cron/$vol
 	pkill -f "zumastor start master $vol"
 }
 
 function stop_target {
-	vol=$1
-	host=$2
+	local -r vol=$1
+	local -r host=$2
+
 	pkill -f "zumastor start target $vol $host"
 }
 
 function define_volume {
-	vol=$1
-	odev=$2
-	sdev=$3
-	path=$VOLUMES/$vol
-	sock=/etc/zumastor/servers/$vol
+	local -r vol=$1
+	local -r odev=$2
+	local -r sdev=$3
+	local -r path=$VOLUMES/$vol
+	local -r sock=/etc/zumastor/servers/$vol
+
 	test -n "$odev" || return 1
 	test -n "$sdev" || return 1
 	mkdir $path || return 1
@@ -93,8 +102,9 @@ function define_volume {
 }
 
 function forget_master {
-	vol=$1
-	path=$VOLUMES/$vol
+	local -r vol=$1
+	local -r path=$VOLUMES/$vol
+
 	stop_master $vol
 	if test -e $path/master; then
 		rm -r $path/master
@@ -102,9 +112,10 @@ function forget_master {
 }
 
 function forget_volume {
-	vol=$1
-	path=$VOLUMES/$vol
-	sock=/etc/zumastor/servers/$vol
+	local -r vol=$1
+	local -r path=$VOLUMES/$vol
+	local -r sock=/etc/zumastor/servers/$vol
+
 	# FIXME: cleanup snapshots, snapshot devices, and any target or master daemons here
 	rmdir $path/targets
 	rm -r $path/device
@@ -116,24 +127,27 @@ function forget_volume {
 }
 
 function define_target {
-	vol=$1
-	host=$2
-	path=$VOLUMES/$vol/targets/$host
+	local -r vol=$1
+	local -r host=$2
+	local -r path=$VOLUMES/$vol/targets/$host
+
 	mkdir $path || return 1
 	mkfifo $path/trigger || return 1
 	zumastor start target $vol $host || return 1
 }
 
 function forget_target {
-	vol=$1
-	host=$2
-	path=$VOLUMES/$vol/targets/$host
+	local -r vol=$1
+	local -r host=$2
+	local -r path=$VOLUMES/$vol/targets/$host
+
 	rm -r $path
 }
 
 function set_master {
-	vol=$1
-	path=$VOLUMES/$vol
+	local -r vol=$1
+	local -r path=$VOLUMES/$vol
+
 	rm -rf $path/source # need to prompt
 	mkdir $path/master || return 1
 	mkdir $path/master/schedule || return 1
@@ -151,9 +165,10 @@ function set_master {
 }
 
 function set_source {
-	vol=$1
-	host=$2
-	path=$VOLUMES/$vol
+	local -r vol=$1
+	local -r host=$2
+	local -r path=$VOLUMES/$vol
+
 	forget_master $vol
 	mkdir $path/source || return 1
 	mkdir $path/source/$host
@@ -211,19 +226,23 @@ stop)
 	esac
 	;;
 snapshot)
-	vol=$2
-	kind=$3
+	local -r vol=$2
+	local -r kind=$3
+
 	echo $kind >$VOLUMES/$vol/master/trigger
 	exit ;;
 replicate)
-	vol=$2
-	host=$3
-	snap=$4
+	local -r vol=$2
+	local -r host=$3
+	local -r snap=$4
+
 	echo replicate $vol\($snap\) to $host
 	exit ;;
 status)
-	tree -F $2 $VOLUMES
-	tree -F $2 /var/run/zumastor
+	local -r vol=$2
+
+	tree -F $vol $VOLUMES
+	tree -F $vol /var/run/zumastor
 	exit ;;
 esac
 

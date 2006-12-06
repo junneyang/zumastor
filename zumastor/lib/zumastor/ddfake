@@ -9,6 +9,7 @@ if [ X"$DDFAKE" = X"yes" ]; then
 function dmsetup {
 	case $1 in
 	create)
+		local args
 		read args
 		echo dmsetup create $2 $args
 		;;

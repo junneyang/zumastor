@@ -4,8 +4,9 @@
 # Licensed under the GNU GPL version 2
 
 function volume_name {
-	vol=$1
-	id=$2
+	local -r vol=$1
+	local -r id=$2
+
 	if [ X$id = X-1 ]; then
 		echo $vol
 	else
@@ -14,14 +15,15 @@ function volume_name {
 }
 
 function start_volume {
-	vol=$1
-	info=$VOLUMES/$vol
-	sdev=$(readlink $info/device/snapstore)
-	odev=$(readlink $info/device/origin)
-	agent=/var/run/zumastor/agents/$vol
-	server=/var/run/zumastor/servers/$vol
-	agentlog=/var/log/zumastor/${vol}-agent.log
-	serverlog=/var/log/zumastor/${vol}-server.log
+	local -r vol=$1
+	local -r info=$VOLUMES/$vol
+	local -r sdev=$(readlink $info/device/snapstore)
+	local -r odev=$(readlink $info/device/origin)
+	local -r agent=/var/run/zumastor/agents/$vol
+	local -r server=/var/run/zumastor/servers/$vol
+	local -r agentlog=/var/log/zumastor/${vol}-agent.log
+	local -r serverlog=/var/log/zumastor/${vol}-server.log
+
 	mkfifo $agent
 	mkfifo $server
 	ddsnap agent -l $agentlog $agent || return 1
@@ -30,39 +32,42 @@ function start_volume {
 }
 
 function stop_volume {
-	vol=$1
-	info=$VOLUMES/$vol
-	sdev=$(readlink $info/device/snapstore)
-	odev=$(readlink $info/device/origin)
-	agent=/var/run/zumastor/agents/$vol
-	server=/var/run/zumastor/servers/$vol
-	agentlog=/var/log/zumastor/${vol}-agent.log
-	serverlog=/var/log/zumastor/${vol}-server.log
+	local -r vol=$1
+	local -r info=$VOLUMES/$vol
+	local -r sdev=$(readlink $info/device/snapstore)
+	local -r odev=$(readlink $info/device/origin)
+	local -r agent=/var/run/zumastor/agents/$vol
+	local -r server=/var/run/zumastor/servers/$vol
+	local -r agentlog=/var/log/zumastor/${vol}-agent.log
+	local -r serverlog=/var/log/zumastor/${vol}-server.log
+
 	pkill -f "ddsnap server -l $serverlog $sdev $odev $agent $server"
 	pkill -f "ddsnap agent -l $agentlog $agent"
 	rm $agent $server
 }
 
 function create_device {
-	vol=$1
-	id=$2
-	info=$VOLUMES/$vol
-	sock=/etc/zumastor/servers/$vol
-	size=$(ddsnap status $sock --size) || return 1
-	sdev=$(readlink $info/device/snapstore)
-	odev=$(readlink $info/device/origin)
-	name=$(volume_name $vol $id)
-	mount=/var/run/zumastor/mount/$name
+	local -r vol=$1
+	local -r id=$2
+	local -r info=$VOLUMES/$vol
+	local -r sock=/etc/zumastor/servers/$vol
+	local -r size=$(ddsnap status $sock --size) || return 1
+	local -r sdev=$(readlink $info/device/snapstore)
+	local -r odev=$(readlink $info/device/origin)
+	local -r name=$(volume_name $vol $id)
+	local -r mount=/var/run/zumastor/mount/$name
+
 	echo 0 $size ddsnap $sdev $odev $sock $id | dmsetup create $name || return 1
 	test -d $mount || mkdir $mount || return 1
 	mount -o ro /dev/mapper/$name $mount
 }
 
 function remove_device {
-	vol=$1
-	id=$2
-	name=$(volume_name $vol $id)
-	mount=/var/run/zumastor/mount/$name
+	local -r vol=$1
+	local -r id=$2
+	local -r name=$(volume_name $vol $id)
+	local -r mount=/var/run/zumastor/mount/$name
+
 	umount $mount
 	rmdir $mount
 	dmsetup remove $name || return 1
