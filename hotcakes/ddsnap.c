@@ -2464,13 +2464,12 @@ int main(int argc, char *argv[])
 
 			trace_on(fprintf(stderr, "xd=%d raw=%d test=%d opt_comp=%d mode=%u gzip_level=%d\n", xd, raw, test, opt_comp, mode, gzip_level););
 
-			char const *sockname, *snaptag1str, *snaptag2str, *snapdev1, *snapdev2, *snaptagremstr, *hoststr;
+			char const *sockname, *snaptag1str, *snaptag2str, *snapstemstr, *snaptagremstr, *hoststr;
 
 			sockname      = poptGetArg(cdCon);
 			snaptag1str   = poptGetArg(cdCon);
 			snaptag2str   = poptGetArg(cdCon);
-			snapdev1      = poptGetArg(cdCon);
-			snapdev2      = poptGetArg(cdCon);
+			snapstemstr   = poptGetArg(cdCon);
 			snaptagremstr = poptGetArg(cdCon);
 			hoststr       = poptGetArg(cdCon);
 
@@ -2493,6 +2492,14 @@ int main(int argc, char *argv[])
 			} else {
 				port = DEFAULT_REPLICATION_PORT;
 			}
+
+			char *snapdev1 = (char *) malloc (strlen(snapstemstr) + strlen(snaptag1str) + 1);
+			char *snapdev2 = (char *) malloc (strlen(snapstemstr) + strlen(snaptag2str) + 1);
+
+			snapdev1 = strcpy(snapdev1, snapstemstr);
+			snapdev1 = strcat(snapdev1, snaptag1str);
+			snapdev2 = strcpy(snapdev2, snapstemstr);
+			snapdev2 = strcat(snapdev2, snaptag2str);
 
 			u32 snaptag1, snaptag2, remsnaptag;
 
