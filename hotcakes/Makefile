@@ -69,7 +69,7 @@ devspam: tests/devspam.c trace.h
 	cd tests && cc devspam.c $(flags) -I$(includes) -o ../devspam
 
 clean:
-	rm -f $(binaries) *.o xdelta/*.o a.out
+	rm -f build.h $(binaries) *.o xdelta/*.o a.out
 .PHONY: clean
 
 install: $(binaries)
