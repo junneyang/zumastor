@@ -1372,7 +1372,7 @@ static int snapnum_tag(struct superblock *sb, unsigned bit)
 
 static int create_snapshot(struct superblock *sb, unsigned snaptag)
 {
-	unsigned i, snapshots = sb->image.snapshots;
+	int i, snapshots = sb->image.snapshots;
 	struct snapshot *snapshot;
 
 	/* check tag not already used */
@@ -1387,7 +1387,7 @@ static int create_snapshot(struct superblock *sb, unsigned snaptag)
 	return -EFULL;
 
 create:
-	trace_on(printf("Create snapshot %u (internal %i)\n", snaptag, i););
+	trace_on(printf("Create snaptag %u (snapnum %i)\n", snaptag, i););
 	snapshot = sb->image.snaplist + sb->image.snapshots++;
 	*snapshot = (struct snapshot){ .tag = snaptag, .bit = i, .ctime = time(NULL) };
 	sb->snapmask |= (1ULL << i);
@@ -1668,7 +1668,7 @@ static int delete_snapshot(struct superblock *sb, unsigned tag)
 delete:
 	snapshot = sb->image.snaplist + i;
 	bit = snapshot->bit;
-	trace_on(printf("Delete snapshot %i (internal %i)\n", tag, bit););
+	trace_on(printf("Delete snaptag %u (snapnum %i)\n", tag, bit););
 	memmove(snapshot, snapshot + 1, (char *)(sb->image.snaplist + --sb->image.snapshots) - (char *)snapshot);
 	sb->snapmask &= ~(1ULL << bit);
 	delete_tree_range(sb, 1ULL << bit, 0); // start from the first chunk
@@ -2280,7 +2280,7 @@ next:
 
 #endif
 
-static struct snapshot *valid_snaptag(struct superblock *sb, int tag)
+static struct snapshot *valid_snaptag(struct superblock *sb, u32 tag)
 {
 	int i, n = sb->image.snapshots;
 	struct snapshot *snap = sb->image.snaplist;
@@ -2502,14 +2502,14 @@ static int incoming(struct superblock *sb, struct client *client)
 		unsigned int error_len;
 		
 		client->id = ((struct identify *)message.body)->id;
-		client->snap =  (tag == (u32)~0UL) ? tag : tag_snapnum(sb, tag);
+		client->snap =  (tag == (u32)~0UL) ? -1 : tag_snapnum(sb, tag);
 		client->flags = USING;
 		
 		trace(fprintf(stderr, "got identify request, setting id="U64FMT" snap=%i, sending chunksize_bits=%u\n", client->id, client->snap, sb->image.chunksize_bits););
-		warn("client id %llu, snapshot %u (snapnum %i)", client->id, tag, client->snap);
+		warn("client id %llu, snaptag %u (snapnum %i)", client->id, tag, client->snap);
 
-		struct snapshot * snap_info;
 		if (client->snap != -1) {
+			struct snapshot *snap_info;
 
 			if (!(snap_info = valid_snaptag(sb, client->snap))) {
 				warn("Snapshot id %u is not a valid snapshot\n", client->snap);
@@ -2565,19 +2565,27 @@ static int incoming(struct superblock *sb, struct client *client)
 	case CREATE_SNAPSHOT:
 	{
 		if (create_snapshot(sb, ((struct create_snapshot *)message.body)->snap) < 0)
-			goto reply_error;
+			goto create_error;
 		save_state(sb);
 		if (outbead(sock, REPLY_CREATE_SNAPSHOT, struct { }) < 0)
 			warn("unable to reply to create snapshot message");
+		break;
+	create_error:
+		if (outbead(sock, REPLY_ERROR, struct reply_error, REPLY_ERROR_OTHER, 0) < 0)
+			warn("unable to send error for create snapshot message");
 		break;
 	}
 	case DELETE_SNAPSHOT:
 	{
 		if (delete_snapshot(sb, ((struct create_snapshot *)message.body)->snap) < 0)
-			goto reply_error;
+			goto delete_error;
 		save_state(sb);
 		if (outbead(sock, REPLY_DELETE_SNAPSHOT, struct { }) < 0)
 			warn("unable to reply to delete snapshot message");
+		break;
+	delete_error:
+		if (outbead(sock, REPLY_ERROR, struct reply_error, REPLY_ERROR_OTHER, 0) < 0)
+			warn("unable to send error for delete snapshot message");
 		break;
 	}
 	case INITIALIZE_SNAPSTORE:
@@ -2629,10 +2637,10 @@ static int incoming(struct superblock *sb, struct client *client)
 	}
 	case SET_PRIORITY:
 	{
-		u32 snap = ((struct snapinfo *)message.body)->snap; /* FIXME: u64 in struct, s32 elsewhere */
+		u32 snap = ((struct snapinfo *)message.body)->snap;
 		s8 prio  = ((struct snapinfo *)message.body)->prio;
-		struct snapshot * snap_info;
-		if (snap == -1)
+		struct snapshot *snap_info;
+		if (snap == (u32)~0UL)
 			goto skip_set_prio;
 		if (!(snap_info = valid_snaptag(sb, snap))) {
 			warn("Snapshot id %u is not a valid snapshot\n", snap);
@@ -2644,21 +2652,21 @@ static int incoming(struct superblock *sb, struct client *client)
 			warn("unable to reply to set priority message");
 		break;
 	set_prio_error:
-		if (outbead(sock, REPLY_ERROR, struct {}) < 0)
+		if (outbead(sock, REPLY_ERROR, struct reply_error, REPLY_ERROR_PRIORITY, 0) < 0)
 			warn("unable to send error for set priority message");
 		break;
 	}
 	case USECOUNT:
 	{
-		u32 snap = ((struct usecount_info *)message.body)->snap; /* FIXME: u64 in struct, s32 elsewhere */
-		int32_t usecnt_dev  = ((struct usecount_info *)message.body)->usecnt_dev;
+		u32 snap = ((struct usecount_info *)message.body)->snap;
+		int32_t usecnt_dev = ((struct usecount_info *)message.body)->usecnt_dev;
 		int32_t new_usecnt = 0;
 		unsigned int err_len;
 		uint32_t err = 0;
 		char err_msg[MAX_ERRMSG_SIZE];
 
-		struct snapshot * snap_info;
-		if (snap == -1) {
+		struct snapshot *snap_info;
+		if (snap == (u32)~0UL) {
 			snprintf(err_msg, MAX_ERRMSG_SIZE, "Setting the usecount of the origin.");
 			err_msg[MAX_ERRMSG_SIZE-1] = '\0';
 			err = REPLY_ERROR_INVALID_SNAPSHOT;
@@ -2702,7 +2710,7 @@ static int incoming(struct superblock *sb, struct client *client)
 	}
 	case GENERATE_CHANGE_LIST:
 	{
-		unsigned int snap1 = ((struct generate_changelist *)message.body)->snap1,
+		u32 snap1 = ((struct generate_changelist *)message.body)->snap1,
 			snap2 = ((struct generate_changelist *)message.body)->snap2;
 		char const *err_msg;
 
@@ -2754,14 +2762,14 @@ static int incoming(struct superblock *sb, struct client *client)
 		close(change_fd);
 
 	generate_error:
-		trace(warn("%s", err_msg););
+		warn("%s", err_msg);
 		if (outbead(sock, REPLY_ERROR, struct { }) < 0)
 			warn("unable to send reply error for generating change list message\n");
 		break;
 	}
 	case STREAM_CHANGE_LIST:
 	{
-		unsigned int snap1 = ((struct stream_changelist *)message.body)->snap1,
+		u32 snap1 = ((struct stream_changelist *)message.body)->snap1,
 			snap2 = ((struct stream_changelist *)message.body)->snap2;
 		char const *err_msg;
 
@@ -2792,7 +2800,7 @@ static int incoming(struct superblock *sb, struct client *client)
 		break;
 
 	stream_error:
-		trace(warn("%s", err_msg););
+		warn("%s", err_msg);
 		if (outbead(sock, REPLY_ERROR, struct { }) < 0)
 			warn("unable to send error for streaming change list message");
 		break;
@@ -2932,7 +2940,7 @@ static int incoming(struct superblock *sb, struct client *client)
 		break;
 
 	status_error:
-		trace(warn("%s", err_msg););
+		warn("%s", err_msg);
 
 		int err;
 
@@ -2953,9 +2961,9 @@ static int incoming(struct superblock *sb, struct client *client)
 		return -2;
 
 	default:
-	reply_error:
-		if (outbead(sock, REPLY_ERROR, struct { }) < 0) // wrong!!!
-			warn("unable to send generic error message");
+		warn("snapshot server received unknown message code=%x, length=%u", message.head.code, message.head.length);
+		if (outbead(sock, REPLY_ERROR, struct reply_error, REPLY_ERROR_UNKNOWN_MESSAGE, 0) < 0) // wrong!!!
+			warn("unable to send unknown message error");
 	}
 
 #ifdef SIMULATE_CRASH
@@ -3162,8 +3170,8 @@ int snap_server(struct superblock *sb, int listenfd, int getsigfd, int agentfd)
 					warn("Client %llu disconnected", client->id);
 
 					if (client->flags == USING) {
-						struct snapshot * snap_info;
-						if (client->snap != -1) {							
+						if (client->snap != -1) {
+							struct snapshot *snap_info;
 							if (!(snap_info = valid_snaptag(sb, client->snap)))
 								warn("Snapshot id %u is not a valid snapshot\n", client->snap);
 							u32 new_usecnt = snap_info->usecnt - 1;
