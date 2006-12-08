@@ -831,7 +831,7 @@ static int control(struct dm_target *target)
 		trace(warn("wait message");)
 		if ((err = readpipe(sock, &message.head, sizeof(message.head))))
 			goto socket_error;
-		trace(warn("got message header code %x", message.head.code);)
+		trace(warn("got message header code %x, length %u", message.head.code, message.head.length);)
 		length = message.head.length;
 		if (length > maxbody) //!!! FIXME: shouldn't limit message sizes
 			goto message_too_long;
@@ -875,7 +875,19 @@ static int control(struct dm_target *target)
 			break;
 		}
 		default: 
-			warn("Unknown message %x", message.head.code);
+			warn("Unknown message %x, length %u", message.head.code, message.head.length);
+			if (message.head.code == REPLY_ERROR && message.head.length >= 4) {
+				unsigned int maxlen;
+				struct reply_error body;
+
+				if (message.head.length > sizeof(body))
+					maxlen = sizeof(body);
+				else
+					maxlen = message.head.length;
+
+				memcpy(&body, &message.body, maxlen);
+				warn("REPLY_ERROR with err=%x", body.err);
+			}
 			continue;
 		}
 	}
@@ -1072,7 +1084,7 @@ static int ddsnap_create(struct dm_target *target, unsigned argc, char **argv)
 #ifdef CACHE
 	unsigned bm_size;
 #endif
-	error = "ddsnap usage: orgdev snapdev sockname snapnum";
+	error = "ddsnap usage: snapdev orgdev sockname snapnum";
 	err = -EINVAL;
 	if (argc != 4)
 		goto eek;
@@ -1107,13 +1119,13 @@ static int ddsnap_create(struct dm_target *target, unsigned argc, char **argv)
 		INIT_LIST_HEAD(&info->pending[i]);
 
 	error = "Can't get snapshot device";
-	
 	if ((err = dm_get_device(target, argv[0], 0, 0, dm_table_get_mode(target->table), &info->snapdev)))
 		goto eek;
-	error = "Can't get origin device";
 	
+	error = "Can't get origin device";
 	if ((err = dm_get_device(target, argv[1], 0, 0, dm_table_get_mode(target->table), &info->orgdev)))
 		goto eek;
+
 	error = "Can't connect control socket";
 	if ((err = get_control_socket(argv[2])) < 0)
 		goto eek;
@@ -1137,7 +1149,7 @@ static int ddsnap_create(struct dm_target *target, unsigned argc, char **argv)
 		goto eek;
 	if ((err = kernel_thread((void *)control, target, 0)) < 0)
 		goto eek;
-	warn("Created snapshot device origin=%s snapstore=%s socket=%s snapshot=%i", argv[0], argv[1], argv[2], snap);
+	warn("Created snapshot device snapstore=%s origin=%s socket=%s snapshot=%i", argv[0], argv[1], argv[2], snap);
 	return 0;
 
 eek:	warn("Virtual device create error %i: %s!", err, error);
