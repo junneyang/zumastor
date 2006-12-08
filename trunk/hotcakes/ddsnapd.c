@@ -1358,7 +1358,6 @@ static int tag_snapnum(struct superblock *sb, unsigned tag)
 	return -1;
 }
 
-#if 0
 static unsigned int snapnum_tag(struct superblock *sb, unsigned bit)
 {
 	unsigned int i, n = sb->image.snapshots;
@@ -1370,7 +1369,6 @@ static unsigned int snapnum_tag(struct superblock *sb, unsigned bit)
 
 	return (u32)~0UL;
 }
-#endif
 
 static int create_snapshot(struct superblock *sb, unsigned snaptag)
 {
@@ -2519,7 +2517,7 @@ static int incoming(struct superblock *sb, struct client *client)
 		client->snap = (tag == (u32)~0UL) ? -1 : tag_snapnum(sb, tag);
 		client->flags = USING;
 		
-		trace(fprintf(stderr, "got identify request, setting id="U64FMT" snap=%i (tag=%u), sending chunksize_bits=%u\n", client->id, client->snap, tag, sb->image.chunksize_bits););
+		trace(fprintf(stderr, "got identify request, setting id="U64FMT" snap=%i (tag=%i), sending chunksize_bits=%u\n", client->id, client->snap, tag, sb->image.chunksize_bits););
 		warn("client id %llu, snaptag %u (snapnum %i)", client->id, tag, client->snap);
 
 		if (client->snap != -1) {
@@ -2527,7 +2525,7 @@ static int incoming(struct superblock *sb, struct client *client)
 
 			if (!(snap_info = valid_snaptag(sb, tag))) {
 				warn("Snapshot tag %u is not valid", tag);
-				snprintf(err_msg, MAX_ERRMSG_SIZE, "Snapshot tag %u is not valid", tag);
+				snprintf(err_msg, MAX_ERRMSG_SIZE, "Snapshot tag %i is not valid", tag);
 				err_msg[MAX_ERRMSG_SIZE-1] = '\0'; // make sure it's null terminated
 				err = REPLY_ERROR_INVALID_SNAPSHOT;
 				goto identify_error;
@@ -2544,13 +2542,13 @@ static int incoming(struct superblock *sb, struct client *client)
 		}
 
 		if (len != sb->image.orgsectors) {
-			snprintf(err_msg, MAX_ERRMSG_SIZE, "volume size mismatch for snapshot %u", tag);
+			snprintf(err_msg, MAX_ERRMSG_SIZE, "volume size mismatch for snapshot %i", tag);
 			err_msg[MAX_ERRMSG_SIZE-1] = '\0'; // make sure it's null terminated
 			err = REPLY_ERROR_SIZE_MISMATCH;
 			goto identify_error;
 		}
 		if (off != sb->image.orgoffset) {
-			snprintf(err_msg, MAX_ERRMSG_SIZE, "volume offset mismatch for snapshot %u", tag);
+			snprintf(err_msg, MAX_ERRMSG_SIZE, "volume offset mismatch for snapshot %i", tag);
 			err_msg[MAX_ERRMSG_SIZE-1] = '\0'; // make sure it's null terminated
 			err = REPLY_ERROR_OFFSET_MISMATCH;
 			goto identify_error;
@@ -3185,9 +3183,12 @@ int snap_server(struct superblock *sb, int listenfd, int getsigfd, int agentfd)
 
 					if (client->flags == USING) {
 						if (client->snap != -1) {
+							u32 tag = snapnum_tag(sb, client->snap);
 							struct snapshot *snap_info;
-							if (!(snap_info = valid_snapnum(sb, client->snap)))
-								warn("Snapshot id %i is not valid", client->snap);
+							if (!(snap_info = valid_snapnum(sb, tag))) {
+								warn("Snapshot id %i is not valid", tag);
+								goto close_client;
+							}
 							u32 new_usecnt = snap_info->usecnt - 1;
 							if (new_usecnt < 0) {
 								warn("Usecount underflow.");
@@ -3196,7 +3197,7 @@ int snap_server(struct superblock *sb, int listenfd, int getsigfd, int agentfd)
 							snap_info->usecnt = new_usecnt;
 						}
 					}
-
+				close_client:
 					save_state(sb); // !!! just for now
 					close(client->sock);
 					free(client);
