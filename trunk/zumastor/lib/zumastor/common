@@ -3,6 +3,29 @@
 # Author: Daniel Phillips <phillips@google.com>
 # Licensed under the GNU GPL version 2
 
+function find_in {
+	local -r item=$1
+	local -ra array=(${@:2})
+
+	for memb in ${array[@]}; do
+		if [ X$memb = X$item ]; then
+			return 0
+		fi
+	done
+
+	return 1
+}
+
+function verify_volname {
+	local -r vol=$1
+
+	# allow anything of nonzero length made of printable characters except slashes
+	[ $vol ] || return 1
+	echo "$vol" | grep -E '([^[:print:]]|/)' > /dev/null && return 1
+
+	return 0
+}
+
 function volume_name {
 	local -r vol=$1
 	local -r id=$2
@@ -17,25 +40,24 @@ function volume_name {
 function start_volume {
 	local -r vol=$1
 	local -r info=$VOLUMES/$vol
-	local -r sdev=$(readlink $info/device/snapstore)
-	local -r odev=$(readlink $info/device/origin)
+	local -r sdev=$info/device/snapstore
+	local -r odev=$info/device/origin
 	local -r agent=/var/run/zumastor/agents/$vol
 	local -r server=/var/run/zumastor/servers/$vol
 	local -r agentlog=/var/log/zumastor/${vol}-agent.log
 	local -r serverlog=/var/log/zumastor/${vol}-server.log
 
-	mkfifo $agent
-	mkfifo $server
+	mkfifo $agent || return 1
+	mkfifo $server || return 1
 	ddsnap agent -l $agentlog $agent || return 1
 	ddsnap server -l $serverlog $sdev $odev $agent $server || return 1
-	sleep .5 # FIXME: wait until device is ready or timeout
 }
 
 function stop_volume {
 	local -r vol=$1
 	local -r info=$VOLUMES/$vol
-	local -r sdev=$(readlink $info/device/snapstore)
-	local -r odev=$(readlink $info/device/origin)
+	local -r sdev=$info/device/snapstore
+	local -r odev=$info/device/origin
 	local -r agent=/var/run/zumastor/agents/$vol
 	local -r server=/var/run/zumastor/servers/$vol
 	local -r agentlog=/var/log/zumastor/${vol}-agent.log
@@ -50,16 +72,17 @@ function create_device {
 	local -r vol=$1
 	local -r id=$2
 	local -r info=$VOLUMES/$vol
-	local -r sock=/etc/zumastor/servers/$vol
-	local -r size=$(ddsnap status $sock --size) || return 1
-	local -r sdev=$(readlink $info/device/snapstore)
-	local -r odev=$(readlink $info/device/origin)
+	local -r agent=/etc/zumastor/agents/$vol
+	local -r server=/etc/zumastor/servers/$vol
+	local -r size=$(ddsnap status $server --size) || return 1
+	local -r sdev=$info/device/snapstore
+	local -r odev=$info/device/origin
 	local -r name=$(volume_name $vol $id)
 	local -r mount=/var/run/zumastor/mount/$name
 
-	echo 0 $size ddsnap $sdev $odev $sock $id | dmsetup create $name || return 1
+	echo 0 $size ddsnap $sdev $odev $agent $id | dmsetup create $name || return 1
 	test -d $mount || mkdir $mount || return 1
-	mount -o ro /dev/mapper/$name $mount
+	mount -o ro /dev/mapper/$name $mount || { echo "unable to mount $mount"; return 1; }
 }
 
 function remove_device {

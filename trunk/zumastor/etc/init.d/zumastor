@@ -13,22 +13,27 @@ function start_zumastor {
 	local -r agents=/var/run/zumastor/agents
 	local -r servers=/var/run/zumastor/servers
 	local vol
+	local id
 
+	# setup directory structure
 	if ! [ -d /var/run/zumastor ]; then
 		mkdir -p $agents || return 1
 		mkdir -p $servers || return 1
 		mkdir -p /var/run/zumastor/cron || return 1
+		mkdir -p /var/run/zumastor/mount || return 1
 	fi
+
 	for vol in $(ls $VOLUMES) ; do
 		start_volume $vol || return 1
+
 		create_device $vol -1 || return 1
 		local -r list=$(ddsnap status $servers/$vol --list) || return 1
-		local id
 		for id in $list ; do
 			create_device $vol $id || return 1
 		done
+
 		if test -x $VOLUMES/$vol/master; then
-			zumastor start master $vol
+			zumastor start master $vol || return 1
 		fi
 		for host in $(ls $VOLUMES/$vol/targets) ; do
 			zumastor start target $vol $host
@@ -40,6 +45,7 @@ function stop_zumastor {
 	echo Stopping zumastor
 	local -r servers=/var/run/zumastor/servers
 	local vol
+	local id
 
 	for vol in $(ls $VOLUMES) ; do
 		for host in $(ls $VOLUMES/$vol/targets) ; do
@@ -48,12 +54,13 @@ function stop_zumastor {
 		if test -x $VOLUMES/$vol/master; then
 			zumastor stop master $vol
 		fi
+
 		local -r list=$(ddsnap status $servers/$vol --list)
-		local id
 		for id in $list ; do
 			remove_device $vol $id
 		done
 		remove_device $vol -1
+
 		stop_volume $vol
 	done
 }

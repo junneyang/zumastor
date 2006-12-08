@@ -12,24 +12,33 @@ function new_snapshot {
 	local -r kind=$2
 	local -r master=$VOLUMES/$vol/master
 	local -r sock=/etc/zumastor/servers/$vol
-	local -r file=$master/snapshots/$kind
-	local -ar snapshots
+	local -r maxfile=$master/schedule/$kind
+	local -r listfile=$master/snapshots/$kind
+	local -a snapshots
 	local max
 	local next
 	local num
 	local oldest
 
-	read max <$master/schedule/$kind
-	echo new snapshot $vol $kind max=$max
-	echo $kind snapshots limit: $max
-	read next <$master/next
-	echo next = $next
-	echo $(( next+1 )) >$master/next
+echo "new_snapshot:"
+echo "vol=$vol kind=$kind"
+	[ -f $maxfile ] || { echo "$maxfile is missing, doing nothing"; return 1; }
+	read max <$maxfile
+	[ $max ] || { echo "$maxfile is empty, doing nothing"; return 1; }
+	[ $max -gt 0 ] || { echo "$maxfile contains zero, doing nothing"; return 1; }
 
-	read -a snapshots <$file
-	echo snapshots: ${snapshots[@]}
+	read next <$master/next
+	echo $(( next+1 )) >$master/next
+echo "next=$next"
+
+	if [ -f $listfile ]; then
+		read -a snapshots <$listfile
+	else
+		snapshots=()
+	fi
 	num=${#snapshots[@]}
 	snapshots[$num]=$next
+
 	ddsnap create $sock $next
 	create_device $vol $next
 
@@ -39,8 +48,8 @@ function new_snapshot {
 		ddsnap delete $sock $oldest
 		unset snapshots[0]
 	fi
-	echo snapshots: ${snapshots[@]}
-	echo ${snapshots[@]} >$file
+	echo ${snapshots[@]} >$listfile
+echo "snapshots=${snapshots[@]}"
 }
 
 function run_master {
@@ -48,29 +57,35 @@ function run_master {
 	local -r fifo=$VOLUMES/$vol/master/trigger
 	local kind
 
-	test -r $fifo || return 1
+	[ -r $fifo ] && [ -p $fifo ] || { echo "missing $fifo"; return 1; }
 	touch /var/run/zumastor/cron/$vol || return 1
+
+	# FIXME: daemonize (close stdin, stdout, stderr)
 	while true; do
-		read kind <$fifo || return 1
+		read kind <$fifo || exit 1
 		new_snapshot $vol $kind
-	done
+	done &
 }
 
 function run_target {
 	local -r vol=$1
 	local -r host=$2
 	local -r fifo=$VOLUMES/$vol/targets/$host/trigger
+	local id
 
-	test -r $fifo || return 1
+	[ -r $fifo ] && [ -p $fifo ] || { echo "missing $fifo"; return 1; }
+
+	# FIXME: daemonize (close stdin, stdout, stderr)
 	while true; do
-		xargs -n1 <$fifo echo replicate $vol $host || echo error $?
-	done
+		read id <$fifo || exit 1
+		echo replicate $vol $host $id # !!!
+	done &
 }
 
 function stop_master {
 	local -r vol=$1
 
-	rm /var/run/zumastor/cron/$vol
+	rm -f /var/run/zumastor/cron/$vol
 	pkill -f "zumastor start master $vol"
 }
 
@@ -88,8 +103,6 @@ function define_volume {
 	local -r path=$VOLUMES/$vol
 	local -r sock=/etc/zumastor/servers/$vol
 
-	test -n "$odev" || return 1
-	test -n "$sdev" || return 1
 	mkdir $path || return 1
 	mkdir $path/device || return 1
 	ln -sf $odev $path/device/origin  || return 1
@@ -101,16 +114,6 @@ function define_volume {
 	create_device $vol -1 || return 1
 }
 
-function forget_master {
-	local -r vol=$1
-	local -r path=$VOLUMES/$vol
-
-	stop_master $vol
-	if test -e $path/master; then
-		rm -r $path/master
-	fi
-}
-
 function forget_volume {
 	local -r vol=$1
 	local -r path=$VOLUMES/$vol
@@ -118,7 +121,7 @@ function forget_volume {
 
 	# FIXME: cleanup snapshots, snapshot devices, and any target or master daemons here
 	rmdir $path/targets
-	rm -r $path/device
+	rm -rf $path/device
 	remove_device $vol -1
 	ddsnap remove $sock -1
 	forget_master $vol
@@ -141,27 +144,47 @@ function forget_target {
 	local -r host=$2
 	local -r path=$VOLUMES/$vol/targets/$host
 
-	rm -r $path
+	rm -rf $path
 }
 
 function set_master {
 	local -r vol=$1
+	local -r kind=$2
+	local -r count=$3
 	local -r path=$VOLUMES/$vol
+	local new
 
 	rm -rf $path/source # need to prompt
-	mkdir $path/master || return 1
-	mkdir $path/master/schedule || return 1
-	# next part is wrong, need to parse x=n form, take default if not present
-	echo $2 >$path/master/schedule/hourly || return 1
-	echo $3 >$path/master/schedule/daily || return 1
-	echo $4 >$path/master/schedule/weekly || return 1
-	echo 0 >$path/master/next || return 1
-	mkdir $path/master/snapshots || return 1
-	touch $path/master/snapshots/hourly || return 1
-	touch $path/master/snapshots/daily || return 1
-	touch $path/master/snapshots/weekly || return 1
-	mkfifo $path/master/trigger || return 1
-	zumastor start master $vol
+
+	find_in $kind ${KINDS[@]} || { echo "$0: unknown snapshot type $kind"; return 1; }
+
+	[ -d $path/master ] || new=yes
+
+	if [ $new ]; then
+		mkdir $path/master || return 1
+		mkdir $path/master/schedule || return 1
+	fi
+
+	if [ $count -gt 0 ]; then
+		echo $count >$path/master/schedule/$kind || return 1
+	else
+		rm -f $path/master/schedule/$kind
+	fi
+
+	if [ $new ]; then
+		echo 0 >$path/master/next || return 1
+		mkdir $path/master/snapshots || return 1
+		mkfifo $path/master/trigger || return 1
+		zumastor start master $vol
+	fi
+}
+
+function forget_master {
+	local -r vol=$1
+	local -r path=$VOLUMES/$vol
+
+	stop_master $vol
+	[ -d $path/master ] && rm -rf $path/master
 }
 
 function set_source {
@@ -174,78 +197,108 @@ function set_source {
 	mkdir $path/source/$host
 }
 
-VOLUMES=/var/lib/zumastor/volumes
+declare -r VOLUMES=/var/lib/zumastor/volumes
+declare -ar KINDS=(hourly daily weekly monthly)
 
-test -x $VOLUMES || (echo Cannot find zumastor database; exit 1)
+test -x $VOLUMES || { echo Cannot find zumastor database; exit 1; }
 
 case $1 in
 define)
 	case $2 in
 	volume)
+		[ $# -eq 5 ] || { echo "usage: $0 define volume <vol> <origin> <snapstore>"; exit 2; }
+		verify_volname $3 || { echo "$0: invalid volume name $3"; exit 1; }
 		define_volume $3 $4 $5
 		exit ;;
 	target)
+		[ $# -eq 4 ] || { echo "usage: $0 define target <vol> <host>"; exit 2; }
 		define_target $3 $4
 		exit ;;
 	master)
-		set_master $3 $4 $5 $6&
+		[ $# -eq 5 ] || { echo "usage: $0 define master <vol> <kind> <count>"; exit 2; }
+		set_master $3 $4 $5
 		exit ;;
 	source)
-		set_source $3 $4&
+		[ $# -eq 4 ] || { echo "usage: $0 define source <vol> <host>"; exit 2; }
+		set_source $3 $4
 		exit ;;
+	*)
+		echo "usage: $0 define volume|target|master|source"
+		exit 2 ;;
 	esac
 	;;
 forget)
 	case $2 in
 	volume)
+		[ $# -eq 3 ] || { echo "usage: $0 forget volume <vol>"; exit 2; }
 		forget_volume $3
 		exit ;;
 	target)
+		[ $# -eq 4 ] || { echo "usage: $0 forget target <vol> <host>"; exit 2; }
 		forget_target $3 $4
 		exit ;;
+	*)
+		echo "usage: $0 forget volume|target"
+		exit 2 ;;
 	esac
 	;;
 start)
 	case $2 in
 	master)
-		run_master $3 &
+		[ $# -eq 3 ] || { echo "usage: $0 start master <vol>"; exit 2; }
+		run_master $3
 		exit ;;
 	target)
-		run_target $3 $4 &
+		[ $# -eq 4 ] || { echo "usage: $0 start target <vol> <host>"; exit 2; }
+		run_target $3 $4
 		exit ;;
+	*)
+		echo "usage: $0 start master|target"
+		exit 2 ;;
 	esac
 	;;
 stop)
 	case $2 in
 	master)
-		stop_master $3 &
+		[ $# -eq 3 ] || { echo "usage: $0 stop master <vol>"; exit 2; }
+		stop_master $3
 		exit ;;
 	target)
-		stop_target $3 $4 &
+		[ $# -eq 4 ] || { echo "usage: $0 stop target <vol> <host>"; exit 2; }
+		stop_target $3 $4
 		exit ;;
+	*)
+		echo "usage: $0 stop master|target"
+		exit 2 ;;
 	esac
 	;;
 snapshot)
-	local -r vol=$2
-	local -r kind=$3
+	[ $# -eq 3 ] || { echo "usage: $0 snapshot <vol> <kind>"; exit 2; }
+	declare -r vol=$2
+	declare -r kind=$3
 
+	find_in $kind ${KINDS[@]} || { echo "$0: unknown snapshot type $kind"; exit 1; }
 	echo $kind >$VOLUMES/$vol/master/trigger
-	exit ;;
+	exit
+	;;
 replicate)
-	local -r vol=$2
-	local -r host=$3
-	local -r snap=$4
+	[ $# -eq 4 ] || { echo "usage: $0 replicate <vol> <host> <snap>"; exit 2; }
+	declare -r vol=$2
+	declare -r host=$3
+	declare -r snap=$4
 
-	echo replicate $vol\($snap\) to $host
-	exit ;;
+	echo replicate $vol\($snap\) to $host #!!!
+	exit
+	;;
 status)
-	local -r vol=$2
-
-	tree -F $vol $VOLUMES
-	tree -F $vol /var/run/zumastor
-	exit ;;
+	[ $# -eq 1 ] || { echo "usage: $0 status"; exit 2; }
+	tree -Fx $VOLUMES
+	tree -Fx /var/run/zumastor
+	exit
+	;;
 esac
 
 echo "Error: $@"
-echo "Usage: $0 ..."
+echo "Usage: $0 define|forget|start|stop|snapshot|replicate|status [<subcommand>] [<options>...]"
 exit 2
+

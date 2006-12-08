@@ -1,12 +1,6 @@
 To do:
 
- - start ddsnap daemons
-
  - add use counts
-
- - Hook up snapshot the rest of the way
-    - Create devmapper device on snapshot create
-    - Delete devmapper device on snapshot delete
 
  - Remote operations
     - ssh to start downstream listen
@@ -26,3 +20,6 @@ Done:
  - set up development tree
  - install/uninstall/develop scripts
  - create/delete ddsnap sockets
+ - start ddsnap daemons
+ - create/delete devmapper device on snapshot create/delete
+ - mount/unmount device on snapshot create/delete
