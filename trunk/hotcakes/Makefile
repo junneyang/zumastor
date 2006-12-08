@@ -3,7 +3,7 @@ kernel=./kernel
 instdir=/usr/bin
 #instdir=/tmp/ddsnap
 
-deps = Makefile trace.h diskio.h buffer.h list.h sock.h build.h
+deps = Makefile trace.h diskio.h buffer.h list.h sock.h
 ddsnap_agent_deps = $(deps) ddsnap.agent.h $(kernel)/dm-ddsnap.h
 ddsnapd_deps = $(deps) ddsnapd.h $(kernel)/dm-ddsnap.h
 ddsnap_deps = $(deps) ddsnap.h ddsnapd.h ddsnap.agent.h $(kernel)/dm-ddsnap.h
@@ -62,7 +62,7 @@ ddraid-agent: ddraid.agent.c $(ddraid_deps)
 #ddsnap-agent: ddsnap.agent.c daemonize.o $(ddsnap_deps)
 #	cc ddsnap.agent.c $(flags) -I$(includes) daemonize.o -o ddsnap-agent -lpopt
 
-ddsnap: ddsnap.c buffer.o ddsnapd.o ddsnap.agent.o ddsnap.common.o xdelta/xdelta3.o delta.o diskio.o daemonize.o $(ddsnap_deps)
+ddsnap: ddsnap.c buffer.o ddsnapd.o ddsnap.agent.o ddsnap.common.o xdelta/xdelta3.o delta.o diskio.o daemonize.o $(ddsnap_deps) build.h
 	cc ddsnap.c $(flags) -I$(includes) buffer.o ddsnapd.o ddsnap.agent.o ddsnap.common.o xdelta/xdelta3.o delta.o diskio.o daemonize.o -o ddsnap -lpopt -lz
 
 devspam: tests/devspam.c trace.h
@@ -83,7 +83,7 @@ kernel:
 kern:
 	cd ../../.. && make bzImage SUBDIRS=drivers/md
 
-build.h:
+build.h: $(ddsnap_agent_deps) $(ddsnapd_deps) $(ddsnap_deps) $(ddraid_deps)
 	rm -f $@
 	@echo '/*' > $@
 	@echo ' * This file is generated automatically by the Makefile.' >> $@
@@ -229,13 +229,13 @@ delta:	deltafile0-1
 .PHONY: delta
 
 deltafile0-1: changelist0-1
-	sudo ./ddsnap delta create -r changelist0-1 $@ /dev/mapper/snapshot0 /dev/mapper/snapshot1
+	sudo ./ddsnap delta create -r changelist0-1 $@ /dev/mapper/snapshot
 
 deltafile0-2: changelist0-2
-	sudo ./ddsnap delta create -r changelist0-2 $@ /dev/mapper/snapshot0 /dev/mapper/snapshot2
+	sudo ./ddsnap delta create -r changelist0-2 $@ /dev/mapper/snapshot
 
 deltafile1-2: changelist1-2
-	sudo ./ddsnap delta create -r changelist1-2 $@ /dev/mapper/snapshot1 /dev/mapper/snapshot2
+	sudo ./ddsnap delta create -r changelist1-2 $@ /dev/mapper/snapshot
 
 
 ddsnap-test3: 
