@@ -763,14 +763,14 @@ static void init_allocation(struct superblock *sb)
 	sb->image.journal_base = (meta_bitmap_base_chunk + meta_bitmap_chunks + (meta_flag ? snap_bitmap_chunks : 0)) << sb->sectors_per_chunk_bits;
 
 	if (meta_flag)
-		warn("metadata store size: %Lu chunks (%Lu sectors)", meta_chunks, meta_chunks << sb->sectors_per_chunk_bits);
-	warn("snapshot store size: %Lu chunks (%Lu sectors)", chunks, chunks << sb->sectors_per_chunk_bits);
+		warn("metadata store size: %llu chunks (%llu sectors)", meta_chunks, meta_chunks << sb->sectors_per_chunk_bits);
+	warn("snapshot store size: %llu chunks (%llu sectors)", chunks, chunks << sb->sectors_per_chunk_bits);
 	printf("Initializing %u bitmap blocks... ", bitmaps);
 
 	unsigned i;
 	for (i = 0; i < bitmaps; i++, sector += sb->sectors_per_block) {
 		struct buffer *buffer = getblk(sb->metadev, sector, sb->blocksize);
-		printf("%Lx ", buffer->sector);
+		printf("%llx ", buffer->sector);
 		memset(buffer->data, 0, sb->blocksize);
 		/* Reserve bitmaps and superblock */
 		if (i == 0) {
@@ -1037,7 +1037,7 @@ static void gen_changelist_leaf(struct superblock *sb, struct eleaf *leaf, void 
 			if ( ((p->share & mask2) == mask2) != ((p->share & mask1) == mask1) ) {
 				newchunk = leaf->base_chunk + leaf->map[i].rchunk;
 				if (append_change_list(cl, newchunk) < 0)
-					warn("unable to write chunk %Lu to changelist\n", newchunk);
+					warn("unable to write chunk %llu to changelist", newchunk);
 				break;
 			}
 		}
@@ -1338,7 +1338,7 @@ static int test_unique(struct superblock *sb, chunk_t chunk, int snapnum, chunk_
 static u64 calc_snapmask(struct superblock *sb)
 {
 	u64 mask = 0;
-	int i;
+	unsigned int i;
 
 	for (i = 0; i < sb->image.snapshots; i++)
 		mask |= 1ULL << sb->image.snaplist[i].bit;
@@ -1348,25 +1348,27 @@ static u64 calc_snapmask(struct superblock *sb)
 
 static int tag_snapnum(struct superblock *sb, unsigned tag)
 {
-	unsigned i, n = sb->image.snapshots;
+	unsigned int i, n = sb->image.snapshots;
+	struct snapshot const *snap = sb->image.snaplist;
 
 	for (i = 0; i < n; i++)
-		if (sb->image.snaplist[i].tag == tag)
-			return sb->image.snaplist[i].bit;
+		if (snap[i].tag == tag)
+			return snap[i].bit;
 
 	return -1;
 }
 
 #if 0
-static int snapnum_tag(struct superblock *sb, unsigned bit)
+static unsigned int snapnum_tag(struct superblock *sb, unsigned bit)
 {
-	unsigned i, n = sb->image.snapshots;
+	unsigned int i, n = sb->image.snapshots;
+	struct snapshot const *snap = sb->image.snaplist;
 
 	for (i = 0; i < n; i++)
-		if (sb->image.snaplist[i].bit == bit)
-			return sb->image.snaplist[i].tag;
+		if (snap[i].bit == bit)
+			return snap[i].tag;
 
-	return -1;
+	return (u32)~0UL;
 }
 #endif
 
@@ -1668,7 +1670,7 @@ static int delete_snapshot(struct superblock *sb, unsigned tag)
 delete:
 	snapshot = sb->image.snaplist + i;
 	bit = snapshot->bit;
-	trace_on(printf("Delete snaptag %u (snapnum %i)\n", tag, bit););
+	trace_on(warn("Delete snaptag %u (snapnum %i)", tag, bit););
 	memmove(snapshot, snapshot + 1, (char *)(sb->image.snaplist + --sb->image.snapshots) - (char *)snapshot);
 	sb->snapmask &= ~(1ULL << bit);
 	delete_tree_range(sb, 1ULL << bit, 0); // start from the first chunk
@@ -1708,7 +1710,7 @@ struct client
 {
 	u64 id;
 	fd_t sock;
-	int snap;
+	int snap; /* snapnum/snapbit for snapshots, -1 for origin */
 	u32 flags; 
 };
 
@@ -1950,7 +1952,7 @@ static void addto_response(struct addto *r, chunk_t chunk)
 	trace(printf("inside addto_response\n"););
 	if (chunk != r->nextchunk) {
 		if (r->top) {
-			trace(warn("finish old range\n"););
+			trace(warn("finish old range"););
 			*(r->countp) = (r->nextchunk -  r->firstchunk);
 		} else {
 			trace(warn("alloc new reply"););
@@ -2292,14 +2294,26 @@ static struct snapshot *valid_snaptag(struct superblock *sb, u32 tag)
 	return NULL;
 }
 
+static struct snapshot *valid_snapnum(struct superblock *sb, int snapnum)
+{
+	unsigned int i, n = sb->image.snapshots;
+	struct snapshot *snap = sb->image.snaplist;
+
+	for (i = 0; i < n; i++)
+		if (snap[i].bit == snapnum)
+			return &snap[i];
+
+	return NULL;
+}
+
 static unsigned int max_snapbit(struct snapshot const *snaplist, unsigned int snapshots)
 {
+	unsigned int i;
 	unsigned int max = 0;
-	unsigned int snapnum;
 
-	for (snapnum = 0; snapnum < snapshots; snapnum++)
-		if (snaplist[snapnum].bit > max)
-			max = snaplist[snapnum].bit;
+	for (i = 0; i < snapshots; i++)
+		if (snaplist[i].bit > max)
+			max = snaplist[i].bit;
 
 	return max;
 }
@@ -2502,18 +2516,18 @@ static int incoming(struct superblock *sb, struct client *client)
 		unsigned int error_len;
 		
 		client->id = ((struct identify *)message.body)->id;
-		client->snap =  (tag == (u32)~0UL) ? -1 : tag_snapnum(sb, tag);
+		client->snap = (tag == (u32)~0UL) ? -1 : tag_snapnum(sb, tag);
 		client->flags = USING;
 		
-		trace(fprintf(stderr, "got identify request, setting id="U64FMT" snap=%i, sending chunksize_bits=%u\n", client->id, client->snap, sb->image.chunksize_bits););
+		trace(fprintf(stderr, "got identify request, setting id="U64FMT" snap=%i (tag=%u), sending chunksize_bits=%u\n", client->id, client->snap, tag, sb->image.chunksize_bits););
 		warn("client id %llu, snaptag %u (snapnum %i)", client->id, tag, client->snap);
 
 		if (client->snap != -1) {
 			struct snapshot *snap_info;
 
-			if (!(snap_info = valid_snaptag(sb, client->snap))) {
-				warn("Snapshot id %u is not a valid snapshot\n", client->snap);
-				snprintf(err_msg, MAX_ERRMSG_SIZE, "Snapshot id %u is not a valid snapshot", client->snap);
+			if (!(snap_info = valid_snaptag(sb, tag))) {
+				warn("Snapshot tag %u is not valid", tag);
+				snprintf(err_msg, MAX_ERRMSG_SIZE, "Snapshot tag %u is not valid", tag);
 				err_msg[MAX_ERRMSG_SIZE-1] = '\0'; // make sure it's null terminated
 				err = REPLY_ERROR_INVALID_SNAPSHOT;
 				goto identify_error;
@@ -2637,13 +2651,13 @@ static int incoming(struct superblock *sb, struct client *client)
 	}
 	case SET_PRIORITY:
 	{
-		u32 snap = ((struct snapinfo *)message.body)->snap;
+		u32 tag = ((struct snapinfo *)message.body)->snap;
 		s8 prio  = ((struct snapinfo *)message.body)->prio;
 		struct snapshot *snap_info;
-		if (snap == (u32)~0UL)
+		if (tag == (u32)~0UL)
 			goto skip_set_prio;
-		if (!(snap_info = valid_snaptag(sb, snap))) {
-			warn("Snapshot id %u is not a valid snapshot\n", snap);
+		if (!(snap_info = valid_snaptag(sb, tag))) {
+			warn("Snapshot tag %u is not valid", tag);
 			goto set_prio_error;
 		}
 		snap_info->prio = prio;
@@ -2658,7 +2672,7 @@ static int incoming(struct superblock *sb, struct client *client)
 	}
 	case USECOUNT:
 	{
-		u32 snap = ((struct usecount_info *)message.body)->snap;
+		u32 tag = ((struct usecount_info *)message.body)->snap;
 		int32_t usecnt_dev = ((struct usecount_info *)message.body)->usecnt_dev;
 		int32_t new_usecnt = 0;
 		unsigned int err_len;
@@ -2666,16 +2680,16 @@ static int incoming(struct superblock *sb, struct client *client)
 		char err_msg[MAX_ERRMSG_SIZE];
 
 		struct snapshot *snap_info;
-		if (snap == (u32)~0UL) {
+		if (tag == (u32)~0UL) {
 			snprintf(err_msg, MAX_ERRMSG_SIZE, "Setting the usecount of the origin.");
 			err_msg[MAX_ERRMSG_SIZE-1] = '\0';
 			err = REPLY_ERROR_INVALID_SNAPSHOT;
 			goto usecnt_error; /* not really an error though */
 		}
 
-		if (!(snap_info = valid_snaptag(sb, snap))) {
-			warn("Snapshot id %u is not a valid snapshot\n", snap);
-			snprintf(err_msg, MAX_ERRMSG_SIZE, "Snapshot id %u is not a valid snapshot.", snap);
+		if (!(snap_info = valid_snaptag(sb, tag))) {
+			warn("Snapshot tag %u is not valid", tag);
+			snprintf(err_msg, MAX_ERRMSG_SIZE, "Snapshot tag %u is not valid", tag);
 			err_msg[MAX_ERRMSG_SIZE-1] = '\0';
 			err = REPLY_ERROR_INVALID_SNAPSHOT;
 			goto usecnt_error;
@@ -2710,15 +2724,15 @@ static int incoming(struct superblock *sb, struct client *client)
 	}
 	case GENERATE_CHANGE_LIST:
 	{
-		u32 snap1 = ((struct generate_changelist *)message.body)->snap1,
-			snap2 = ((struct generate_changelist *)message.body)->snap2;
+		u32 tag1 = ((struct generate_changelist *)message.body)->snap1,
+			tag2 = ((struct generate_changelist *)message.body)->snap2;
 		char const *err_msg;
 
 		/* check that each snapshot is a valid tag */
 		struct snapshot *snapshot1, *snapshot2;
 		err_msg = "invalid snapshot tag";
-		if (!(snapshot1 = valid_snaptag(sb, snap1))
-		    || !(snapshot2 = valid_snaptag(sb, snap2)))
+		if (!(snapshot1 = valid_snaptag(sb, tag1))
+		    || !(snapshot2 = valid_snaptag(sb, tag2)))
 			goto generate_error;
 
 		int change_fd;
@@ -2729,7 +2743,7 @@ static int incoming(struct superblock *sb, struct client *client)
 
 		struct change_list *cl;
 
-		trace_on(printf("generating changelist from snapshots %u and %u\n", snap1, snap2););
+		trace_on(printf("generating changelist from snapshots tags %u and %u\n", tag1, tag2););
 		err_msg = "unable to generate changelist";
 		if ((cl = gen_changelist_tree(sb, snapshot1, snapshot2)) == NULL)
 			goto generate_error_close;
@@ -2764,25 +2778,25 @@ static int incoming(struct superblock *sb, struct client *client)
 	generate_error:
 		warn("%s", err_msg);
 		if (outbead(sock, REPLY_ERROR, struct { }) < 0)
-			warn("unable to send reply error for generating change list message\n");
+			warn("unable to send reply error for generating change list message");
 		break;
 	}
 	case STREAM_CHANGE_LIST:
 	{
-		u32 snap1 = ((struct stream_changelist *)message.body)->snap1,
-			snap2 = ((struct stream_changelist *)message.body)->snap2;
+		u32 tag1 = ((struct stream_changelist *)message.body)->snap1,
+			tag2 = ((struct stream_changelist *)message.body)->snap2;
 		char const *err_msg;
 
 		/* check that each snapshot is a valid tag */
 		struct snapshot *snapshot1, *snapshot2;
 		err_msg = "invalid snapshot tag";
-		if (!(snapshot1 = valid_snaptag(sb, snap1))
-		    || !(snapshot2 = valid_snaptag(sb, snap2)))
+		if (!(snapshot1 = valid_snaptag(sb, tag1))
+		    || !(snapshot2 = valid_snaptag(sb, tag2)))
 			goto stream_error;
 
 		struct change_list *cl;
 
-		trace_on(printf("generating changelist from snapshots %u and %u\n", snap1, snap2););
+		trace_on(printf("generating changelist from snapshot tags %u and %u\n", tag1, tag2););
 		err_msg = "unable to generate changelist";
 		if ((cl = gen_changelist_tree(sb, snapshot1, snapshot2)) == NULL)
 			goto stream_error;
@@ -2810,7 +2824,7 @@ static int incoming(struct superblock *sb, struct client *client)
 		struct status_request request;
 		char const *err_msg;
 		struct snapshot const *snaplist = sb->image.snaplist;
-		unsigned int snapnum;
+		unsigned int snapslot;
 
 		if (message.head.length != sizeof(request)) {
 			err_msg = "status_request has wrong length";
@@ -2832,10 +2846,10 @@ static int incoming(struct superblock *sb, struct client *client)
 		unsigned int num_columns = num_rows;
 		unsigned int status_count;
 
-		if (request.snap != (u32)~0UL) {
+		if (request.snap != (u32)~0UL) { /* meaning "all snapshots" */
 			status_count = 0;
-			for (snapnum = 0; snapnum < sb->image.snapshots; snapnum++)
-				if (snaplist[snapnum].tag == request.snap) {
+			for (snapslot = 0; snapslot < sb->image.snapshots; snapslot++)
+				if (snaplist[snapslot].tag == request.snap) {
 					status_count = 1;
 					break;
 				}
@@ -2870,8 +2884,8 @@ static int incoming(struct superblock *sb, struct client *client)
 			printf("num_rows=%u num_columns=%u status_count=%u\n", num_rows, num_columns, status_count);
 
 			printf("snapshots:\n");
-			for (snapnum = 0; snapnum < sb->image.snapshots; snapnum++)
-				printf(" %2d: bit=%d, idtag=%u\n", snapnum, sb->image.snaplist[snapnum].bit, sb->image.snaplist[snapnum].tag);
+			for (snapslot = 0; snapslot < sb->image.snapshots; snapslot++)
+				printf(" %2u: bit=%d, idtag=%u\n", snapslot, sb->image.snaplist[snapslot].bit, sb->image.snaplist[snapslot].tag);
 			printf("\n");
 
 			for (row = 0; row < num_rows; row++) {
@@ -2911,17 +2925,17 @@ static int incoming(struct superblock *sb, struct client *client)
 		struct status *snap_status;
 
 		row = 0;
-		for (snapnum = 0; snapnum < sb->image.snapshots; snapnum++) {
-			if (request.snap != (u32)~0UL && snaplist[snapnum].tag != request.snap)
+		for (snapslot = 0; snapslot < sb->image.snapshots; snapslot++) {
+			if (request.snap != (u32)~0UL && snaplist[snapslot].tag != request.snap)
 				continue;
 
 			snap_status = get_snap_status(reply, row);
 
-			snap_status->ctime = snaplist[snapnum].ctime;
-			snap_status->snap = snaplist[snapnum].tag;
+			snap_status->ctime = snaplist[snapslot].ctime;
+			snap_status->snap = snaplist[snapslot].tag;
 
 			for (col = 0; col < num_columns; col++)
-				snap_status->chunk_count[col] = share_table[snaplist[snapnum].bit][col];
+				snap_status->chunk_count[col] = share_table[snaplist[snapslot].bit][col];
 
 			row++;
 		}
@@ -2976,7 +2990,7 @@ static int incoming(struct superblock *sb, struct client *client)
 	return 0;
 
  message_too_long:
-	warn("message %x too long (%u bytes) (disconnecting client)\n", message.head.code, message.head.length);
+	warn("message %x too long (%u bytes) (disconnecting client)", message.head.code, message.head.length);
 #ifdef DEBUG_BAD_MESSAGES
 	for (;;) {
 		unsigned int byte;
@@ -2988,7 +3002,7 @@ static int incoming(struct superblock *sb, struct client *client)
 #endif
 	return -1;
  message_too_short:
-	warn("message %x too short (%u bytes) (disconnecting client)\n", message.head.code, message.head.length);
+	warn("message %x too short (%u bytes) (disconnecting client)", message.head.code, message.head.length);
 	return -1;
  pipe_error:
 	return -1; /* we quietly drop the client if the connect breaks */
@@ -3078,7 +3092,7 @@ int snap_server_setup(const char *agent_sockname, const char *server_sockname, i
 	trace(warn("Established agent control connection"););
 
 	struct server_head server_head = { .type = AF_UNIX, .length = (strlen(server_sockname) + 1) };
-	trace(warn("server socket name is %s and length is %d\n", server_sockname, server_head.length););
+	trace(warn("server socket name is %s and length is %d", server_sockname, server_head.length););
 	if (writepipe(*agentfd, &(struct head){ SERVER_READY, sizeof(struct server_head) }, sizeof(struct head)) < 0 ||
 	    writepipe(*agentfd, &server_head, sizeof(server_head)) < 0 || 
 	    writepipe(*agentfd, server_sockname, server_head.length) < 0)
@@ -3172,8 +3186,8 @@ int snap_server(struct superblock *sb, int listenfd, int getsigfd, int agentfd)
 					if (client->flags == USING) {
 						if (client->snap != -1) {
 							struct snapshot *snap_info;
-							if (!(snap_info = valid_snaptag(sb, client->snap)))
-								warn("Snapshot id %u is not a valid snapshot\n", client->snap);
+							if (!(snap_info = valid_snapnum(sb, client->snap)))
+								warn("Snapshot id %i is not valid", client->snap);
 							u32 new_usecnt = snap_info->usecnt - 1;
 							if (new_usecnt < 0) {
 								warn("Usecount underflow.");
