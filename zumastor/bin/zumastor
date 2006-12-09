@@ -20,8 +20,8 @@ function new_snapshot {
 	local num
 	local oldest
 
-echo "new_snapshot:"
-echo "vol=$vol kind=$kind"
+#echo "new_snapshot:"
+#echo "vol=$vol kind=$kind"
 	[ -f $maxfile ] || { echo "$maxfile is missing, doing nothing"; return 1; }
 	read max <$maxfile
 	[ $max ] || { echo "$maxfile is empty, doing nothing"; return 1; }
@@ -29,7 +29,7 @@ echo "vol=$vol kind=$kind"
 
 	read next <$master/next
 	echo $(( next+1 )) >$master/next
-echo "next=$next"
+#echo "next=$next"
 
 	if [ -f $listfile ]; then
 		read -a snapshots <$listfile
@@ -49,7 +49,7 @@ echo "next=$next"
 		unset snapshots[0]
 	fi
 	echo ${snapshots[@]} >$listfile
-echo "snapshots=${snapshots[@]}"
+#echo "snapshots=${snapshots[@]}"
 }
 
 function run_master {

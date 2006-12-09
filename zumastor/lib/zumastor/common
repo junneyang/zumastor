@@ -33,7 +33,9 @@ function volume_name {
 	if [ X$id = X-1 ]; then
 		echo $vol
 	else
-		echo $vol\($id\)
+		# we can't use parens because ddsnap just tacks on the snapshot tag
+		#echo $vol\($id\)
+		echo $vol$id
 	fi
 }
 
