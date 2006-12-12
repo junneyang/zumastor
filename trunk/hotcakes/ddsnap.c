@@ -880,9 +880,11 @@ static int apply_delta_extents(int deltafile, u32 mode, u32 chunk_size, u64 chun
 		} else
 			uncomp_size = deh.data_length;
 
-                if (deh.setting == RAW)
+                if (deh.setting == RAW) {
 			memcpy(updated, delta_data, extent_size);
-		else {
+			if (deh.check_sum != checksum((const unsigned char *)updated, extent_size))
+				goto apply_checksum_error;
+		} else {
 			trace_off(printf("uncomp_size %llu & deh.data_length %llu\n", uncomp_size, deh.data_length););
 
 			if (uncomp_size == extent_size)
@@ -899,6 +901,13 @@ static int apply_delta_extents(int deltafile, u32 mode, u32 chunk_size, u64 chun
 					goto apply_chunk_error;
 			}
 
+			if (mode == TEST) {
+				if ((err = fdread(deltafile, up_extent1, extent_size)) < 0)
+					goto apply_testread_error;
+				if ((err = fdread(deltafile, up_extent2, extent_size)) < 0)
+					goto apply_testread_error;
+			}
+
 			if (deh.check_sum != checksum((const unsigned char *)updated, extent_size)) {
 				if (mode != TEST)
 					goto apply_checksum_error;
@@ -907,10 +916,6 @@ static int apply_delta_extents(int deltafile, u32 mode, u32 chunk_size, u64 chun
 					printf("\n");
 				printf("Check_sum failed for chunk address "U64FMT"\n", extent_addr);
 
-				if ((err = fdread(deltafile, up_extent1, extent_size)) < 0)
-					goto apply_testread_error;
-				if ((err = fdread(deltafile, up_extent2, extent_size)) < 0)
-					goto apply_testread_error;
 				int c1_chk_sum = checksum((const unsigned char *)extent_data, extent_size);
 
 				/* sanity check: does the checksum of upstream extent1 = checksum of downstream extent1? */
@@ -2384,7 +2389,7 @@ int main(int argc, char *argv[])
 
 			poptFreeContext(cdCon);
 
-			int sock = create_socket(argv[2]);
+			int sock = create_socket(sockname);
 
 			printf("%llu\n", get_origin_sectors(sock));
 			close(sock);
