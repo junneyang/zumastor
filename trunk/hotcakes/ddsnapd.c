@@ -2083,7 +2083,9 @@ int init_snapstore(struct superblock *sb, u32 js_bytes, u32 bs_bits)
 	sb->metadata->chunks = size >> sb->image.chunksize_bits;
 	if ((error = fd_size(sb->orgdev, &size)) < 0)
 		error("Error %i: %s determining origin volume size", errno, strerror(-errno));
-	sb->image.orgsectors = size >> SECTOR_BITS;
+	sb->image.orgsectors = size >> sb->image.chunksize_bits;
+	sb->image.orgsectors <<= sb->image.chunksize_bits;
+	sb->image.orgsectors >>= SECTOR_BITS;
 	sb->image.orgoffset  = 0; //!!! FIXME: shouldn't always assume offset starts at 0
 
 	u32 chunk_size = 1 << sb->image.chunksize_bits, js_chunks = DIVROUND(js_bytes, chunk_size);
