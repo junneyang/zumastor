@@ -288,12 +288,13 @@ replicate)
 	declare -r snap=$4
 
 	echo replicate $vol\($snap\) to $host #!!!
+	echo $snap >$VOLUMES/$vol/targets/$host/trigger
 	exit
 	;;
 status)
-	[ $# -eq 1 ] || { echo "usage: $0 status"; exit 2; }
-	tree -Fx $VOLUMES
-	tree -Fx /var/run/zumastor
+#	[ $# -eq 1 ] || { echo "usage: $0 status"; exit 2; }
+	tree -Fx $2 $VOLUMES
+	tree -Fx $2 /var/run/zumastor
 	exit
 	;;
 esac
