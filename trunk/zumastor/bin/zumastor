@@ -119,11 +119,19 @@ function forget_volume {
 	local -r path=$VOLUMES/$vol
 	local -r sock=/etc/zumastor/servers/$vol
 
-	# FIXME: cleanup snapshots, snapshot devices, and any target or master daemons here
+	# FIXME: cleanup any target or master daemons here
 	rmdir $path/targets
 	rm -rf $path/device
+
+	# get a list of snapshots and remove them first
+	local id
+	for id in $(ddsnap status $sock --list); do
+		remove_device $vol $id
+		ddsnap delete $sock $id
+	done
+
 	remove_device $vol -1
-	ddsnap remove $sock -1
+	ddsnap delete $sock -1
 	forget_master $vol
 	stop_volume $vol
 	rmdir $path
@@ -278,6 +286,9 @@ snapshot)
 	declare -r kind=$3
 
 	find_in $kind ${KINDS[@]} || { echo "$0: unknown snapshot type $kind"; exit 1; }
+
+	[ -e $VOLUMES/$vol/master/trigger ] || { echo $0: volume \'$vol\' not master; exit 1; }
+
 	echo $kind >$VOLUMES/$vol/master/trigger
 	exit
 	;;
@@ -292,7 +303,7 @@ replicate)
 	exit
 	;;
 status)
-#	[ $# -eq 1 ] || { echo "usage: $0 status"; exit 2; }
+	[ $# -le 2 ] || { echo "usage: $0 status [-f]"; exit 2; }
 	tree -Fx $2 $VOLUMES
 	tree -Fx $2 /var/run/zumastor
 	exit
