@@ -1918,7 +1918,8 @@ int main(int argc, char *argv[])
 
 	if (strcmp(command, "initialize") == 0) {
 		char const *snapdev, *origdev, *metadev;
-		u32 bs_bits = SECTOR_BITS + SECTORS_PER_BLOCK, js_bytes = DEFAULT_JOURNAL_SIZE;
+		u32 bs_bits = SECTOR_BITS + SECTORS_PER_BLOCK, cs_bits = SECTOR_BITS + SECTORS_PER_BLOCK, 
+			js_bytes = DEFAULT_JOURNAL_SIZE;
 
 		struct poptOption options[] = {
 			{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &initOptions, 0, NULL, NULL },
@@ -2002,7 +2003,7 @@ int main(int argc, char *argv[])
 
 		poptFreeContext(initCon);
 		
-		trace_off(printf("js_bytes was %u & bs_bits was %u\n", js_bytes, bs_bits););
+		trace_off(printf("js_bytes was %u, bs_bits was %u and cs_bits was %u\n", js_bytes, bs_bits, cs_bits););
 
 		if (bs_str != NULL) {
 			bs_bits = strtobits(bs_str);
@@ -2021,10 +2022,10 @@ int main(int argc, char *argv[])
 			}
 		}
 
-		trace_off(printf("js_bytes is %u & bs_bits is %u\n", js_bytes, bs_bits););
+		trace_off(printf("js_bytes is %u, bs_bits is %u, and cs_bits is %u\n", js_bytes, bs_bits, cs_bits););
 
 # ifdef MKDDSNAP_TEST
-		init_snapstore(sb, js_bytes, bs_bits);
+		init_snapstore(sb, js_bytes, bs_bits, cs_bits);
 		create_snapshot(sb, 0);
 		
 		int i;
@@ -2042,7 +2043,7 @@ int main(int argc, char *argv[])
 		return 0;
 # endif /* end of test code */
 		
-		return init_snapstore(sb, js_bytes, bs_bits);
+		return init_snapstore(sb, js_bytes, bs_bits, cs_bits);
 	}
 	if (strcmp(command, "agent") == 0) {
 		char const *sockname;
