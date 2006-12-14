@@ -403,7 +403,7 @@ found:
 			/* snapshot read from origin */
 			struct hook *hook;
 			trace(warn("hook end_io for %Lx", (long long)bio->bi_sector));
-			hook = kmem_cache_alloc(end_io_cache, GFP_KERNEL|__GFP_NOFAIL); // !!! union with pending
+			hook = kmem_cache_alloc(end_io_cache, GFP_NOIO|__GFP_NOFAIL); // !!! union with pending
 			*hook = (struct hook){
 				.info = info,
 				.sector = bio->bi_sector,
@@ -1095,7 +1095,7 @@ static int ddsnap_create(struct dm_target *target, unsigned argc, char **argv)
 
 	err = -ENOMEM;
 	error = "can't get kernel memory";
-	if (!(info = kmalloc(sizeof(struct devinfo), GFP_KERNEL)))
+	if (!(info = kmalloc(sizeof(struct devinfo), GFP_NOIO|__GFP_NOFAIL)))
 		goto eek;
 
 	*info = (struct devinfo){ 
