@@ -19,6 +19,9 @@
 #define SB_SIZE 4096
 #define SB_MAGIC "snapshot"
 
+#define METADATA_ALLOC(SB) ((SB)->image.alloc[0])
+#define SNAPDATA_ALLOC(SB) ((SB)->image.alloc[((SB)->metadev == (SB)->snapdev) ? 0 : 1])
+
 struct superblock
 {
 	/* Persistent, saved to disk */
@@ -29,7 +32,6 @@ struct superblock
 		sector_t etree_root;
 		sector_t orgoffset, orgsectors;
 		u64 flags;
-		u32 blocksize_bits, chunksize_bits;
 		u64 deleting;
 		struct snapshot
 		{
@@ -44,21 +46,20 @@ struct superblock
 		u32 etree_levels;
 		s32 journal_base, journal_next, journal_size;
 		u32 sequence;
-		struct allocation_info
+		u64 meta_chunks_used, snap_chunks_used;
+		struct allocspace_img
 		{
 			sector_t bitmap_base;
 			sector_t chunks;
 			sector_t freechunks;
 			chunk_t  last_alloc;
 			u64      bitmap_blocks;
-		} alloc[2]; /* shouldn't be hardcoded? */
+			u32      allocsize_bits;
+		} alloc[2]; 
 	} image;
 
 	/* Derived, not saved to disk */
 	u64 snapmask;
-	u32 blocksize, chunksize, blocks_per_node;
-	u32 sectors_per_block_bits, sectors_per_block;
-	u32 sectors_per_chunk_bits, sectors_per_chunk;
 	unsigned flags;
 	unsigned snapdev, metadev, orgdev;
 	unsigned snaplock_hash_bits;
@@ -69,13 +70,18 @@ struct superblock
 	chunk_t dest_exception;
 	unsigned copy_chunks;
 	unsigned max_commit_blocks;
-	struct allocation_info  *metadata, *snapdata, *current_alloc;
+	struct allocspace {
+		struct allocspace_img *asi;
+		u32 allocsize;  
+		u32 sectors_per_alloc_bits, sectors_per_alloc;
+		u32 alloc_per_node;  /* only for metadata */
+	} metadata, snapdata;
 };
 
 int snap_server_setup(const char *agent_sockname, const char *server_sockname, int *listenfd, int *getsigfd, int *agentfd);
 int snap_server(struct superblock *sb, int listenfd, int getsigfd, int agentfd);
 
-int init_snapstore(struct superblock *sb, u32 js_bytes, u32 bs_bits);
+int init_snapstore(struct superblock *sb, u32 js_bytes, u32 bs_bits, u32 cs_bits);
 
 u32 strtobytes(char const *string);
 u32 strtobits(char const *string);
