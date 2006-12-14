@@ -4,7 +4,6 @@
 # Licensed under the GNU GPL version 2
 
 # if enabled, don't run the actual commands
-if [ X"$DDFAKE" = X"yes" ]; then
 
 function dmsetup {
 	case $1 in
@@ -49,4 +48,11 @@ function ddsnap {
 	esac
 }
 
-fi
+function mount {
+	case $1 in
+*)
+	echo mount $@
+	return 0
+	;;
+	esac
+}
