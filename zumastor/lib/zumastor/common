@@ -11,7 +11,7 @@ declare -r LOGS=/var/log/zumastor
 # may read from a config file in the future
 declare -r AGENTS=$RUNPATH/agents
 declare -r SERVERS=$RUNPATH/servers
-declare -r MOUNTS=$RUNATH/mount
+declare -r MOUNTS=$RUNPATH/mount
 
 declare -ar KINDS=(hourly daily weekly monthly)
 
