@@ -4,8 +4,8 @@
 # Author: Daniel Phillips <phillips@google.com>
 # Licensed under the GNU GPL version 2
 
-. /lib/lsb/init-functions
-. /lib/zumastor/common
+. /lib/lsb/init-functions || { echo "$0: unable to load LSB init functions"; exit 1; }
+. /lib/zumastor/common || { echo "$0: unable to load common zumastor functions"; exit 1; }
 . /lib/zumastor/ddfake
 
 function start_zumastor {
@@ -14,6 +14,7 @@ function start_zumastor {
 	local -r servers=/var/run/zumastor/servers
 	local vol
 	local id
+	local host
 
 	# setup directory structure
 	if ! [ -d /var/run/zumastor ]; then
@@ -23,19 +24,19 @@ function start_zumastor {
 		mkdir -p /var/run/zumastor/mount || return 1
 	fi
 
-	for vol in $(ls $VOLUMES) ; do
+	for vol in $(ls $VOLUMES); do
 		start_volume $vol || return 1
 
 		create_device $vol -1 || return 1
 		local -r list=$(ddsnap status $servers/$vol --list) || return 1
-		for id in $list ; do
+		for id in $list; do
 			create_device $vol $id || return 1
 		done
 
-		if test -x $VOLUMES/$vol/master; then
+		if [ -x $VOLUMES/$vol/master ]; then
 			zumastor start master $vol || return 1
 		fi
-		for host in $(ls $VOLUMES/$vol/targets) ; do
+		for host in $(ls $VOLUMES/$vol/targets); do
 			zumastor start target $vol $host
 		done
 	done
@@ -46,17 +47,17 @@ function stop_zumastor {
 	local -r servers=/var/run/zumastor/servers
 	local vol
 	local id
+	local host
 
-	for vol in $(ls $VOLUMES) ; do
-		for host in $(ls $VOLUMES/$vol/targets) ; do
+	for vol in $(ls $VOLUMES); do
+		for host in $(ls $VOLUMES/$vol/targets); do
 			zumastor stop target $vol $host
 		done
-		if test -x $VOLUMES/$vol/master; then
+		if [ -x $VOLUMES/$vol/master ]; then
 			zumastor stop master $vol
 		fi
 
-		local -r list=$(ddsnap status $servers/$vol --list)
-		for id in $list ; do
+		for id in $(ddsnap status $servers/$vol --list); do
 			remove_device $vol $id
 		done
 		remove_device $vol -1
@@ -65,9 +66,7 @@ function stop_zumastor {
 	done
 }
 
-VOLUMES=/var/lib/zumastor/volumes
-
-test -x $VOLUMES || exit 1
+[ -d $VOLUMES ] || { echo "$0: cannot find zumastor database in '$VOLUMES'"; exit 1; }
 
 case $1 in
 start)
@@ -77,7 +76,7 @@ stop)
 	stop_zumastor
 	;;
 restart|force-reload)
-	stop_zumastor || exit
+	stop_zumastor
 	start_zumastor
 	;;
 status)

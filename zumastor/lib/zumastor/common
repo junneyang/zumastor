@@ -3,7 +3,11 @@
 # Author: Daniel Phillips <phillips@google.com>
 # Licensed under the GNU GPL version 2
 
+declare -r VOLUMES=/var/lib/zumastor/volumes
+declare -ar KINDS=(hourly daily weekly monthly)
+
 function find_in {
+	[ $# -ge 1 ] || { echo "$0: too few arguments ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
 	local -r item=$1
 	local -ra array=(${@:2})
 
@@ -16,30 +20,103 @@ function find_in {
 	return 1
 }
 
-function verify_volname {
+function verify_valid_volname {
+	[ $# -eq 1 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
 	local -r vol=$1
 
-	# allow anything of nonzero length made of printable characters except slashes
-	[ $vol ] || return 1
-	echo "$vol" | grep -E '([^[:print:]]|/)' > /dev/null && return 1
+	# allow anything of nonzero length made of printable characters except slashes or spaces
+	[[ $vol ]] || return 1
+	echo "$vol" | grep -E '([^[:print:]]|/| )' >/dev/null && return 1
 
 	return 0
 }
 
+function verify_valid_device {
+	[ $# -eq 1 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
+	local -r dev=$1
+
+	# allow anything made of printable characters starting with a slash
+	[[ $dev ]] || return 1
+	echo "$dev" | grep -E '(^[^/]|[^[:print:]])' >/dev/null && return 1
+
+	return 0
+}
+
+function verify_valid_host {
+	[ $# -eq 1 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
+	local -r host=$1
+
+	# allow anything of nonzero length made of printable characters except
+	# slashes or spaces, or more than one colon
+	[[ $host ]] || return 1
+	echo "$host" | grep -E '([^[:print:]]|/| |:.*:)' >/dev/null && return 1
+
+	return 0
+}
+
+function verify_valid_number {
+	[ $# -eq 1 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
+	local -r num=$1
+
+	# allow only strings of digits 
+	[[ $num ]] || return 1
+	echo "$num" | grep -E '[^0-9]' >/dev/null && return 1
+
+	return 0
+}
+
+function verify_managed_vol {
+	[ $# -eq 1 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
+	local -r vol=$1
+
+	# make sure the name is non-empty, doesn't have slashes, etc.,
+	# then make sure that name is in the database
+	verify_valid_volname $vol || return 1
+	[ -d $VOLUMES/$vol ] && return 0
+
+	return 1
+}
+
+function verify_existing_target {
+	[ $# -eq 2 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
+	local -r vol=$1
+	local -r host=$2
+	local -r fifo=$VOLUMES/$vol/targets/$host/trigger
+
+	verify_managed_vol $vol || return 1
+	verify_valid_host $host || return 1
+	[ -r $fifo ] && [ -p $fifo ] && return 0;
+
+	return 1
+}
+
+function verify_existing_snap {
+	[ $# -eq 2 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
+	local -r vol=$1
+	local -r snap=$2
+	local -r sock=/var/run/zumastor/servers/$vol
+
+	verify_managed_vol $vol || return 1
+	verify_valid_number $snap || return 1
+	ddsnap status $sock $snap 2>/dev/null | grep -E "^ *$snap " >/dev/null && return 0
+
+	return 1
+}
+
 function volume_name {
+	[ $# -eq 2 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
 	local -r vol=$1
 	local -r id=$2
 
-	if [ X$id = X-1 ]; then
+	if [[ $id = -1 ]]; then
 		echo $vol
 	else
-		# we can't use parens because ddsnap just tacks on the snapshot tag
 		echo $vol\($id\)
-		#echo $vol$id
 	fi
 }
 
 function start_volume {
+	[ $# -eq 1 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
 	local -r vol=$1
 	local -r info=$VOLUMES/$vol
 	local -r sdev=$info/device/snapstore
@@ -56,6 +133,7 @@ function start_volume {
 }
 
 function stop_volume {
+	[ $# -eq 1 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
 	local -r vol=$1
 	local -r info=$VOLUMES/$vol
 	local -r sdev=$info/device/snapstore
@@ -71,11 +149,12 @@ function stop_volume {
 }
 
 function create_device {
+	[ $# -eq 2 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
 	local -r vol=$1
 	local -r id=$2
 	local -r info=$VOLUMES/$vol
-	local -r agent=/etc/zumastor/agents/$vol
-	local -r server=/etc/zumastor/servers/$vol
+	local -r agent=/var/run/zumastor/agents/$vol
+	local -r server=/var/run/zumastor/servers/$vol
 	local -r size=$(ddsnap status $server --size) || return 1
 	local -r sdev=$info/device/snapstore
 	local -r odev=$info/device/origin
@@ -88,6 +167,7 @@ function create_device {
 }
 
 function remove_device {
+	[ $# -eq 2 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
 	local -r vol=$1
 	local -r id=$2
 	local -r name=$(volume_name $vol $id)
@@ -97,3 +177,4 @@ function remove_device {
 	rmdir $mount
 	dmsetup remove $name || return 1
 }
+

@@ -4,14 +4,14 @@
 # Author: Daniel Phillips <phillips@google.com>
 # Licensed under the GNU GPL version 2
 
-. /lib/zumastor/common
+. /lib/zumastor/common || { echo "$0: unable to load common zumastor functions"; exit 1; }
 . /lib/zumastor/ddfake
 
 function new_snapshot {
 	local -r vol=$1
 	local -r kind=$2
 	local -r master=$VOLUMES/$vol/master
-	local -r sock=/etc/zumastor/servers/$vol
+	local -r sock=/var/run/zumastor/servers/$vol
 	local -r maxfile=$master/schedule/$kind
 	local -r listfile=$master/snapshots/$kind
 	local -a snapshots
@@ -20,16 +20,16 @@ function new_snapshot {
 	local num
 	local oldest
 
-#echo "new_snapshot:"
-#echo "vol=$vol kind=$kind"
-	[ -f $maxfile ] || { echo "$maxfile is missing, doing nothing"; return 1; }
+	echo "`date`: new '$kind' snapshot requested for volume '$vol'"
+
+	[ -f $maxfile ] || { echo "$0: '$maxfile' is missing, doing nothing"; return 1; }
 	read max <$maxfile
-	[ $max ] || { echo "$maxfile is empty, doing nothing"; return 1; }
-	[ $max -gt 0 ] || { echo "$maxfile contains zero, doing nothing"; return 1; }
+	[ $max ] || { echo "$0: '$maxfile' is empty, doing nothing"; return 1; }
+	[ $max -gt 0 ] || { echo "$0: '$maxfile' contains zero, doing nothing"; return 1; }
 
 	read next <$master/next
 	echo $(( next+1 )) >$master/next
-#echo "next=$next"
+	echo "`date`: new snapshot will be '$next'"
 
 	if [ -f $listfile ]; then
 		read -a snapshots <$listfile
@@ -49,21 +49,37 @@ function new_snapshot {
 		unset snapshots[0]
 	fi
 	echo ${snapshots[@]} >$listfile
-#echo "snapshots=${snapshots[@]}"
+	echo "`date`: '$kind' snapshot list is now: ${snapshots[@]}"
+}
+
+function replicate_snapshot {
+	local -r vol=$1
+	local -r host=$2
+	local -r snap=$3
+
+	echo "`date`: replication for snapshot '$snap' on volume '$vol' to '$host'"
+
+	# !!! implement
 }
 
 function run_master {
 	local -r vol=$1
 	local -r fifo=$VOLUMES/$vol/master/trigger
+	local -r log=/var/log/zumastor/${vol}-master.log
+	local -r cron=/var/run/zumastor/cron/$vol
 	local kind
 
-	[ -r $fifo ] && [ -p $fifo ] || { echo "missing $fifo"; return 1; }
+	[ -r $fifo ] && [ -p $fifo ] || { echo "$0: master snapshot trigger '$fifo' is missing"; return 1; }
 	touch /var/run/zumastor/cron/$vol || return 1
 
-	# FIXME: daemonize (close stdin, stdout, stderr)
+	# daemonize (close stdin, stdout, stderr)
+	exec 0</dev/null 1>/dev/null 2>/dev/null
+
+	# we reopen the log for each write so rotation works
+	echo "`date`: starting master snapshot daemon for volume '$vol': pid $$" >> $log
 	while true; do
 		read kind <$fifo || exit 1
-		new_snapshot $vol $kind
+		new_snapshot $vol $kind >> $log 2>&1
 	done &
 }
 
@@ -71,29 +87,36 @@ function run_target {
 	local -r vol=$1
 	local -r host=$2
 	local -r fifo=$VOLUMES/$vol/targets/$host/trigger
-	local id
+	local -r log=/var/log/zumastor/${vol}-target-${host}.log
+	local snap
 
-	[ -r $fifo ] && [ -p $fifo ] || { echo "missing $fifo"; return 1; }
+	[ -r $fifo ] && [ -p $fifo ] || { echo "$0: target replication trigger '$fifo' is missing"; return 1; }
 
-	# FIXME: daemonize (close stdin, stdout, stderr)
+	# daemonize (close stdin, stdout, stderr)
+	exec 0</dev/null 1>/dev/null 2>/dev/null
+
+	# we reopen the log for each write so rotation works
+	echo "`date`: starting replication daemon of volume '$vol' to target '$host': pid $$" >> $log
 	while true; do
-		read id <$fifo || exit 1
-		echo replicate $vol $host $id # !!!
+		# !!! Implement skipping to most recent snapshot if there is a backlog
+		read snap <$fifo || exit 1
+		replicate_snapshot $vol $host $snap >> $log 2>&1
 	done &
 }
 
 function stop_master {
 	local -r vol=$1
+	local -r cron=/var/run/zumastor/cron/$vol
 
-	rm -f /var/run/zumastor/cron/$vol
-	pkill -f "zumastor start master $vol"
+	rm -f $cron
+	pkill -f "zumastor start master $vol" || return 1
 }
 
 function stop_target {
 	local -r vol=$1
 	local -r host=$2
 
-	pkill -f "zumastor start target $vol $host"
+	pkill -f "zumastor start target $vol $host" || return 1
 }
 
 function define_volume {
@@ -101,40 +124,43 @@ function define_volume {
 	local -r odev=$2
 	local -r sdev=$3
 	local -r path=$VOLUMES/$vol
-	local -r sock=/etc/zumastor/servers/$vol
+	local -r sock=/var/run/zumastor/servers/$vol
 
 	mkdir $path || return 1
 	mkdir $path/device || return 1
 	ln -sf $odev $path/device/origin  || return 1
 	ln -sf $sdev $path/device/snapstore || return 1
 	mkdir $path/targets || return 1
-	# FIXME: check to see if there are any snapshots in the snapshot store and initialize here
-	start_volume $vol || return 1
+
 	ddsnap create $sock -1 || return 1
 	create_device $vol -1 || return 1
+	# FIXME: check to see if there are any snapshots in the snapshot store and initialize here
+
+	start_volume $vol || return 1
 }
 
 function forget_volume {
 	local -r vol=$1
 	local -r path=$VOLUMES/$vol
-	local -r sock=/etc/zumastor/servers/$vol
-
-	# FIXME: cleanup any target or master daemons here
-	rmdir $path/targets
-	rm -rf $path/device
-
-	# get a list of snapshots and remove them first
+	local -r sock=/var/run/zumastor/servers/$vol
 	local id
+
+	stop_volume $vol
+
+	for host in $targets; do
+		forget_target $vol $host
+	done
+	forget_master $vol
+
+	# remove any snapshots devices first, then the origin
 	for id in $(ddsnap status $sock --list); do
 		remove_device $vol $id
-		ddsnap delete $sock $id
 	done
-
 	remove_device $vol -1
-	ddsnap delete $sock -1
-	forget_master $vol
-	stop_volume $vol
-	rmdir $path
+
+	rmdir $path/targets
+	rm -rf $path/device
+	rmdir $path || return 1
 }
 
 function define_target {
@@ -152,7 +178,8 @@ function forget_target {
 	local -r host=$2
 	local -r path=$VOLUMES/$vol/targets/$host
 
-	rm -rf $path
+	zumastor stop target $vol $host
+	rm -rf $path || return 1
 }
 
 function set_master {
@@ -161,10 +188,14 @@ function set_master {
 	local -r count=$3
 	local -r path=$VOLUMES/$vol
 	local new
+	local conv
 
-	rm -rf $path/source # need to prompt
+	if [ -d $path/source ]; then
+		read -p "$vol is currently a downstream volume, convert to master? [n] " conv
+		[ X$conv = Xy ] || [ X$conv = Xyes ] || return 1
 
-	find_in $kind ${KINDS[@]} || { echo "$0: unknown snapshot type $kind"; return 1; }
+		rm -rf $path/source
+	fi
 
 	[ -d $path/master ] || new=yes
 
@@ -183,7 +214,7 @@ function set_master {
 		echo 0 >$path/master/next || return 1
 		mkdir $path/master/snapshots || return 1
 		mkfifo $path/master/trigger || return 1
-		zumastor start master $vol
+		zumastor start master $vol || return 1
 	fi
 }
 
@@ -199,118 +230,224 @@ function set_source {
 	local -r vol=$1
 	local -r host=$2
 	local -r path=$VOLUMES/$vol
+	local conv
 
-	forget_master $vol
+	if [ -d $path/master ]; then
+		read -p "$vol is currently a master, convert to a downstream volume? [n] " conv
+		[ X$conv = Xy ] || [ X$conv = Xyes ] || return 1
+
+		forget_master $vol
+	fi
+
 	mkdir $path/source || return 1
-	mkdir $path/source/$host
+	mkdir $path/source/$host || return 1
 }
 
-declare -r VOLUMES=/var/lib/zumastor/volumes
-declare -ar KINDS=(hourly daily weekly monthly)
+function trigger_snapshot {
+	local -r vol=$1
+	local -r kind=$2
+	local -r fifo=$VOLUMES/$vol/master/trigger
 
-test -x $VOLUMES || { echo Cannot find zumastor database; exit 1; }
+	[ -r $fifo ] && [ -p $fifo ] || { echo "$0: volume '$vol' is not master"; return 1; }
 
-case $1 in
-define)
-	case $2 in
-	volume)
-		[ $# -eq 5 ] || { echo "usage: $0 define volume <vol> <origin> <snapstore>"; exit 2; }
-		verify_volname $3 || { echo "$0: invalid volume name $3"; exit 1; }
-		define_volume $3 $4 $5
-		exit ;;
-	target)
-		[ $# -eq 4 ] || { echo "usage: $0 define target <vol> <host>"; exit 2; }
-		define_target $3 $4
-		exit ;;
-	master)
-		[ $# -eq 5 ] || { echo "usage: $0 define master <vol> <kind> <count>"; exit 2; }
-		set_master $3 $4 $5
-		exit ;;
-	source)
-		[ $# -eq 4 ] || { echo "usage: $0 define source <vol> <host>"; exit 2; }
-		set_source $3 $4
-		exit ;;
-	*)
-		echo "usage: $0 define volume|target|master|source"
-		exit 2 ;;
+	echo $kind >$fifo || return 1
+}
+
+function trigger_replication {
+	local -r vol=$1
+	local -r host=$2
+	local snap=$3
+	local -r fifo=$VOLUMES/$vol/targets/$host/trigger
+
+	# !!! update snap if empty
+
+	[ -r $fifo ] && [ -p $fifo ] || { echo "$0: host '$host' is not a target for volume '$vol'"; return 1; }
+
+	echo $snap >$fifo || return 1
+}
+
+function run_command {
+	case $1 in
+	define)
+		case $2 in
+		volume)
+			[ $# -eq 5 ] || { echo "usage: $0 define volume <vol> <origin> <snapstore>"; exit 2; }
+			local -r vol=$3
+			local -r origin=$4
+			local -r snapstore=$5
+
+			verify_valid_volname $vol || { echo "$0: invalid volume name '$vol'"; exit 1; }
+			verify_valid_device $origin || { echo "$0: invalid device '$origin'"; exit 1; }
+			verify_valid_device $snapstore || { echo "$0: invalid device '$snapstore'"; exit 1; }
+
+			define_volume $vol $origin $snapstore
+			exit $? ;;
+		target)
+			[ $# -eq 4 ] || { echo "usage: $0 define target <vol> <host>"; exit 2; }
+			local -r vol=$3
+			local -r host=$4
+
+			verify_managed_vol $vol || { echo "$0: volume '$vol' is not a managed volume"; exit 1; }
+			verify_valid_host $host || { echo "$0: invalid host '$host'"; exit 1; }
+
+			define_target $vol $host
+			exit $? ;;
+		master)
+			[ $# -eq 5 ] || { echo "usage: $0 define master <vol> <kind> <count>"; exit 2; }
+			local -r vol=$3
+			local -r kind=$4
+			local -r count=$5
+
+			verify_managed_vol $vol || { echo "$0: volume '$vol' is not a managed volume"; exit 1; }
+			find_in $kind ${KINDS[@]} || { echo "$0: unknown snapshot type '$kind'"; exit 1; }
+			verify_valid_number $count || { echo "$0: bad snapshot count '$count'"; exit 1; }
+
+			set_master $vol $kind $count
+			exit $? ;;
+		source)
+			[ $# -eq 4 ] || { echo "usage: $0 define source <vol> <host>"; exit 2; }
+			local -r vol=$3
+			local -r host=$4
+
+			verify_managed_vol $vol || { echo "$0: volume '$vol' is not a managed volume"; exit 1; }
+			verify_valid_host $host || { echo "$0: invalid host '$host'"; exit 1; }
+
+			set_source $vol $host
+			exit $? ;;
+		*)
+			echo "usage: $0 define volume|target|master|source"
+			exit 2 ;;
+		esac
+		;;
+	forget)
+		case $2 in
+		volume)
+			[ $# -eq 3 ] || { echo "usage: $0 forget volume <vol>"; exit 2; }
+			local -r vol=$3
+
+			verify_managed_vol $vol || { echo "$0: volume '$vol' is not a managed volume"; exit 1; }
+
+			forget_volume $vol
+			exit $? ;;
+		target)
+			[ $# -eq 4 ] || { echo "usage: $0 forget target <vol> <host>"; exit 2; }
+			local -r vol=$3
+			local -r host=$4
+
+			verify_managed_vol $vol || { echo "$0: volume '$vol' is not a managed volume"; exit 1; }
+			verify_valid_host $host || { echo "$0: invalid host '$host'"; exit 1; }
+
+			forget_target $vol $host
+			exit $? ;;
+		*)
+			echo "usage: $0 forget volume|target"
+			exit 2 ;;
+		esac
+		;;
+	start)
+		case $2 in
+		master)
+			[ $# -eq 3 ] || { echo "usage: $0 start master <vol>"; exit 2; }
+			local -r vol=$3
+
+			verify_managed_vol $vol || { echo "$0: volume '$vol' is not a managed volume"; exit 1; }
+
+			run_master $vol
+			exit $? ;;
+		target)
+			[ $# -eq 4 ] || { echo "usage: $0 start target <vol> <host>"; exit 2; }
+			local -r vol=$3
+			local -r host=$4
+
+			verify_managed_vol $vol || { echo "$0: volume '$vol' is not a managed volume"; exit 1; }
+			verify_valid_host $host || { echo "$0: invalid host '$host'"; exit 1; }
+
+			run_target $vol $host
+			exit $? ;;
+		*)
+			echo "usage: $0 start master|target"
+			exit 2 ;;
+		esac
+		;;
+	stop)
+		case $2 in
+		master)
+			[ $# -eq 3 ] || { echo "usage: $0 stop master <vol>"; exit 2; }
+			local -r vol=$3
+
+			verify_managed_vol $vol || { echo "$0: volume '$vol' is not a managed volume"; exit 1; }
+
+			stop_master $vol
+			exit $? ;;
+		target)
+			[ $# -eq 4 ] || { echo "usage: $0 stop target <vol> <host>"; exit 2; }
+			local -r vol=$3
+			local -r host=$4
+
+			verify_managed_vol $vol || { echo "$0: volume '$vol' is not a managed volume"; exit 1; }
+			verify_valid_host $host || { echo "$0: invalid host '$host'"; exit 1; }
+
+			stop_target $vol $host || exit 1
+			exit $? ;;
+		*)
+			echo "usage: $0 stop master|target"
+			exit 2 ;;
+		esac
+		;;
+	snapshot)
+		[ $# -eq 3 ] || { echo "usage: $0 snapshot <vol> <kind>"; exit 2; }
+		local -r vol=$2
+		local -r kind=$3
+
+		verify_managed_vol $vol || { echo "$0: volume '$vol' is not a managed volume"; exit 1; }
+		find_in $kind ${KINDS[@]} || { echo "$0: unknown snapshot type '$kind'"; exit 1; }
+
+		trigger_snapshot $vol $kind
+		exit $?
+		;;
+	replicate)
+		[ $# -eq 4 ] || { echo "usage: $0 replicate <vol> <host> <snap>"; exit 2; }
+		local -r vol=$2
+		local -r host=$3
+		local -r snap=$4
+
+		verify_managed_vol $vol || { echo "$0: volume '$vol' is not a managed volume"; exit 1; }
+		verify_existing_target $vol $host || { echo "$0: host '$host' is not a target for volume '$vol'"; exit 1; }
+		[ -z $snap ] || verify_existing_snap $vol $snap || { echo "$0: invalid snapshot '$snap' for volume '$vol'"; exit 1; }
+
+		trigger_replication $vol $host $snap
+		exit $?
+		;;
+	status)
+		[ $# -lt 4 ] || { echo "usage: $0 status [-f] [<vol> [<snap>]]"; exit 2; }
+
+		# !!! zero or one arguments means to call tree for now
+		if [ $# -lt 3 ]; then
+			local -r opt=$2
+
+			tree -Fx $opt $VOLUMES
+			tree -Fx $opt /var/run/zumastor
+			exit $?
+		else
+			local -r vol=$2
+			local -r snap=$3
+			local -r sock=/var/run/zumastor/servers/$vol
+
+			verify_managed_vol $vol || { echo "$0: volume '$vol' is not a managed volume"; exit 1; }
+			[ -z $snap ] || verify_existing_snap $vol $snap || { echo "$0: invalid snapshot '$snap' for volume '$vol'"; exit 1; }
+
+			ddsnap status $sock $snap
+			exit $?
+		fi
+		;;
 	esac
-	;;
-forget)
-	case $2 in
-	volume)
-		[ $# -eq 3 ] || { echo "usage: $0 forget volume <vol>"; exit 2; }
-		forget_volume $3
-		exit ;;
-	target)
-		[ $# -eq 4 ] || { echo "usage: $0 forget target <vol> <host>"; exit 2; }
-		forget_target $3 $4
-		exit ;;
-	*)
-		echo "usage: $0 forget volume|target"
-		exit 2 ;;
-	esac
-	;;
-start)
-	case $2 in
-	master)
-		[ $# -eq 3 ] || { echo "usage: $0 start master <vol>"; exit 2; }
-		run_master $3
-		exit ;;
-	target)
-		[ $# -eq 4 ] || { echo "usage: $0 start target <vol> <host>"; exit 2; }
-		run_target $3 $4
-		exit ;;
-	*)
-		echo "usage: $0 start master|target"
-		exit 2 ;;
-	esac
-	;;
-stop)
-	case $2 in
-	master)
-		[ $# -eq 3 ] || { echo "usage: $0 stop master <vol>"; exit 2; }
-		stop_master $3
-		exit ;;
-	target)
-		[ $# -eq 4 ] || { echo "usage: $0 stop target <vol> <host>"; exit 2; }
-		stop_target $3 $4
-		exit ;;
-	*)
-		echo "usage: $0 stop master|target"
-		exit 2 ;;
-	esac
-	;;
-snapshot)
-	[ $# -eq 3 ] || { echo "usage: $0 snapshot <vol> <kind>"; exit 2; }
-	declare -r vol=$2
-	declare -r kind=$3
 
-	find_in $kind ${KINDS[@]} || { echo "$0: unknown snapshot type $kind"; exit 1; }
+	[ $# -gt 0 ] && echo "Error in command: $@"
+	echo "Usage: $0 {define|forget|start|stop|snapshot|replicate|status} [<subarguments>...]"
+	exit 2
+}
 
-	[ -e $VOLUMES/$vol/master/trigger ] || { echo $0: volume \'$vol\' not master; exit 1; }
 
-	echo $kind >$VOLUMES/$vol/master/trigger
-	exit
-	;;
-replicate)
-	[ $# -eq 4 ] || { echo "usage: $0 replicate <vol> <host> <snap>"; exit 2; }
-	declare -r vol=$2
-	declare -r host=$3
-	declare -r snap=$4
-
-	echo replicate $vol\($snap\) to $host #!!!
-	echo $snap >$VOLUMES/$vol/targets/$host/trigger
-	exit
-	;;
-status)
-	[ $# -le 2 ] || { echo "usage: $0 status [-f]"; exit 2; }
-	tree -Fx $2 $VOLUMES
-	tree -Fx $2 /var/run/zumastor
-	exit
-	;;
-esac
-
-echo "Error: $@"
-echo "Usage: $0 define|forget|start|stop|snapshot|replicate|status [<subcommand>] [<options>...]"
-exit 2
+[ -d $VOLUMES ] || { echo "$0: cannot find zumastor database in '$VOLUMES'"; exit 1; }
+run_command "$@"
 
