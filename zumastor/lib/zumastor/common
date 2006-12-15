@@ -4,6 +4,15 @@
 # Licensed under the GNU GPL version 2
 
 declare -r VOLUMES=/var/lib/zumastor/volumes
+declare -r RUNPATH=/var/run/zumastor
+declare -r LOGS=/var/log/zumastor
+
+# these can be modified here
+# may read from a config file in the future
+declare -r AGENTS=$RUNPATH/agents
+declare -r SERVERS=$RUNPATH/servers
+declare -r MOUNTS=$RUNATH/mount
+
 declare -ar KINDS=(hourly daily weekly monthly)
 
 function find_in {
@@ -94,7 +103,7 @@ function verify_existing_snap {
 	[ $# -eq 2 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
 	local -r vol=$1
 	local -r snap=$2
-	local -r sock=/var/run/zumastor/servers/$vol
+	local -r sock=${SERVERS}/$vol
 
 	verify_managed_vol $vol || return 1
 	verify_valid_number $snap || return 1
@@ -121,10 +130,10 @@ function start_volume {
 	local -r info=$VOLUMES/$vol
 	local -r sdev=$info/device/snapstore
 	local -r odev=$info/device/origin
-	local -r agent=/var/run/zumastor/agents/$vol
-	local -r server=/var/run/zumastor/servers/$vol
-	local -r agentlog=/var/log/zumastor/${vol}-agent.log
-	local -r serverlog=/var/log/zumastor/${vol}-server.log
+	local -r agent=${AGENTS}/$vol
+	local -r server=${SERVERS}/$vol
+	local -r agentlog=${LOGS}/${vol}-agent.log
+	local -r serverlog=${LOGS}/${vol}-server.log
 
 	mkfifo $agent || return 1
 	mkfifo $server || return 1
@@ -138,10 +147,10 @@ function stop_volume {
 	local -r info=$VOLUMES/$vol
 	local -r sdev=$info/device/snapstore
 	local -r odev=$info/device/origin
-	local -r agent=/var/run/zumastor/agents/$vol
-	local -r server=/var/run/zumastor/servers/$vol
-	local -r agentlog=/var/log/zumastor/${vol}-agent.log
-	local -r serverlog=/var/log/zumastor/${vol}-server.log
+	local -r agent=${AGENTS}/$vol
+	local -r server=${SERVERS}/$vol
+	local -r agentlog=${LOGS}/${vol}-agent.log
+	local -r serverlog=${LOGS}/${vol}-server.log
 
 	pkill -f "ddsnap server -l $serverlog $sdev $odev $agent $server"
 	pkill -f "ddsnap agent -l $agentlog $agent"
@@ -153,13 +162,13 @@ function create_device {
 	local -r vol=$1
 	local -r id=$2
 	local -r info=$VOLUMES/$vol
-	local -r agent=/var/run/zumastor/agents/$vol
-	local -r server=/var/run/zumastor/servers/$vol
+	local -r agent=${AGENTS}/$vol
+	local -r server=${SERVERS}/$vol
 	local -r size=$(ddsnap status $server --size) || return 1
 	local -r sdev=$info/device/snapstore
 	local -r odev=$info/device/origin
 	local -r name=$(volume_name $vol $id)
-	local -r mount=/var/run/zumastor/mount/$name
+	local -r mount=${MOUNTS}/$name
 
 	echo 0 $size ddsnap $sdev $odev $agent $id | dmsetup create $name || return 1
 	test -d $mount || mkdir $mount || return 1
@@ -171,7 +180,7 @@ function remove_device {
 	local -r vol=$1
 	local -r id=$2
 	local -r name=$(volume_name $vol $id)
-	local -r mount=/var/run/zumastor/mount/$name
+	local -r mount=${MOUNTS}/$name
 
 	umount $mount
 	rmdir $mount

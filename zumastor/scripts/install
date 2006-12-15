@@ -8,6 +8,7 @@ cp bin/zumastor /bin/
 cp -a lib/zumastor /lib/
 cp -a var/lib/zumastor /var/lib/
 cp -a var/run/zumastor /var/run/
+cp -a var/log/zumastor /var/log/
 
 rm /etc/zumastor >/dev/null 2>&1 # in case of symlink
 
