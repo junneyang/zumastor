@@ -11,7 +11,7 @@ function new_snapshot {
 	local -r vol=$1
 	local -r kind=$2
 	local -r master=$VOLUMES/$vol/master
-	local -r sock=/var/run/zumastor/servers/$vol
+	local -r sock=${SERVERS}/$vol
 	local -r maxfile=$master/schedule/$kind
 	local -r listfile=$master/snapshots/$kind
 	local -a snapshots
@@ -65,12 +65,12 @@ function replicate_snapshot {
 function run_master {
 	local -r vol=$1
 	local -r fifo=$VOLUMES/$vol/master/trigger
-	local -r log=/var/log/zumastor/${vol}-master.log
-	local -r cron=/var/run/zumastor/cron/$vol
+	local -r log=${LOGS}/${vol}-master.log
+	local -r cron=${CRONS}/$vol
 	local kind
 
 	[ -r $fifo ] && [ -p $fifo ] || { echo "$0: master snapshot trigger '$fifo' is missing"; return 1; }
-	touch /var/run/zumastor/cron/$vol || return 1
+	touch ${CRONS}/$vol || return 1
 
 	# daemonize (close stdin, stdout, stderr)
 	exec 0</dev/null 1>/dev/null 2>/dev/null
@@ -87,7 +87,7 @@ function run_target {
 	local -r vol=$1
 	local -r host=$2
 	local -r fifo=$VOLUMES/$vol/targets/$host/trigger
-	local -r log=/var/log/zumastor/${vol}-target-${host}.log
+	local -r log=${LOGS}/${vol}-target-${host}.log
 	local snap
 
 	[ -r $fifo ] && [ -p $fifo ] || { echo "$0: target replication trigger '$fifo' is missing"; return 1; }
@@ -106,7 +106,7 @@ function run_target {
 
 function stop_master {
 	local -r vol=$1
-	local -r cron=/var/run/zumastor/cron/$vol
+	local -r cron=${CRONS}/$vol
 
 	rm -f $cron
 	pkill -f "zumastor start master $vol" || return 1
@@ -124,7 +124,7 @@ function define_volume {
 	local -r odev=$2
 	local -r sdev=$3
 	local -r path=$VOLUMES/$vol
-	local -r sock=/var/run/zumastor/servers/$vol
+	local -r sock=${SERVERS}/$vol
 
 	mkdir $path || return 1
 	mkdir $path/device || return 1
@@ -142,7 +142,10 @@ function define_volume {
 function forget_volume {
 	local -r vol=$1
 	local -r path=$VOLUMES/$vol
-	local -r sock=/var/run/zumastor/servers/$vol
+	local -r sock=${SERVERS}/$vol
+	local -r agentlog=${LOGS}/${vol}-agent.log
+	local -r serverlog=${LOGS}/${vol}-server.log
+
 	local id
 
 	stop_volume $vol
@@ -160,6 +163,7 @@ function forget_volume {
 
 	rmdir $path/targets
 	rm -rf $path/device
+	rm $agentlog $serverlog
 	rmdir $path || return 1
 }
 
@@ -426,12 +430,12 @@ function run_command {
 			local -r opt=$2
 
 			tree -Fx $opt $VOLUMES
-			tree -Fx $opt /var/run/zumastor
+			tree -Fx $opt $RUNPATH
 			exit $?
 		else
 			local -r vol=$2
 			local -r snap=$3
-			local -r sock=/var/run/zumastor/servers/$vol
+			local -r sock=${SERVERS}/$vol
 
 			verify_managed_vol $vol || { echo "$0: volume '$vol' is not a managed volume"; exit 1; }
 			[ -z $snap ] || verify_existing_snap $vol $snap || { echo "$0: invalid snapshot '$snap' for volume '$vol'"; exit 1; }
