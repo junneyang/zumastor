@@ -1,9 +1,15 @@
 #!/bin/sh
 
+rm /lib/zumastor >/dev/null 2>&1 # in case of symlink
+rm /var/lib/zumastor >/dev/null 2>&1 # in case of symlink
+rm /var/run/zumastor >/dev/null 2>&1 # in case of symlink
+
 cp bin/zumastor /bin/
 cp -a lib/zumastor /lib/
 cp -a var/lib/zumastor /var/lib/
 cp -a var/run/zumastor /var/run/
+
+rm /etc/zumastor >/dev/null 2>&1 # in case of symlink
 
 cp -a etc/cron.hourly/zumastor /etc/cron.hourly/
 cp -a etc/cron.daily/zumastor /etc/cron.daily/

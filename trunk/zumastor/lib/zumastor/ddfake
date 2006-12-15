@@ -3,8 +3,11 @@
 # Author: Daniel Phillips <phillips@google.com>
 # Licensed under the GNU GPL version 2
 
-# if enabled, define functions to override the actual commands
-[[ $DDFAKE = yes ]] || return
+# if this environment variable is set,
+# define functions to override the actual commands
+[[ $DDFAKE ]] || return
+
+echo DDFAKE ENABLED
 
 function dmsetup {
 	case $1 in
@@ -51,18 +54,19 @@ function ddsnap {
 
 function mount {
 	case $1 in
-*)
-	echo mount $@
-	return 0
-	;;
+	*)
+		echo mount $@
+		return 0
+		;;
 	esac
 }
 
 function umount {
 	case $1 in
-*)
-	echo umount $@
-	return 0
-	;;
+	*)
+		echo umount $@
+		return 0
+		;;
 	esac
 }
+
