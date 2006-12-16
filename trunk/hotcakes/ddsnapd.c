@@ -2449,13 +2449,13 @@ static int incoming(struct superblock *sb, struct client *client)
 				goto message_too_short;
 
 			trace(printf("origin write query, %u ranges\n", body->count););
-			message.head.code = REPLY_ORIGIN_WRITE;
+			message.head.code = ORIGIN_WRITE_OK;
 			for (i = 0; i < body->count; i++, p++)
 				for (j = 0, chunk = p->chunk; j < p->chunks; j++, chunk++) {
 					chunk_t exception = make_unique(sb, chunk, -1);
 					if (exception == -1) {
-						warn("ERROR: I/O Failure -- unable to perform copyout during origin write.");
-						message.head.code = REPLY_ERROR;
+						warn("ERROR: unable to perform copyout during origin write.");
+						message.head.code = ORIGIN_WRITE_ERROR;
 					}
 					if (exception)
 						waitfor_chunk(sb, chunk, &pending);
@@ -2478,14 +2478,14 @@ static int incoming(struct superblock *sb, struct client *client)
 			goto message_too_short;
 		trace(printf("snapshot write request, %u ranges\n", body->count););
 		struct addto snap = { .nextchunk = -1 };
-		u32 ret_msgcode = REPLY_SNAPSHOT_WRITE;
+		u32 ret_msgcode = SNAPSHOT_WRITE_OK;
 		for (i = 0; i < body->count; i++)
 			for (j = 0; j < body->ranges[i].chunks; j++) {
 				chunk_t chunk = body->ranges[i].chunk + j;
 				chunk_t exception = make_unique(sb, chunk, client->snap);
 				if (exception == -1) {
-					warn("ERROR: I/O failure -- unable to perform copyout during snapshot write.");
-					ret_msgcode = REPLY_ERROR;
+					warn("ERROR: unable to perform copyout during snapshot write.");
+					ret_msgcode = SNAPSHOT_WRITE_ERROR;
 				}
 				trace(printf("exception = %Lx\n", exception););
 					addto_response(&snap, chunk);
@@ -2521,8 +2521,9 @@ static int incoming(struct superblock *sb, struct client *client)
 					readlock_chunk(sb, chunk, client);
 				}
 			}
-		finish_reply(client->sock, &org, REPLY_SNAPSHOT_READ_ORIGIN, body->id);
-		finish_reply(client->sock, &snap, REPLY_SNAPSHOT_READ, body->id);
+		//!!! when can these reads fail?
+		finish_reply(client->sock, &org, SNAPSHOT_READ_ORIGIN_OK, body->id);
+		finish_reply(client->sock, &snap, SNAPSHOT_READ_OK, body->id);
 		break;
 	}
 	case FINISH_SNAPSHOT_READ:
@@ -2540,12 +2541,18 @@ static int incoming(struct superblock *sb, struct client *client)
 	}
 	case IDENTIFY:
 	{
-		u32 err = 0; /* success */
-		char err_msg[MAX_ERRMSG_SIZE];
 		u32 tag      = ((struct identify *)message.body)->snap;
 		sector_t off = ((struct identify *)message.body)->off;
 		sector_t len = ((struct identify *)message.body)->len;
+		u32 err = 0; /* success */
 		unsigned int error_len;
+		char err_msg[MAX_ERRMSG_SIZE];
+
+#ifdef DEBUG_ERROR
+		snprintf(err_msg, MAX_ERRMSG_SIZE, "Debug mode to test error messages");
+		err_msg[MAX_ERRMSG_SIZE-1] = '\0';
+		goto identify_error;
+#endif
 		
 		client->id = ((struct identify *)message.body)->id;
 		client->snap = (tag == (u32)~0UL) ? -1 : tag_snapnum(sb, tag);
@@ -2561,14 +2568,14 @@ static int incoming(struct superblock *sb, struct client *client)
 				warn("Snapshot tag %u is not valid", tag);
 				snprintf(err_msg, MAX_ERRMSG_SIZE, "Snapshot tag %u is not valid", tag);
 				err_msg[MAX_ERRMSG_SIZE-1] = '\0'; // make sure it's null terminated
-				err = REPLY_ERROR_INVALID_SNAPSHOT;
+				err = ERROR_INVALID_SNAPSHOT;
 				goto identify_error;
 			}
 			u32 new_usecnt = snap_info->usecnt + 1;
 			if (new_usecnt < snap_info->usecnt) {
 				snprintf(err_msg, MAX_ERRMSG_SIZE, "Usecount overflow.");
 				err_msg[MAX_ERRMSG_SIZE-1] = '\0'; // make sure it's null terminated
-				err = REPLY_ERROR_USECOUNT;
+				err = ERROR_USECOUNT;
 				goto identify_error;
 			}
 			
@@ -2578,13 +2585,13 @@ static int incoming(struct superblock *sb, struct client *client)
 		if (len != sb->image.orgsectors) {
 			snprintf(err_msg, MAX_ERRMSG_SIZE, "volume size mismatch for snapshot %u", tag);
 			err_msg[MAX_ERRMSG_SIZE-1] = '\0'; // make sure it's null terminated
-			err = REPLY_ERROR_SIZE_MISMATCH;
+			err = ERROR_SIZE_MISMATCH;
 			goto identify_error;
 		}
 		if (off != sb->image.orgoffset) {
 			snprintf(err_msg, MAX_ERRMSG_SIZE, "volume offset mismatch for snapshot %u", tag);
 			err_msg[MAX_ERRMSG_SIZE-1] = '\0'; // make sure it's null terminated
-			err = REPLY_ERROR_OFFSET_MISMATCH;
+			err = ERROR_OFFSET_MISMATCH;
 			goto identify_error;
 		}
 		
@@ -2610,27 +2617,33 @@ static int incoming(struct superblock *sb, struct client *client)
 
 	case CREATE_SNAPSHOT:
 	{
+#ifdef DEBUG_ERROR
+		goto create_error;
+#endif
 		if (create_snapshot(sb, ((struct create_snapshot *)message.body)->snap) < 0)
 			goto create_error;
 		save_state(sb);
-		if (outbead(sock, REPLY_CREATE_SNAPSHOT, struct { }) < 0)
+		if (outbead(sock, CREATE_SNAPSHOT_OK, struct { }) < 0)
 			warn("unable to reply to create snapshot message");
 		break;
 	create_error:
-		if (outbead(sock, REPLY_ERROR, struct reply_error, REPLY_ERROR_OTHER, 0) < 0)
+		if (outbead(sock, CREATE_SNAPSHOT_ERROR, struct { }) < 0) //!!! return message
 			warn("unable to send error for create snapshot message");
 		break;
 	}
 	case DELETE_SNAPSHOT:
 	{
+#ifdef DEBUG_ERROR
+		goto delete_error;
+#endif
 		if (delete_snapshot(sb, ((struct create_snapshot *)message.body)->snap) < 0)
 			goto delete_error;
 		save_state(sb);
-		if (outbead(sock, REPLY_DELETE_SNAPSHOT, struct { }) < 0)
+		if (outbead(sock, DELETE_SNAPSHOT_OK, struct { }) < 0)
 			warn("unable to reply to delete snapshot message");
 		break;
 	delete_error:
-		if (outbead(sock, REPLY_ERROR, struct reply_error, REPLY_ERROR_OTHER, 0) < 0)
+		if (outbead(sock, DELETE_SNAPSHOT_ERROR, struct {})  < 0) //!!! return message
 			warn("unable to send error for delete snapshot message");
 		break;
 	}
@@ -2682,25 +2695,43 @@ static int incoming(struct superblock *sb, struct client *client)
 		}
 		break;
 	}
-	case SET_PRIORITY:
+	case PRIORITY:
 	{
-		u32 tag = ((struct snapinfo *)message.body)->snap;
-		s8 prio  = ((struct snapinfo *)message.body)->prio;
+		u32 tag = ((struct priority_info *)message.body)->snap;
+		s8 prio  = ((struct priority_info *)message.body)->prio;
 		struct snapshot *snap_info;
-		if (tag == (u32)~0UL)
-			goto skip_set_prio;
+		uint32_t err = 0;
+		char err_msg[MAX_ERRMSG_SIZE];
+		unsigned int err_len;
+
+#ifdef DEBUG_ERROR
+		snprintf(err_msg, MAX_ERRMSG_SIZE, "Debug mode to test error messages");
+		err_msg[MAX_ERRMSG_SIZE-1] = '\0';
+		goto prio_error;
+#endif
+		if (tag == (u32)~0UL) {
+			snprintf(err_msg, MAX_ERRMSG_SIZE, "Can not set priority for origin");
+			err_msg[MAX_ERRMSG_SIZE-1] = '\0';
+			err = ERROR_INVALID_SNAPSHOT;
+			goto prio_error;
+		}
 		if (!(snap_info = valid_snaptag(sb, tag))) {
 			warn("Snapshot tag %u is not valid", tag);
-			goto set_prio_error;
+			snprintf(err_msg, MAX_ERRMSG_SIZE, "Snapshot tag %u is not valid", tag);
+			err_msg[MAX_ERRMSG_SIZE-1] = '\0';
+			err = ERROR_INVALID_SNAPSHOT;
+			goto prio_error;
 		}
 		snap_info->prio = prio;
-	skip_set_prio:
-		if (outbead(sock, REPLY_SET_PRIORITY, struct { }) < 0)
+		if (outbead(sock, PRIORITY_OK, struct priority_ok, snap_info->prio) < 0)
 			warn("unable to reply to set priority message");
 		break;
-	set_prio_error:
-		if (outbead(sock, REPLY_ERROR, struct reply_error, REPLY_ERROR_PRIORITY, 0) < 0)
-			warn("unable to send error for set priority message");
+	prio_error:
+		err_len = sizeof(struct priority_error) + strlen(err_msg) + 1;
+                if (outhead(sock, PRIORITY_ERROR, err_len) < 0 ||
+		    writepipe(sock, &err, sizeof(err)) < 0 ||
+		    writepipe(sock, err_msg, err_len - sizeof(struct priority_error)) < 0)
+			warn("unable to reply to PRIORITY message with error");
 		break;
 	}
 	case USECOUNT:
@@ -2712,11 +2743,17 @@ static int incoming(struct superblock *sb, struct client *client)
 		uint32_t err = 0;
 		char err_msg[MAX_ERRMSG_SIZE];
 
+#ifdef DEBUG_ERROR
+		snprintf(err_msg, MAX_ERRMSG_SIZE, "Debug mode to test error messages");
+		err_msg[MAX_ERRMSG_SIZE-1] = '\0';
+		goto usecnt_error;
+#endif
+
 		struct snapshot *snap_info;
 		if (tag == (u32)~0UL) {
 			snprintf(err_msg, MAX_ERRMSG_SIZE, "Setting the usecount of the origin.");
 			err_msg[MAX_ERRMSG_SIZE-1] = '\0';
-			err = REPLY_ERROR_INVALID_SNAPSHOT;
+			err = ERROR_INVALID_SNAPSHOT;
 			goto usecnt_error; /* not really an error though */
 		}
 
@@ -2724,7 +2761,7 @@ static int incoming(struct superblock *sb, struct client *client)
 			warn("Snapshot tag %u is not valid", tag);
 			snprintf(err_msg, MAX_ERRMSG_SIZE, "Snapshot tag %u is not valid", tag);
 			err_msg[MAX_ERRMSG_SIZE-1] = '\0';
-			err = REPLY_ERROR_INVALID_SNAPSHOT;
+			err = ERROR_INVALID_SNAPSHOT;
 			goto usecnt_error;
 		}
 		new_usecnt = usecnt_dev + snap_info->usecnt;
@@ -2732,13 +2769,13 @@ static int incoming(struct superblock *sb, struct client *client)
 		if (((new_usecnt >> 16) != 0) && (usecnt_dev >= 0)) {
 			snprintf(err_msg, MAX_ERRMSG_SIZE, "Usecount overflow.");
 			err_msg[MAX_ERRMSG_SIZE-1] = '\0';
-			err = REPLY_ERROR_USECOUNT;
+			err = ERROR_USECOUNT;
 			goto usecnt_error;
 		}
 		if (((new_usecnt >> 16) != 0) && (usecnt_dev < 0)) {
 			snprintf(err_msg, MAX_ERRMSG_SIZE, "Usecount underflow.");
 			err_msg[MAX_ERRMSG_SIZE-1] = '\0';
-			err = REPLY_ERROR_USECOUNT;
+			err = ERROR_USECOUNT;
 			goto usecnt_error;
 		}
 		
@@ -2755,70 +2792,16 @@ static int incoming(struct superblock *sb, struct client *client)
 			warn("unable to reply to USECOUNT message with error");
 		break;
 	}
-	case GENERATE_CHANGE_LIST:
-	{
-		u32 tag1 = ((struct generate_changelist *)message.body)->snap1,
-			tag2 = ((struct generate_changelist *)message.body)->snap2;
-		char const *err_msg;
-
-		/* check that each snapshot is a valid tag */
-		struct snapshot *snapshot1, *snapshot2;
-		err_msg = "invalid snapshot tag";
-		if (!(snapshot1 = valid_snaptag(sb, tag1))
-		    || !(snapshot2 = valid_snaptag(sb, tag2)))
-			goto generate_error;
-
-		int change_fd;
-
-		err_msg = "unable to get file descriptor for changelist";
-		if ((change_fd = recv_fd(sock)) < 0)
-			goto generate_error;
-
-		struct change_list *cl;
-
-		trace_on(printf("generating changelist from snapshots tags %u and %u\n", tag1, tag2););
-		err_msg = "unable to generate changelist";
-		if ((cl = gen_changelist_tree(sb, snapshot1, snapshot2)) == NULL)
-			goto generate_error_close;
-
-		err_msg = "unable to write to changelist file";
-		if (fdwrite(change_fd, &(sb->snapdata.asi->allocsize_bits), sizeof(sb->snapdata.asi->allocsize_bits)) < 0)
-			goto generate_error_free;
-
-		trace_on(printf("writing "U64FMT" chunk addresses\n", cl->count););
-		err_msg = "unable to write changelist";
-		if (fdwrite(change_fd, cl->chunks, cl->count * sizeof(cl->chunks[0])) < 0)
-			goto generate_error_free;
-
-		free_change_list(cl);
-
-		u64 end_of_stream = -1;
-		if (fdwrite(change_fd, &end_of_stream, sizeof(end_of_stream)) < 0)
-			goto generate_error;
-
-		close(change_fd);
-
-		if (outbead(sock, REPLY_GENERATE_CHANGE_LIST, struct { }) < 0)
-			warn("unable to reply to generate change list message");
-		break;
-
-	generate_error_free:
-		free_change_list(cl);
-
-	generate_error_close:
-		close(change_fd);
-
-	generate_error:
-		warn("%s", err_msg);
-		if (outbead(sock, REPLY_ERROR, struct { }) < 0)
-			warn("unable to send reply error for generating change list message");
-		break;
-	}
-	case STREAM_CHANGE_LIST:
+	case STREAM_CHANGELIST:
 	{
 		u32 tag1 = ((struct stream_changelist *)message.body)->snap1,
 			tag2 = ((struct stream_changelist *)message.body)->snap2;
 		char const *err_msg;
+
+#ifdef DEBUG_ERROR
+		err_msg = "Debug mode to test error messages";
+		goto stream_error;
+#endif
 
 		/* check that each snapshot is a valid tag */
 		struct snapshot *snapshot1, *snapshot2;
@@ -2835,8 +2818,8 @@ static int incoming(struct superblock *sb, struct client *client)
 			goto stream_error;
 
 		trace_on(printf("sending stream header\n"););
-		if (outbead(sock, REPLY_STREAM_CHANGE_LIST, struct changelist_stream, cl->count, 
-			    sb->snapdata.asi->allocsize_bits) < 0)
+		if (outbead(sock, STREAM_CHANGELIST_OK, struct changelist_stream, cl->count, 
+					sb->snapdata.asi->allocsize_bits) < 0)
 			warn("unable to send reply to stream change list message");
 
 		trace_on(printf("streaming "U64FMT" chunk addresses\n", cl->count););
@@ -2849,16 +2832,24 @@ static int incoming(struct superblock *sb, struct client *client)
 
 	stream_error:
 		warn("%s", err_msg);
-		if (outbead(sock, REPLY_ERROR, struct { }) < 0)
-			warn("unable to send error for streaming change list message");
+
+		int err;
+		if ((err = outhead(sock, STREAM_CHANGELIST_ERROR, strlen(err_msg)+1)) < 0 ||
+				(err = writepipe(sock, err_msg, strlen(err_msg)+1)) < 0)
+			warn("unable to send error for streaming change list message: %s", strerror(-err));
 		break;
 	}
-	case STATUS_REQUEST:
+	case STATUS:
 	{
 		struct status_request request;
-		char const *err_msg;
 		struct snapshot const *snaplist = sb->image.snaplist;
 		unsigned int snapslot;
+		char const *err_msg;
+
+#ifdef DEBUG_ERROR
+		err_msg = "Debug mode to test error messages";
+		goto status_error;
+#endif
 
 		if (message.head.length != sizeof(request)) {
 			err_msg = "status_request has wrong length";
@@ -2973,7 +2964,7 @@ static int incoming(struct superblock *sb, struct client *client)
 
 		/* send it */
 
-		if (outhead(sock, STATUS_MESSAGE, reply_len) < 0 ||
+		if (outhead(sock, STATUS_OK, reply_len) < 0 ||
 			writepipe(sock, reply, reply_len) < 0)
 			warn("unable to send status message");
 
@@ -2983,10 +2974,10 @@ static int incoming(struct superblock *sb, struct client *client)
 
 	status_error:
 		warn("%s", err_msg);
-
+		
 		int err;
-
-		if ((err = outbead(sock, REPLY_ERROR, struct { })) < 0)
+		if ((err = outhead(sock, STATUS_ERROR, strlen(err_msg)+1)) < 0 ||
+				(err = writepipe(sock, err_msg, strlen(err_msg)+1)) < 0)
 			warn("unable to send error for status message: %s", strerror(-err));
 		break;
 	}
@@ -2996,18 +2987,46 @@ static int incoming(struct superblock *sb, struct client *client)
 
 		if ((err = outbead(sock, ORIGIN_SECTORS, struct origin_sectors, sb->image.orgsectors)) < 0)
 			warn("unable to send origin sectors message: %s", strerror(-err));
-
+		
 		break;
 	}
 	case SHUTDOWN_SERVER:
 		return -2;
-
-	default:
+		
+	case PROTOCOL_ERROR: 
+	{	struct protocol_error *pe = malloc(message.head.length);
+		
+		if (!pe) {
+			warn("received protocol error message; unable to retreive information");
+			break;
+		}	
+		
+		memcpy(pe, message.body, message.head.length);
+		
+		char * err_msg = "No message sent";
+		if (message.head.length - sizeof(struct protocol_error) > 0) {
+			pe->msg[message.head.length - sizeof(struct protocol_error) - 1] = '\0';
+			err_msg = pe->msg;
+		}
+		warn("protocol error message - error code: %x unknown code: %x message: %s", 
+				pe->err, pe->culprit, err_msg); 
+		free(pe);
+		break;
+	}
+	default: 
+	{
+		uint32_t proto_err  = ERROR_UNKNOWN_MESSAGE;
+		char *err_msg = "Server received unknown message";
 		warn("snapshot server received unknown message code=%x, length=%u", message.head.code, message.head.length);
-		if (outbead(sock, REPLY_ERROR, struct reply_error, REPLY_ERROR_UNKNOWN_MESSAGE, 0) < 0) // wrong!!!
-			warn("unable to send unknown message error");
+		if (outhead(sock, PROTOCOL_ERROR, sizeof(struct protocol_error) + strlen(err_msg) +1) < 0 ||
+			writepipe(sock, &proto_err, sizeof(uint32_t)) < 0 ||
+			writepipe(sock, &message.head.code, sizeof(uint32_t)) < 0 ||
+			writepipe(sock, err_msg, strlen(err_msg) + 1) < 0)
+				warn("unable to send unknown message error");
 	}
 
+	} /* end switch statement */
+	
 #ifdef SIMULATE_CRASH
 	static int messages = 0;
 	if (++messages == 5) {

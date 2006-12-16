@@ -533,22 +533,34 @@ connect:
 			goto socket_error;
 	
 		switch (message.head.code) {
-		case REPLY_ORIGIN_WRITE:
+		case ORIGIN_WRITE_ERROR:
+			warn("Origin write failure");
+			failed_io = 1;
+		case ORIGIN_WRITE_OK:
 			rw = WRITE;
 			to_snap = 0;
 			break;
 
-		case REPLY_SNAPSHOT_WRITE:
+		case SNAPSHOT_WRITE_ERROR:
+			warn("Snapshot %u write failure", info->snap); 
+			failed_io = 1;
+		case SNAPSHOT_WRITE_OK:
 			rw = WRITE;
 			to_snap = 1;
 			break;
 
-		case REPLY_SNAPSHOT_READ_ORIGIN:
+		case SNAPSHOT_READ_ORIGIN_ERROR:
+			warn("Snapshot %u read from origin failure", info->snap); 
+			failed_io = 1;
+		case SNAPSHOT_READ_ORIGIN_OK:
 			rw = READ;
 			to_snap = 0;
 			break;
 
-		case REPLY_SNAPSHOT_READ:
+		case SNAPSHOT_READ_ERROR:
+			warn("Snapshot %u read failure", info->snap); 
+			failed_io = 1;
+		case SNAPSHOT_READ_OK:
 			rw = READ;
 			to_snap = 1; 
 			break;
@@ -563,7 +575,7 @@ connect:
 
 			up(&info->server_out_sem);
 			if (outbead(info->control_socket, CONNECT_SERVER_OK, struct { }) < 0)
-				warn("unable to send CONNECT_SERVER_OK message to agent\n");
+				warn("unable to send CONNECT_SERVER_OK message to agent");
 			continue;
 			
 		case IDENTIFY_ERROR:
@@ -582,18 +594,32 @@ connect:
 			if (writepipe(info->control_socket, &err, sizeof(err)) < 0) 
 				warn("can't send out err");
 			if (writepipe(info->control_socket, err_msg, length) < 0)
-				warn("unable to send message CONNECT_SERVER_ERROR to agent\n");
+				warn("unable to send message CONNECT_SERVER_ERROR to agent");
 			continue;
 			
-		case REPLY_ERROR:	
-			trace_on(warn("failed i/o"););
-			failed_io = 1;
-			break;
+		case PROTOCOL_ERROR:
+			// !!! FIXME with a nice error message
+			warn("caught a protocol error message");
+			continue;
 			
 		default: 
-			warn("Unknown message %x. sending reply error back to server", message.head.code);
+		{
+			struct protocol_error pe = { 	.err = ERROR_UNKNOWN_MESSAGE, 
+							.culprit = message.head.code };
+			err_msg = "Unknown message accepted by client kernel thread"; 
+			warn("Unknown message %x, length %u. sending protocol error back to server",
+				       	message.head.code, message.head.length);
+			message.head.code = PROTOCOL_ERROR;
+			message.head.length = sizeof(struct protocol_error) + strlen(err_msg) + 1;
+			if (writepipe(sock, &message.head, sizeof(message.head)) < 0 || 
+				writepipe(sock, &pe, sizeof(struct protocol_error)) < 0 ||
+				writepipe(sock, err_msg, strlen(err_msg) + 1) < 0)
+				warn("unable to send protocol error message");
 			continue;
 		}
+
+		} // switch statement
+
 		if (length < sizeof(struct rw_request))
 			goto message_too_short;
 
@@ -820,6 +846,7 @@ static int control(struct dm_target *target)
 	struct messagebuf message; // !!! have a buffer in the target->info
 	struct file *sock;
 	int err, length;
+	char *err_msg;
 
 	daemonize_properly("ddsnap-cntl", info->snap);
 	trace_on(warn("Control thread started, pid=%i for snapshot %d", current->pid, info->snap);)
@@ -874,22 +901,27 @@ static int control(struct dm_target *target)
 			up(&info->recover_sem); /* worker uploads locks now */
 			break;
 		}
+		case PROTOCOL_ERROR:
+			// !!! FIXME: add a new 
+			warn("caught a protocol error message");
+	   		break;		
 		default: 
-			warn("Unknown message %x, length %u", message.head.code, message.head.length);
-			if (message.head.code == REPLY_ERROR && message.head.length >= 4) {
-				unsigned int maxlen;
-				struct reply_error body;
-
-				if (message.head.length > sizeof(body))
-					maxlen = sizeof(body);
-				else
-					maxlen = message.head.length;
-
-				memcpy(&body, &message.body, maxlen);
-				warn("REPLY_ERROR with err=%x", body.err);
-			}
+		{
+			struct protocol_error pe = { 	.err = ERROR_UNKNOWN_MESSAGE, 
+							.culprit = message.head.code };
+			err_msg = "Unknown message accepted by control kernel thread"; 
+			warn("Unknown message %x, length %u. sending protocol error back to server",
+				       	message.head.code, message.head.length);
+			message.head.code = PROTOCOL_ERROR;
+			message.head.length = sizeof(struct protocol_error) + strlen(err_msg) + 1;
+			if (writepipe(sock, &message.head, sizeof(message.head)) < 0 || 
+				writepipe(sock, &pe, sizeof(struct protocol_error)) < 0 ||
+				writepipe(sock, err_msg, strlen(err_msg) + 1) < 0)
+				warn("unable to send protocol error message");
 			continue;
 		}
+		
+		} // switch statement
 	}
 out:
 	warn("%s exiting for snapshot %d", task->comm, info->snap);
