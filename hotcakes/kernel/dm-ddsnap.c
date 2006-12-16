@@ -211,7 +211,8 @@ static void report_error(struct devinfo *info)
 	if (test_and_set_bit(REPORT_BIT, &info->flags))
 		return;
 	up(&info->more_work_sem);
-	down(&info->recover_sem);
+	while (down_interruptible(&info->recover_sem))
+		;
 	info->flags |= RECOVER_FLAG;
 }
 
@@ -509,13 +510,15 @@ static int incoming(struct dm_target *target)
 	u32 chunksize_bits;
 
 	daemonize_properly("ddsnap-clnt", info->snap);
-	down(&info->exit2_sem);
+	while (down_interruptible(&info->exit2_sem))
+		;
 	trace_on(warn("Client thread started, pid=%i for snapshot %d", current->pid, info->snap);)
 connect:
 	trace(warn("Request socket connection");)
 	outbead(info->control_socket, NEED_SERVER, struct { });
 	trace(warn("Wait for socket connection");)
-	down(&info->server_in_sem);
+	while (down_interruptible(&info->server_in_sem))
+		;
 	trace(warn("got socket %p", info->sock);)
 	sock = info->sock;
 
@@ -745,12 +748,14 @@ static int worker(struct dm_target *target)
 
 	daemonize_properly("ddsnap-wrkr", info->snap);
 	trace_on(warn("Worker thread started, pid=%i for snapshot %d", current->pid, info->snap);)
-	down(&info->exit1_sem);
+	while (down_interruptible(&info->exit1_sem))
+		;
 	goto recover; /* just for now we'll always upload locks, even on fresh start */
 restart:
 	while (worker_running(info)) {
 		unsigned long irqflags;
-		down(&info->more_work_sem);
+		while (down_interruptible(&info->more_work_sem))
+			;
 
 		/* Send message for each pending request. */
 		spin_lock(&info->pending_lock);
@@ -763,7 +768,8 @@ restart:
 			spin_unlock(&info->pending_lock);
 			trace(show_pending(info);)
 
-			down(&info->server_out_sem);
+			while (down_interruptible(&info->server_out_sem))
+				;
 			trace(warn("Server query [%Lx/%x]", pending->chunk, pending->chunks);)
 			if ((err = outbead(info->sock,
 				bio_data_dir(pending->bio) == WRITE? QUERY_WRITE: QUERY_SNAPSHOT_READ,
@@ -788,7 +794,8 @@ restart:
 			spin_unlock_irqrestore(&info->end_io_lock, irqflags);
 			trace(warn("release sector %Lx, chunk %Lx", (long long)hook->sector, chunk);)
 			kmem_cache_free(end_io_cache, hook);
-			down(&info->server_out_sem);
+			while (down_interruptible(&info->server_out_sem))
+				;
 			if ((err = outbead(info->sock, FINISH_SNAPSHOT_READ, struct rw_request1,
 				.count = 1, .ranges[0].chunk = chunk, .ranges[0].chunks = 1)))
 				goto report;
@@ -800,7 +807,8 @@ restart:
 		trace(warn("Yowza! More work?");)
 	}
 	if ((info->flags & RECOVER_FLAG)) {
-		down(&info->server_out_sem);
+		while (down_interruptible(&info->server_out_sem))
+			;
 		up(&info->more_work_sem);
 		goto recover;
 	}
@@ -814,7 +822,8 @@ report:
 	report_error(info);
 recover:
 	trace_on(warn("worker recovering for snapshot %d", info->snap);)
-	down(&info->recover_sem);
+	while (down_interruptible(&info->recover_sem))
+		;
 	if ((info->flags & FINISH_FLAG))
 		goto finish;
 	if (is_snapshot(info))
@@ -853,7 +862,8 @@ static int control(struct dm_target *target)
 	sock = info->control_socket;
 	trace(warn("got socket %p", sock);)
 
-	down(&info->exit3_sem);
+	while (down_interruptible(&info->exit3_sem))
+		;
 	while (running(info)) {
 		trace(warn("wait message");)
 		if ((err = readpipe(sock, &message.head, sizeof(message.head))))
@@ -1051,11 +1061,14 @@ static void ddsnap_destroy(struct dm_target *target)
 
 	// !!! wrong! the thread might be just starting, think about this some more
 	// ah, don't let ddsnap_destroy run while ddsnap_create is spawning threads
-	down(&info->exit1_sem);
+	while (down_interruptible(&info->exit1_sem))
+		;
 	warn("thread 1 exited");
-	down(&info->exit2_sem);
+	while (down_interruptible(&info->exit2_sem))
+		;
 	warn("thread 2 exited");
-	down(&info->exit3_sem);
+	while (down_interruptible(&info->exit3_sem))
+		;
 	warn("thread 3 exited");
 
 	if (info->sock)
