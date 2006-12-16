@@ -7,8 +7,6 @@
 #include "sock.h"
 #include "trace.h"
 
-#define MAX_ERRMSG_SIZE 128
-
 #define SECTORS_PER_BLOCK 7
 #define CHUNK_SIZE 4096
 #define DEFAULT_JOURNAL_SIZE (100 * CHUNK_SIZE)

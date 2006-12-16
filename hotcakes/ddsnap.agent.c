@@ -129,19 +129,54 @@ static int incoming(struct context *context, struct client *client)
 			break;
 		}
 		break;
+
 	case CONNECT_SERVER_OK:
 		warn("Everything connected properly, all is well");
 		break;
+
 	case CONNECT_SERVER_ERROR:
 		err = ((struct connect_server_error *)message.body)->err;
 		err_msg = ((struct connect_server_error *)message.body)->msg;
 		err_msg[message.head.length - (sizeof(err) + 1)] = '\0';
 		warn("ERROR: %s, all is NOT well", err_msg);
 		break;
-	default:
-		warn("Agent received unknown message type %x, length %u", message.head.code, message.head.length);
+
+	case PROTOCOL_ERROR: 
+	{
+		struct protocol_error *pe = malloc(message.head.length);
+
+		if (!pe) {
+			warn("received protocol error message; unable to retreive information");
+			break;
+		}
+
+		memcpy(pe, message.body, message.head.length);
+
+		err_msg = "No message sent";
+		if (message.head.length - sizeof(struct protocol_error) > 0) {
+			pe->msg[message.head.length - sizeof(struct protocol_error) - 1] = '\0';
+			err_msg = pe->msg;
+		}
+		warn("protocol error message - error code: %x unknown code: %x message: %s",
+					pe->err, pe->culprit, err_msg);
+		free(pe);
 		break;
 	}
+	default:
+	{
+		uint32_t err = ERROR_UNKNOWN_MESSAGE;
+		err_msg = "Agent received unknown message";
+		
+		warn("Agent received unknown message type %x, length %u", message.head.code, message.head.length);
+		if (outhead(sock, PROTOCOL_ERROR, sizeof(struct protocol_error) + strlen(err_msg) +1) < 0 ||
+				writepipe(sock, &err, sizeof(uint32_t)) < 0 || 
+		 		writepipe(sock, &message.head.code, sizeof(uint32_t)) < 0 ||
+				writepipe(sock, err_msg, strlen(err_msg) + 1) < 0) 
+			warn("unable to send protocol error message\n");
+		break;
+	}
+
+	} /* end of switch statement */
 	return 0;
 
 instantiate:

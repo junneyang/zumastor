@@ -1,5 +1,8 @@
 #ifndef __DDSNAP_COMMON_H
 #define __DDSNAP_COMMON_H
+
+#define MAX_ERRMSG_SIZE 128
+
 struct change_list
 {
 	u64 count;

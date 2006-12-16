@@ -91,6 +91,59 @@ static u64 checksum(const unsigned char *data, u32 data_length)
 	return result;
 }
 
+static char *get_message(int sock, unsigned int length) 
+{
+	char *buffer;
+	if (!(buffer = malloc(length)))
+		return NULL;
+
+	int err;
+	if ((err = readpipe(sock, buffer, length)) < 0) {
+		warn("unable to get reason why command failed: %s", strerror(err));
+		free(buffer);
+		return NULL;
+	}
+	buffer[length-1] = '\0';
+	
+	return buffer;
+}
+
+static void error_message_handler(int sock, const char *prefix, unsigned int length) 
+{
+	char *buffer = get_message(sock, length);
+	warn("%s : %s", prefix, (buffer? buffer : "no error message"));
+	if (buffer)
+		free(buffer);
+}
+
+static void unknown_message_handler(int sock, struct head *head) 
+{
+	if (head->code != PROTOCOL_ERROR) {
+		warn("received unexpected code=%x length=%u", head->code, head->length);
+		return;
+	}
+
+	/* process protocol error message */
+	int err;
+	struct protocol_error pe;
+	
+	if (head->length < sizeof(struct protocol_error)) {
+		warn("message too short");
+		return;
+	}
+	
+	if ((err = readpipe(sock, &pe, sizeof(struct protocol_error))) < 0) {
+		warn("unable to receive protocol error message: %s", strerror(-err));
+		return;
+	}
+	
+	if (head->length - sizeof(struct protocol_error) <= 0)
+		return;
+	error_message_handler(sock, "protocol error message", 
+			head->length - sizeof(struct protocol_error));
+		
+}
+
 static int create_socket(char const *sockname)
 {
 
@@ -160,7 +213,7 @@ static struct change_list *read_changelist(int cl_fd)
 			break;
 
 		if (len != sizeof(u64)) {
-			error("Incomplete chunk address.\n");
+			error("Incomplete chunk address.");
 			break;
 		}
 
@@ -168,7 +221,7 @@ static struct change_list *read_changelist(int cl_fd)
 			break;
 
 		if (append_change_list(cl, chunkaddr) < 0)
-			error("unable to append chunk address.\n");
+			error("unable to append chunk address.");
 	}
 
 	if (chunkaddr != -1)
@@ -632,7 +685,7 @@ static struct change_list *stream_changelist(int serv_fd, u32 src_snap, u32 tgt_
 {
 	int err;
 
-	if ((err = outbead(serv_fd, STREAM_CHANGE_LIST, struct stream_changelist, src_snap, tgt_snap))) {
+	if ((err = outbead(serv_fd, STREAM_CHANGELIST, struct stream_changelist, src_snap, tgt_snap))) {
 		warn("could not request change list: %s", strerror(-err));
 		return NULL;
 	}
@@ -646,11 +699,14 @@ static struct change_list *stream_changelist(int serv_fd, u32 src_snap, u32 tgt_
 
 	trace_on(printf("reply = %x\n", head.code););
 
-	if (head.code != REPLY_STREAM_CHANGE_LIST) {
-		if (head.code == REPLY_ERROR)
-			warn("unable to obtain changelist between snapshot %u and %u", src_snap, tgt_snap);
-		else
-			warn("received unexpected code=%x length=%u", head.code, head.length);
+	if (head.code != STREAM_CHANGELIST_OK) {
+		warn("unable to obtain changelist between snapshot %u and %u", src_snap, tgt_snap);
+		if (head.code != STREAM_CHANGELIST_ERROR) {
+			unknown_message_handler(serv_fd, &head);
+			return NULL;
+		}
+		error_message_handler(serv_fd, "downstream server reason why send delta failed",
+				head.length);
 		return NULL;
 	}
 
@@ -743,10 +799,12 @@ static int ddsnap_send_delta(int serv_fd, u32 src_snap, u32 tgt_snap, char const
 	trace_on(printf("reply = %x\n", head.code););
 
 	if (head.code != SEND_DELTA_PROCEED) {
-		if (head.code == REPLY_ERROR)
-			warn("downstream system refused delta");
-		else
-			warn("received unexpected code=%x length=%u", head.code, head.length);
+		if (head.code != SEND_DELTA_ERROR) {
+			unknown_message_handler(ds_fd, &head);
+			return 1;
+		}
+		error_message_handler(ds_fd, "downstream server reason why send delta failed",
+				head.length);
 		return 1;
 	}
 
@@ -790,10 +848,13 @@ static int ddsnap_send_delta(int serv_fd, u32 src_snap, u32 tgt_snap, char const
 	trace_on(printf("reply = %x\n", head.code););
 
 	if (head.code != SEND_DELTA_DONE) {
-		if (head.code == REPLY_ERROR)
-			warn("downstream system unable to apply delta");
-		else
-			warn("received unexpected code=%x length=%u", head.code, head.length);
+		
+		if (head.code != SEND_DELTA_ERROR) {
+			unknown_message_handler(ds_fd, &head);
+			return 1;
+		}
+		error_message_handler(ds_fd, "downstream server reason why send delta failed",
+				head.length);
 		return 1;
 	}
 
@@ -868,7 +929,7 @@ static int apply_delta_extents(int deltafile, u32 mode, u32 chunk_size, u64 chun
 		}
 
 		if (deh.compress == TRUE) {
-			trace_off(printf("data was compressed \n"););
+			trace_off(printf("data was compressed\n"););
 			/* zlib decompression */
 			int comp_ret = uncompress(delta_data, (unsigned long *) &uncomp_size, comp_delta, deh.data_length);
 			if (comp_ret == Z_MEM_ERROR)
@@ -1171,10 +1232,7 @@ static int list_snapshots(int serv_fd, int verbose, int onlylast)
 	}
 
 	if (head.code != SNAPSHOT_LIST) {
-		if (head.code == REPLY_ERROR)
-			warn("snapshot server is unable to provide a snapshot list");
-		else
-			warn("received unexpected code=%x length=%u", head.code, head.length);
+		unknown_message_handler(serv_fd, &head);
 		return 1;
 	}
 
@@ -1275,29 +1333,20 @@ static int delete_snapshot(int sock, u32 snaptag)
 	}
 
 	struct head head;
-	unsigned maxbuf = 500;
-	char buf[maxbuf];
-
 	if ((err = readpipe(sock, &head, sizeof(head))) < 0) {
 		warn("unable to read delete snapshot message head: %s", strerror(-err));
-		return 1;
-	}
-	assert(head.length < maxbuf); // !!! don't die
-	if ((err = readpipe(sock, buf, head.length)) < 0) {
-		warn("unable to read delete snapshot message body: %s", strerror(-err));
 		return 1;
 	}
 
 	trace_on(printf("snapshot delete reply = %x\n", head.code););
 
-	if (head.code != REPLY_DELETE_SNAPSHOT) {
-		if (head.code == REPLY_ERROR)
+	if (head.code != DELETE_SNAPSHOT_OK) {
+		if (head.code == DELETE_SNAPSHOT_ERROR)
 			warn("snapshot server is unable to delete snapshot %u", snaptag);
 		else
-			warn("received unexpected code=%x length=%u: %.*s", head.code, head.length, head.length, buf);
+			unknown_message_handler(sock, &head);
 		return 1;
 	}
-
 	return 0;
 }
 
@@ -1313,62 +1362,51 @@ static int create_snapshot(int sock, u32 snaptag)
 	}
 
 	struct head head;
-	unsigned maxbuf = 500;
-	char buf[maxbuf];
-
 	if ((err = readpipe(sock, &head, sizeof(head))) < 0) {
 		warn("unable to read create snapshot message head: %s", strerror(-err));
-		return 1;
-	}
-	assert(head.length < maxbuf); // !!! don't die
-	if ((err = readpipe(sock, buf, head.length)) < 0) {
-		warn("unable to read create snapshot message body: %s", strerror(-err));
 		return 1;
 	}
 
 	trace_on(printf("snapshot create reply = %x\n", head.code););
 
-	if (head.code != REPLY_CREATE_SNAPSHOT) {
-		if (head.code == REPLY_ERROR)
+	if (head.code != CREATE_SNAPSHOT_OK) {
+		if (head.code == CREATE_SNAPSHOT_ERROR)
 			warn("snapshot server is unable to create snapshot %u", snaptag);
-		else
-			warn("received unexpected code=%x length=%u: %.*s", head.code, head.length, head.length, buf);
+		else 
+			unknown_message_handler(sock, &head);
 		return 1;
 	}
-
 	return 0;
 }
 
-static int set_priority(int sock, u32 snaptag, int8_t pri_val)
+static int set_priority(int sock, u32 snaptag, int8_t prio_val)
 {
 	int err;
 
-	if ((err = outbead(sock, SET_PRIORITY, struct snapinfo, snaptag, pri_val)) < 0) {
+	if ((err = outbead(sock, PRIORITY, struct priority_info, snaptag, prio_val)) < 0) {
 		warn("unable to send set priority message: %s", strerror(-err));
 		return 1;
 	}
 
 	struct head head;
-	unsigned maxbuf = 500;
-	char buf[maxbuf];
-
-	if ((err =readpipe(sock, &head, sizeof(head))) < 0) {
+	if ((err = readpipe(sock, &head, sizeof(head))) < 0) {
 		warn("unable to read priority message head: %s", strerror(-err));
 		return 1;
 	}
-	assert(head.length < maxbuf); // !!! don't die
-	if ((err =readpipe(sock, buf, head.length)) < 0) {
-		warn("unable to read priority message body: %s", strerror(-err));
-		return 1;
-	}
-
+	
 	trace_on(printf("reply = %x\n", head.code););
-
-	if (head.code != REPLY_SET_PRIORITY) {
-		if (head.code == REPLY_ERROR)
-			warn("snapshot server is unable to set priority for snapshot %u", snaptag);
-		else
-			warn("received unexpected code=%x length=%u: %.*s", head.code, head.length, head.length, buf);
+	if (head.code != PRIORITY_OK) {
+		if (head.code != PRIORITY_ERROR) {
+			unknown_message_handler(sock, &head);
+			return 1;
+		}
+		struct priority_error *prio_err = 
+			(struct priority_error *)get_message(sock, head.length);
+		warn("snapshot server is unable to set priority for snapshot %u", snaptag);
+		if (!prio_err || head.length == sizeof(struct priority_error))
+			return 1;
+		warn("server reason for priority failure: %s", prio_err->msg);
+		free(prio_err);
 		return 1;
 	}
 
@@ -1399,16 +1437,23 @@ static int usecount(int sock, u32 snaptag, int32_t usecnt_dev)
 	}
 
 	trace_on(printf("reply = %x\n", head.code););
-
-	if (head.code == USECOUNT_ERROR) {
-		struct usecount_error *usecnt_err = (struct usecount_error *) buf;
-		usecnt_err->msg[(head.length-(sizeof(struct usecount_error)))-1] = '\0';
-		error("received unexpected code: %s", usecnt_err->msg);
-	}
-
+	if (head.code != USECOUNT_OK) {
+		if (head.code != USECOUNT_ERROR) {
+			unknown_message_handler(sock, &head);
+			return 1;
+		}	
+		struct usecount_error *usecnt_err = 
+			(struct usecount_error *)get_message(sock, head.length);
+		warn("snapshot server is unable to set usecount for snapshot %u", snaptag);
+		if (!usecnt_err || head.length == sizeof(struct usecount_error))
+			return 1;
+		warn("server reason for usecount failure: %s", usecnt_err->msg);
+		free(usecnt_err);
+		return 1;
+	}		
 	printf("New usecount: %u\n", (unsigned int)((struct usecount_ok *)buf)->usecount);
  
-	return 0;
+	return 0; // should we return usecount here too?
 }
 
 static int ddsnap_delta_server(int lsock, char const *devstem)
@@ -1443,17 +1488,22 @@ static int ddsnap_delta_server(int lsock, char const *devstem)
 
 		struct messagebuf message;
 		int err;
+		char err_msg[MAX_ERRMSG_SIZE];
+		err_msg[0] = '\0';
 
 		if ((err = readpipe(csock, &message.head, sizeof(message.head))) < 0) {
-			warn("error reading upstream message header: %s", strerror(-err));
+			snprintf(err_msg, MAX_ERRMSG_SIZE, "error reading upstream message header: %s", strerror(-err));
+			err_msg[MAX_ERRMSG_SIZE-1] = '\0';
 			goto end_connection;
 		}
 		if (message.head.length > maxbody) {
-			warn("message body too long %u", message.head.length);
+			snprintf(err_msg, MAX_ERRMSG_SIZE, "message body too long %u", message.head.length);
+			err_msg[MAX_ERRMSG_SIZE-1] = '\0';
 			goto end_connection;
 		}
 		if ((err = readpipe(csock, &message.body, message.head.length)) < 0) {
-			warn("error reading upstream message body: %s", strerror(-err));
+			snprintf(err_msg, MAX_ERRMSG_SIZE, "error reading upstream message body: %s", strerror(-err)); 
+			err_msg[MAX_ERRMSG_SIZE-1] = '\0';
 			goto end_connection;
 		}
 
@@ -1462,30 +1512,30 @@ static int ddsnap_delta_server(int lsock, char const *devstem)
 		switch (message.head.code) {
 		case SEND_DELTA:
 			if (message.head.length < sizeof(body)) {
-				warn("incomplete SEND_DELTA request sent by client");
-				outbead(csock, REPLY_ERROR, struct reply_error, REPLY_ERROR_OTHER, 0);
+				snprintf(err_msg, MAX_ERRMSG_SIZE, "incomplete SEND_DELTA request sent by client");
+				err_msg[MAX_ERRMSG_SIZE-1] = '\0';
 				goto end_connection;
 			}
 
 			memcpy(&body, message.body, sizeof(body));
 
 			if (body.snap == (u32)~0UL) {
-				warn("invalid snapshot %u in SEND_DELTA", body.snap);
-				outbead(csock, REPLY_ERROR, struct reply_error, REPLY_ERROR_OTHER, 0);
+				snprintf(err_msg, MAX_ERRMSG_SIZE, "invalid snapshot %u in SEND_DELTA", body.snap);
+				err_msg[MAX_ERRMSG_SIZE-1] = '\0';
 				goto end_connection;
 			}
 
 			if (body.chunk_size == 0) {
-				warn("invalid chunk size %u in SEND_DELTA", body.chunk_size);
-				outbead(csock, REPLY_ERROR, struct reply_error, REPLY_ERROR_OTHER, 0);
+				snprintf(err_msg, MAX_ERRMSG_SIZE, "invalid chunk size %u in SEND_DELTA", body.chunk_size);
+				err_msg[MAX_ERRMSG_SIZE-1] = '\0';
 				goto end_connection;
 			}
 
 			char *snapdev;
 
 			if (!(snapdev = malloc(strlen(devstem)+32+1))) {
-				warn("unable to allocate device name");
-				outbead(csock, REPLY_ERROR, struct reply_error, REPLY_ERROR_OTHER, 0);
+				snprintf(err_msg, MAX_ERRMSG_SIZE, "unable to allocate device name");
+				err_msg[MAX_ERRMSG_SIZE-1] = '\0';
 				goto end_connection;
 			}
 			sprintf(snapdev, "%s%u", devstem, body.snap);
@@ -1496,13 +1546,18 @@ static int ddsnap_delta_server(int lsock, char const *devstem)
 			 * device permission table and check for replicatiosn already in progress.
 			 */
 
-			outbead(csock, SEND_DELTA_PROCEED, struct {});
+			if (outbead(csock, SEND_DELTA_PROCEED, struct {}) < 0) {
+				snprintf(err_msg, MAX_ERRMSG_SIZE, "unable to send delta proceed message to server");
+				err_msg[MAX_ERRMSG_SIZE-1] = '\0';
+				goto end_connection;
+			}
 
 			/* retrieve it */
 
-			if (apply_delta_extents(csock, body.delta_mode, body.chunk_size, body.chunk_count, snapdev, origindev, TRUE) < 0) {
-				warn("unable to apply upstream delta to device \"%s\"", origindev);
-				outbead(csock, REPLY_ERROR, struct reply_error, REPLY_ERROR_OTHER, 0);
+			if (apply_delta_extents(csock, body.delta_mode, body.chunk_size, 
+						body.chunk_count, snapdev, origindev, TRUE) < 0) {
+				snprintf(err_msg, MAX_ERRMSG_SIZE, "unable to apply upstream delta to device \"%s\"", origindev);
+				err_msg[MAX_ERRMSG_SIZE-1] = '\0';
 				goto end_connection;
 			}
 
@@ -1510,19 +1565,27 @@ static int ddsnap_delta_server(int lsock, char const *devstem)
 
 			/* success */
 
-			outbead(csock, SEND_DELTA_DONE, struct {});
+			if (outbead(csock, SEND_DELTA_DONE, struct {}) < 0) {
+				snprintf(err_msg, MAX_ERRMSG_SIZE, "unable to send delta complete message to server");
+				err_msg[MAX_ERRMSG_SIZE-1] = '\0';
+				goto end_connection;
+			}
 			trace_on(fprintf(stderr, "applied streamed delta to \"%s\", closing connection\n", origindev););
 			close(csock);
 			exit(0);
 
 		default:
-			warn("unexpected message type sent to snapshot replication server %x", message.head.code);
-			outbead(csock, REPLY_ERROR, struct reply_error, REPLY_ERROR_OTHER, 0);
+			snprintf(err_msg, MAX_ERRMSG_SIZE, 
+					"unexpected message type sent to snapshot replication server %x", message.head.code); 
+			err_msg[MAX_ERRMSG_SIZE-1] = '\0';
 			goto end_connection;
 		}
 
 	end_connection:
-		warn("closing connection on error");
+		warn("closing connection on error: %s", err_msg);
+		if (outhead(csock, SEND_DELTA_ERROR, strlen(err_msg)+1) < 0 ||
+				writepipe(csock, err_msg, strlen(err_msg)+1) < 0)
+			warn("unable to send delta error message to upstream server");
 		close(csock);
 		exit(1);
 
@@ -1550,11 +1613,8 @@ static u64 get_origin_sectors(int serv_fd)
 	}
 
 	if (head.code != ORIGIN_SECTORS) {
-		if (head.code == REPLY_ERROR)
-			warn("snapshot server is unable to provide the origin sector count");
-		else
-			warn("received unexpected code=%x length=%u", head.code, head.length);
-		return 0;
+		unknown_message_handler(serv_fd, &head);
+		return 1;
 	}
 
 	struct origin_sectors body;
@@ -1587,7 +1647,7 @@ static int ddsnap_get_status(int serv_fd, u32 snaptag, int verbose)
 {
 	int err;
 
-	if ((err = outbead(serv_fd, STATUS_REQUEST, struct status_request, snaptag))) {
+	if ((err = outbead(serv_fd, STATUS, struct status_request, snaptag))) {
 		warn("unable to send status request: %s", strerror(-err));
 		return 1;
 	}
@@ -1599,11 +1659,12 @@ static int ddsnap_get_status(int serv_fd, u32 snaptag, int verbose)
 		return 1;
 	}
 
-	if (head.code != STATUS_MESSAGE) {
-		if (head.code == REPLY_ERROR)
-			warn("snapshot server is unable to provide snapshot status");
-		else
-			warn("received unexpected code=%x length=%u", head.code, head.length);
+	if (head.code != STATUS_OK) {
+		if (head.code != STATUS_ERROR) {
+			unknown_message_handler(serv_fd, &head);
+			return 1;
+		}
+		error_message_handler(serv_fd, "server reason why status failed", head.length);
 		return 1;
 	}
 
