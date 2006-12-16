@@ -8,6 +8,7 @@
 . /lib/zumastor/ddfake
 
 function new_snapshot {
+	[ $# -eq 2 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
 	local -r vol=$1
 	local -r kind=$2
 	local -r master=$VOLUMES/$vol/master
@@ -53,6 +54,7 @@ function new_snapshot {
 }
 
 function replicate_snapshot {
+	[ $# -eq 3 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
 	local -r vol=$1
 	local -r host=$2
 	local -r snap=$3
@@ -63,6 +65,7 @@ function replicate_snapshot {
 }
 
 function run_master {
+	[ $# -eq 1 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
 	local -r vol=$1
 	local -r fifo=$VOLUMES/$vol/master/trigger
 	local -r log=${LOGS}/${vol}-master.log
@@ -84,6 +87,7 @@ function run_master {
 }
 
 function run_target {
+	[ $# -eq 2 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
 	local -r vol=$1
 	local -r host=$2
 	local -r fifo=$VOLUMES/$vol/targets/$host/trigger
@@ -105,6 +109,7 @@ function run_target {
 }
 
 function stop_master {
+	[ $# -eq 1 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
 	local -r vol=$1
 	local -r cron=${CRONS}/$vol
 
@@ -113,6 +118,7 @@ function stop_master {
 }
 
 function stop_target {
+	[ $# -eq 2 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
 	local -r vol=$1
 	local -r host=$2
 
@@ -120,6 +126,7 @@ function stop_target {
 }
 
 function define_volume {
+	[ $# -eq 3 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
 	local -r vol=$1
 	local -r odev=$2
 	local -r sdev=$3
@@ -140,6 +147,7 @@ function define_volume {
 }
 
 function forget_volume {
+	[ $# -eq 1 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
 	local -r vol=$1
 	local -r path=$VOLUMES/$vol
 	local -r sock=${SERVERS}/$vol
@@ -168,6 +176,7 @@ function forget_volume {
 }
 
 function define_target {
+	[ $# -eq 2 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
 	local -r vol=$1
 	local -r host=$2
 	local -r path=$VOLUMES/$vol/targets/$host
@@ -178,6 +187,7 @@ function define_target {
 }
 
 function forget_target {
+	[ $# -eq 2 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
 	local -r vol=$1
 	local -r host=$2
 	local -r path=$VOLUMES/$vol/targets/$host
@@ -187,6 +197,7 @@ function forget_target {
 }
 
 function set_master {
+	[ $# -eq 3 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
 	local -r vol=$1
 	local -r kind=$2
 	local -r count=$3
@@ -223,6 +234,7 @@ function set_master {
 }
 
 function forget_master {
+	[ $# -eq 1 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
 	local -r vol=$1
 	local -r path=$VOLUMES/$vol
 
@@ -231,6 +243,7 @@ function forget_master {
 }
 
 function set_source {
+	[ $# -eq 2 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
 	local -r vol=$1
 	local -r host=$2
 	local -r path=$VOLUMES/$vol
@@ -248,6 +261,7 @@ function set_source {
 }
 
 function trigger_snapshot {
+	[ $# -eq 2 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
 	local -r vol=$1
 	local -r kind=$2
 	local -r fifo=$VOLUMES/$vol/master/trigger
@@ -258,6 +272,7 @@ function trigger_snapshot {
 }
 
 function trigger_replication {
+	[ $# -eq 2 ] || [ $# -eq 3 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
 	local -r vol=$1
 	local -r host=$2
 	local snap=$3
