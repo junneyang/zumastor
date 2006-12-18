@@ -1,6 +1,6 @@
 diff -rup linux-2.6.19-rc3.clean/drivers/md/Kconfig linux-2.6.19-rc3/drivers/md/Kconfig
 --- linux-2.6.19-rc3.clean/drivers/md/Kconfig	2006-12-04 11:43:05.000000000 -0800
-+++ linux-2.6.19-rc3/drivers/md/Kconfig	2006-12-04 11:53:37.000000000 -0800
++++ linux-2.6.19-rc3/drivers/md/Kconfig	2006-12-18 11:01:53.000000000 -0800
 @@ -261,6 +261,22 @@ config DM_MULTIPATH_EMC
  	---help---
  	  Multipath support for EMC CX/AX series hardware.
@@ -26,7 +26,7 @@ diff -rup linux-2.6.19-rc3.clean/drivers/md/Kconfig linux-2.6.19-rc3/drivers/md/
  endif
 diff -rup linux-2.6.19-rc3.clean/drivers/md/Makefile linux-2.6.19-rc3/drivers/md/Makefile
 --- linux-2.6.19-rc3.clean/drivers/md/Makefile	2006-12-04 11:43:05.000000000 -0800
-+++ linux-2.6.19-rc3/drivers/md/Makefile	2006-12-04 11:53:37.000000000 -0800
++++ linux-2.6.19-rc3/drivers/md/Makefile	2006-12-18 11:01:54.000000000 -0800
 @@ -36,6 +36,8 @@ obj-$(CONFIG_DM_MULTIPATH_EMC)	+= dm-emc
  obj-$(CONFIG_DM_SNAPSHOT)	+= dm-snapshot.o
  obj-$(CONFIG_DM_MIRROR)		+= dm-mirror.o
@@ -38,7 +38,7 @@ diff -rup linux-2.6.19-rc3.clean/drivers/md/Makefile linux-2.6.19-rc3/drivers/md
        cmd_unroll = $(PERL) $(srctree)/$(src)/unroll.pl $(UNROLL) \
 diff -rup linux-2.6.19-rc3.clean/drivers/md/dm-ddraid.c linux-2.6.19-rc3/drivers/md/dm-ddraid.c
 --- linux-2.6.19-rc3.clean/drivers/md/dm-ddraid.c	2006-12-04 13:04:17.000000000 -0800
-+++ linux-2.6.19-rc3/drivers/md/dm-ddraid.c	2006-12-04 11:53:37.000000000 -0800
++++ linux-2.6.19-rc3/drivers/md/dm-ddraid.c	2006-12-18 11:01:54.000000000 -0800
 @@ -0,0 +1,1621 @@
 +#include <linux/fs.h>
 +#include <linux/slab.h>
@@ -1663,7 +1663,7 @@ diff -rup linux-2.6.19-rc3.clean/drivers/md/dm-ddraid.c linux-2.6.19-rc3/drivers
 +module_exit(dm_ddraid_exit);
 diff -rup linux-2.6.19-rc3.clean/drivers/md/dm-ddraid.h linux-2.6.19-rc3/drivers/md/dm-ddraid.h
 --- linux-2.6.19-rc3.clean/drivers/md/dm-ddraid.h	2006-12-04 13:04:18.000000000 -0800
-+++ linux-2.6.19-rc3/drivers/md/dm-ddraid.h	2006-12-04 11:53:37.000000000 -0800
++++ linux-2.6.19-rc3/drivers/md/dm-ddraid.h	2006-12-18 11:01:54.000000000 -0800
 @@ -0,0 +1,47 @@
 +#define PACKED __attribute__ ((packed))
 +
@@ -1714,8 +1714,8 @@ diff -rup linux-2.6.19-rc3.clean/drivers/md/dm-ddraid.h linux-2.6.19-rc3/drivers
 +#define MIN_REGION_BITS 12
 diff -rup linux-2.6.19-rc3.clean/drivers/md/dm-ddsnap.c linux-2.6.19-rc3/drivers/md/dm-ddsnap.c
 --- linux-2.6.19-rc3.clean/drivers/md/dm-ddsnap.c	2006-12-04 13:04:11.000000000 -0800
-+++ linux-2.6.19-rc3/drivers/md/dm-ddsnap.c	2006-12-04 17:44:21.000000000 -0800
-@@ -0,0 +1,1223 @@
++++ linux-2.6.19-rc3/drivers/md/dm-ddsnap.c	2006-12-18 11:09:04.000000000 -0800
+@@ -0,0 +1,1280 @@
 +#include <linux/version.h>
 +#include <linux/fs.h>
 +#include <linux/slab.h>
@@ -1918,7 +1918,8 @@ diff -rup linux-2.6.19-rc3.clean/drivers/md/dm-ddsnap.c linux-2.6.19-rc3/drivers
 +	if (test_and_set_bit(REPORT_BIT, &info->flags))
 +		return;
 +	up(&info->more_work_sem);
-+	down(&info->recover_sem);
++	while (down_interruptible(&info->recover_sem))
++		;
 +	info->flags |= RECOVER_FLAG;
 +}
 +
@@ -2110,7 +2111,7 @@ diff -rup linux-2.6.19-rc3.clean/drivers/md/dm-ddsnap.c linux-2.6.19-rc3/drivers
 +			/* snapshot read from origin */
 +			struct hook *hook;
 +			trace(warn("hook end_io for %Lx", (long long)bio->bi_sector));
-+			hook = kmem_cache_alloc(end_io_cache, GFP_KERNEL|__GFP_NOFAIL); // !!! union with pending
++			hook = kmem_cache_alloc(end_io_cache, GFP_NOIO|__GFP_NOFAIL); // !!! union with pending
 +			*hook = (struct hook){
 +				.info = info,
 +				.sector = bio->bi_sector,
@@ -2216,13 +2217,15 @@ diff -rup linux-2.6.19-rc3.clean/drivers/md/dm-ddsnap.c linux-2.6.19-rc3/drivers
 +	u32 chunksize_bits;
 +
 +	daemonize_properly("ddsnap-clnt", info->snap);
-+	down(&info->exit2_sem);
++	while (down_interruptible(&info->exit2_sem))
++		;
 +	trace_on(warn("Client thread started, pid=%i for snapshot %d", current->pid, info->snap);)
 +connect:
 +	trace(warn("Request socket connection");)
 +	outbead(info->control_socket, NEED_SERVER, struct { });
 +	trace(warn("Wait for socket connection");)
-+	down(&info->server_in_sem);
++	while (down_interruptible(&info->server_in_sem))
++		;
 +	trace(warn("got socket %p", info->sock);)
 +	sock = info->sock;
 +
@@ -2240,22 +2243,34 @@ diff -rup linux-2.6.19-rc3.clean/drivers/md/dm-ddsnap.c linux-2.6.19-rc3/drivers
 +			goto socket_error;
 +	
 +		switch (message.head.code) {
-+		case REPLY_ORIGIN_WRITE:
++		case ORIGIN_WRITE_ERROR:
++			warn("Origin write failure");
++			failed_io = 1;
++		case ORIGIN_WRITE_OK:
 +			rw = WRITE;
 +			to_snap = 0;
 +			break;
 +
-+		case REPLY_SNAPSHOT_WRITE:
++		case SNAPSHOT_WRITE_ERROR:
++			warn("Snapshot %u write failure", info->snap); 
++			failed_io = 1;
++		case SNAPSHOT_WRITE_OK:
 +			rw = WRITE;
 +			to_snap = 1;
 +			break;
 +
-+		case REPLY_SNAPSHOT_READ_ORIGIN:
++		case SNAPSHOT_READ_ORIGIN_ERROR:
++			warn("Snapshot %u read from origin failure", info->snap); 
++			failed_io = 1;
++		case SNAPSHOT_READ_ORIGIN_OK:
 +			rw = READ;
 +			to_snap = 0;
 +			break;
 +
-+		case REPLY_SNAPSHOT_READ:
++		case SNAPSHOT_READ_ERROR:
++			warn("Snapshot %u read failure", info->snap); 
++			failed_io = 1;
++		case SNAPSHOT_READ_OK:
 +			rw = READ;
 +			to_snap = 1; 
 +			break;
@@ -2270,7 +2285,7 @@ diff -rup linux-2.6.19-rc3.clean/drivers/md/dm-ddsnap.c linux-2.6.19-rc3/drivers
 +
 +			up(&info->server_out_sem);
 +			if (outbead(info->control_socket, CONNECT_SERVER_OK, struct { }) < 0)
-+				warn("unable to send CONNECT_SERVER_OK message to agent\n");
++				warn("unable to send CONNECT_SERVER_OK message to agent");
 +			continue;
 +			
 +		case IDENTIFY_ERROR:
@@ -2289,18 +2304,32 @@ diff -rup linux-2.6.19-rc3.clean/drivers/md/dm-ddsnap.c linux-2.6.19-rc3/drivers
 +			if (writepipe(info->control_socket, &err, sizeof(err)) < 0) 
 +				warn("can't send out err");
 +			if (writepipe(info->control_socket, err_msg, length) < 0)
-+				warn("unable to send message CONNECT_SERVER_ERROR to agent\n");
++				warn("unable to send message CONNECT_SERVER_ERROR to agent");
 +			continue;
 +			
-+		case REPLY_ERROR:	
-+			trace_on(warn("failed i/o"););
-+			failed_io = 1;
-+			break;
++		case PROTOCOL_ERROR:
++			// !!! FIXME with a nice error message
++			warn("caught a protocol error message");
++			continue;
 +			
 +		default: 
-+			warn("Unknown message %x. sending reply error back to server", message.head.code);
++		{
++			struct protocol_error pe = { 	.err = ERROR_UNKNOWN_MESSAGE, 
++							.culprit = message.head.code };
++			err_msg = "Unknown message accepted by client kernel thread"; 
++			warn("Unknown message %x, length %u. sending protocol error back to server",
++				       	message.head.code, message.head.length);
++			message.head.code = PROTOCOL_ERROR;
++			message.head.length = sizeof(struct protocol_error) + strlen(err_msg) + 1;
++			if (writepipe(sock, &message.head, sizeof(message.head)) < 0 || 
++				writepipe(sock, &pe, sizeof(struct protocol_error)) < 0 ||
++				writepipe(sock, err_msg, strlen(err_msg) + 1) < 0)
++				warn("unable to send protocol error message");
 +			continue;
 +		}
++
++		} // switch statement
++
 +		if (length < sizeof(struct rw_request))
 +			goto message_too_short;
 +
@@ -2426,12 +2455,14 @@ diff -rup linux-2.6.19-rc3.clean/drivers/md/dm-ddsnap.c linux-2.6.19-rc3/drivers
 +
 +	daemonize_properly("ddsnap-wrkr", info->snap);
 +	trace_on(warn("Worker thread started, pid=%i for snapshot %d", current->pid, info->snap);)
-+	down(&info->exit1_sem);
++	while (down_interruptible(&info->exit1_sem))
++		;
 +	goto recover; /* just for now we'll always upload locks, even on fresh start */
 +restart:
 +	while (worker_running(info)) {
 +		unsigned long irqflags;
-+		down(&info->more_work_sem);
++		while (down_interruptible(&info->more_work_sem))
++			;
 +
 +		/* Send message for each pending request. */
 +		spin_lock(&info->pending_lock);
@@ -2444,7 +2475,8 @@ diff -rup linux-2.6.19-rc3.clean/drivers/md/dm-ddsnap.c linux-2.6.19-rc3/drivers
 +			spin_unlock(&info->pending_lock);
 +			trace(show_pending(info);)
 +
-+			down(&info->server_out_sem);
++			while (down_interruptible(&info->server_out_sem))
++				;
 +			trace(warn("Server query [%Lx/%x]", pending->chunk, pending->chunks);)
 +			if ((err = outbead(info->sock,
 +				bio_data_dir(pending->bio) == WRITE? QUERY_WRITE: QUERY_SNAPSHOT_READ,
@@ -2469,7 +2501,8 @@ diff -rup linux-2.6.19-rc3.clean/drivers/md/dm-ddsnap.c linux-2.6.19-rc3/drivers
 +			spin_unlock_irqrestore(&info->end_io_lock, irqflags);
 +			trace(warn("release sector %Lx, chunk %Lx", (long long)hook->sector, chunk);)
 +			kmem_cache_free(end_io_cache, hook);
-+			down(&info->server_out_sem);
++			while (down_interruptible(&info->server_out_sem))
++				;
 +			if ((err = outbead(info->sock, FINISH_SNAPSHOT_READ, struct rw_request1,
 +				.count = 1, .ranges[0].chunk = chunk, .ranges[0].chunks = 1)))
 +				goto report;
@@ -2481,7 +2514,8 @@ diff -rup linux-2.6.19-rc3.clean/drivers/md/dm-ddsnap.c linux-2.6.19-rc3/drivers
 +		trace(warn("Yowza! More work?");)
 +	}
 +	if ((info->flags & RECOVER_FLAG)) {
-+		down(&info->server_out_sem);
++		while (down_interruptible(&info->server_out_sem))
++			;
 +		up(&info->more_work_sem);
 +		goto recover;
 +	}
@@ -2495,7 +2529,8 @@ diff -rup linux-2.6.19-rc3.clean/drivers/md/dm-ddsnap.c linux-2.6.19-rc3/drivers
 +	report_error(info);
 +recover:
 +	trace_on(warn("worker recovering for snapshot %d", info->snap);)
-+	down(&info->recover_sem);
++	while (down_interruptible(&info->recover_sem))
++		;
 +	if ((info->flags & FINISH_FLAG))
 +		goto finish;
 +	if (is_snapshot(info))
@@ -2527,18 +2562,20 @@ diff -rup linux-2.6.19-rc3.clean/drivers/md/dm-ddsnap.c linux-2.6.19-rc3/drivers
 +	struct messagebuf message; // !!! have a buffer in the target->info
 +	struct file *sock;
 +	int err, length;
++	char *err_msg;
 +
 +	daemonize_properly("ddsnap-cntl", info->snap);
 +	trace_on(warn("Control thread started, pid=%i for snapshot %d", current->pid, info->snap);)
 +	sock = info->control_socket;
 +	trace(warn("got socket %p", sock);)
 +
-+	down(&info->exit3_sem);
++	while (down_interruptible(&info->exit3_sem))
++		;
 +	while (running(info)) {
 +		trace(warn("wait message");)
 +		if ((err = readpipe(sock, &message.head, sizeof(message.head))))
 +			goto socket_error;
-+		trace(warn("got message header code %x", message.head.code);)
++		trace(warn("got message header code %x, length %u", message.head.code, message.head.length);)
 +		length = message.head.length;
 +		if (length > maxbody) //!!! FIXME: shouldn't limit message sizes
 +			goto message_too_long;
@@ -2581,10 +2618,27 @@ diff -rup linux-2.6.19-rc3.clean/drivers/md/dm-ddsnap.c linux-2.6.19-rc3/drivers
 +			up(&info->recover_sem); /* worker uploads locks now */
 +			break;
 +		}
++		case PROTOCOL_ERROR:
++			// !!! FIXME: add a new 
++			warn("caught a protocol error message");
++	   		break;		
 +		default: 
-+			warn("Unknown message %x", message.head.code);
++		{
++			struct protocol_error pe = { 	.err = ERROR_UNKNOWN_MESSAGE, 
++							.culprit = message.head.code };
++			err_msg = "Unknown message accepted by control kernel thread"; 
++			warn("Unknown message %x, length %u. sending protocol error back to server",
++				       	message.head.code, message.head.length);
++			message.head.code = PROTOCOL_ERROR;
++			message.head.length = sizeof(struct protocol_error) + strlen(err_msg) + 1;
++			if (writepipe(sock, &message.head, sizeof(message.head)) < 0 || 
++				writepipe(sock, &pe, sizeof(struct protocol_error)) < 0 ||
++				writepipe(sock, err_msg, strlen(err_msg) + 1) < 0)
++				warn("unable to send protocol error message");
 +			continue;
 +		}
++		
++		} // switch statement
 +	}
 +out:
 +	warn("%s exiting for snapshot %d", task->comm, info->snap);
@@ -2714,11 +2768,14 @@ diff -rup linux-2.6.19-rc3.clean/drivers/md/dm-ddsnap.c linux-2.6.19-rc3/drivers
 +
 +	// !!! wrong! the thread might be just starting, think about this some more
 +	// ah, don't let ddsnap_destroy run while ddsnap_create is spawning threads
-+	down(&info->exit1_sem);
++	while (down_interruptible(&info->exit1_sem))
++		;
 +	warn("thread 1 exited");
-+	down(&info->exit2_sem);
++	while (down_interruptible(&info->exit2_sem))
++		;
 +	warn("thread 2 exited");
-+	down(&info->exit3_sem);
++	while (down_interruptible(&info->exit3_sem))
++		;
 +	warn("thread 3 exited");
 +
 +	if (info->sock)
@@ -2779,7 +2836,7 @@ diff -rup linux-2.6.19-rc3.clean/drivers/md/dm-ddsnap.c linux-2.6.19-rc3/drivers
 +#ifdef CACHE
 +	unsigned bm_size;
 +#endif
-+	error = "ddsnap usage: orgdev snapdev sockname snapnum";
++	error = "ddsnap usage: snapdev orgdev sockname snapnum";
 +	err = -EINVAL;
 +	if (argc != 4)
 +		goto eek;
@@ -2790,7 +2847,7 @@ diff -rup linux-2.6.19-rc3.clean/drivers/md/dm-ddsnap.c linux-2.6.19-rc3/drivers
 +
 +	err = -ENOMEM;
 +	error = "can't get kernel memory";
-+	if (!(info = kmalloc(sizeof(struct devinfo), GFP_KERNEL)))
++	if (!(info = kmalloc(sizeof(struct devinfo), GFP_NOIO|__GFP_NOFAIL)))
 +		goto eek;
 +
 +	*info = (struct devinfo){ 
@@ -2814,13 +2871,13 @@ diff -rup linux-2.6.19-rc3.clean/drivers/md/dm-ddsnap.c linux-2.6.19-rc3/drivers
 +		INIT_LIST_HEAD(&info->pending[i]);
 +
 +	error = "Can't get snapshot device";
-+	
 +	if ((err = dm_get_device(target, argv[0], 0, 0, dm_table_get_mode(target->table), &info->snapdev)))
 +		goto eek;
-+	error = "Can't get origin device";
 +	
++	error = "Can't get origin device";
 +	if ((err = dm_get_device(target, argv[1], 0, 0, dm_table_get_mode(target->table), &info->orgdev)))
 +		goto eek;
++
 +	error = "Can't connect control socket";
 +	if ((err = get_control_socket(argv[2])) < 0)
 +		goto eek;
@@ -2844,7 +2901,7 @@ diff -rup linux-2.6.19-rc3.clean/drivers/md/dm-ddsnap.c linux-2.6.19-rc3/drivers
 +		goto eek;
 +	if ((err = kernel_thread((void *)control, target, 0)) < 0)
 +		goto eek;
-+	warn("Created snapshot device origin=%s snapstore=%s socket=%s snapshot=%i", argv[0], argv[1], argv[2], snap);
++	warn("Created snapshot device snapstore=%s origin=%s socket=%s snapshot=%i", argv[0], argv[1], argv[2], snap);
 +	return 0;
 +
 +eek:	warn("Virtual device create error %i: %s!", err, error);
@@ -2941,8 +2998,8 @@ diff -rup linux-2.6.19-rc3.clean/drivers/md/dm-ddsnap.c linux-2.6.19-rc3/drivers
 +MODULE_LICENSE("GPL");
 diff -rup linux-2.6.19-rc3.clean/drivers/md/dm-ddsnap.h linux-2.6.19-rc3/drivers/md/dm-ddsnap.h
 --- linux-2.6.19-rc3.clean/drivers/md/dm-ddsnap.h	2006-12-04 13:04:13.000000000 -0800
-+++ linux-2.6.19-rc3/drivers/md/dm-ddsnap.h	2006-12-04 11:53:37.000000000 -0800
-@@ -0,0 +1,121 @@
++++ linux-2.6.19-rc3/drivers/md/dm-ddsnap.h	2006-12-18 11:01:54.000000000 -0800
+@@ -0,0 +1,133 @@
 +#define PACKED __attribute__ ((packed))
 +#define MAGIC  0xadbe
 +
@@ -2950,21 +3007,27 @@ diff -rup linux-2.6.19-rc3.clean/drivers/md/dm-ddsnap.h linux-2.6.19-rc3/drivers
 +
 +enum csnap_codes
 +{
-+	REPLY_ERROR = 0xbead0000,
++	PROTOCOL_ERROR = 0xbead0000,
 +	IDENTIFY,
 +	IDENTIFY_OK,
 +	IDENTIFY_ERROR,
 +	QUERY_WRITE,
-+	REPLY_ORIGIN_WRITE,
-+	REPLY_SNAPSHOT_WRITE,
++	ORIGIN_WRITE_OK,
++	ORIGIN_WRITE_ERROR,
++	SNAPSHOT_WRITE_OK,
++	SNAPSHOT_WRITE_ERROR,
 +	QUERY_SNAPSHOT_READ,
-+	REPLY_SNAPSHOT_READ,
-+	REPLY_SNAPSHOT_READ_ORIGIN,
++	SNAPSHOT_READ_OK,
++	SNAPSHOT_READ_ERROR,
++	SNAPSHOT_READ_ORIGIN_OK,
++	SNAPSHOT_READ_ORIGIN_ERROR,
 +	FINISH_SNAPSHOT_READ,
-+	CREATE_SNAPSHOT,
-+	REPLY_CREATE_SNAPSHOT,
-+	DELETE_SNAPSHOT,
-+	REPLY_DELETE_SNAPSHOT,
++	CREATE_SNAPSHOT, 
++	CREATE_SNAPSHOT_OK, 
++	CREATE_SNAPSHOT_ERROR, 
++	DELETE_SNAPSHOT, 
++	DELETE_SNAPSHOT_OK,
++	DELETE_SNAPSHOT_ERROR,
 +	DUMP_TREE,
 +	INITIALIZE_SNAPSTORE,
 +	NEED_SERVER,
@@ -2984,39 +3047,47 @@ diff -rup linux-2.6.19-rc3.clean/drivers/md/dm-ddsnap.h linux-2.6.19-rc3/drivers
 +	REMOVE_CLIENT_IDS,
 +	LIST_SNAPSHOTS,
 +	SNAPSHOT_LIST,
-+	GENERATE_CHANGE_LIST,
-+	REPLY_GENERATE_CHANGE_LIST,
-+	SET_PRIORITY,
-+	REPLY_SET_PRIORITY,
++	PRIORITY,
++	PRIORITY_OK, 
++	PRIORITY_ERROR, 
 +	USECOUNT,
 +	USECOUNT_ERROR,
 +	USECOUNT_OK,
-+	STREAM_CHANGE_LIST,
-+	REPLY_STREAM_CHANGE_LIST,
++	STREAM_CHANGELIST,
++	STREAM_CHANGELIST_OK, 
++	STREAM_CHANGELIST_ERROR, 
 +	SEND_DELTA,
 +	SEND_DELTA_PROCEED,
-+	SEND_DELTA_DONE,
-+	STATUS_REQUEST,
-+	STATUS_MESSAGE,
++	SEND_DELTA_DONE, 
++	SEND_DELTA_ERROR,
++	STATUS,
++	STATUS_OK,
++	STATUS_ERROR,
 +	REQUEST_ORIGIN_SECTORS,
 +	ORIGIN_SECTORS,
 +};
 +
 +enum csnap_error_codes
 +{
-+	REPLY_ERROR_REFUSED = 0x01,
-+	REPLY_ERROR_SIZE_MISMATCH,
-+	REPLY_ERROR_OFFSET_MISMATCH,
-+	REPLY_ERROR_INVALID_SNAPSHOT,
-+	REPLY_ERROR_USECOUNT,
-+	REPLY_ERROR_OTHER,
++	ERROR_REFUSED = 0xdead0001,
++	ERROR_SIZE_MISMATCH,
++	ERROR_OFFSET_MISMATCH,
++	ERROR_INVALID_SNAPSHOT,
++	ERROR_PRIORITY,
++	ERROR_USECOUNT,
++	ERROR_UNKNOWN_MESSAGE,
++	ERROR_OTHER,
 +};
 +
 +#define ID_BITS 16
 +
-+struct reply_error { uint32_t err; uint32_t trackno; } PACKED;
++struct protocol_error { uint32_t err; uint32_t culprit; char msg[]; } PACKED;
++struct usecount_info { uint32_t snap; int32_t usecnt_dev; } PACKED;
 +struct usecount_ok { uint16_t usecount; } PACKED;
 +struct usecount_error { uint32_t err; char msg[]; } PACKED;
++struct priority_info { uint32_t snap; int8_t prio; } PACKED;
++struct priority_ok { int8_t prio; } PACKED;
++struct priority_error { uint32_t err; char msg[]; } PACKED;
 +struct match_id { uint64_t id; uint64_t mask; } PACKED;
 +struct set_id { uint64_t id; } PACKED;
 +struct identify { uint64_t id; uint32_t snap; uint64_t off; uint64_t len; } PACKED; // off, len are in sectors  
@@ -3026,7 +3097,6 @@ diff -rup linux-2.6.19-rc3.clean/drivers/md/dm-ddsnap.h linux-2.6.19-rc3/drivers
 +struct create_snapshot { uint32_t snap; } PACKED;
 +struct generate_changelist { uint32_t snap1; uint32_t snap2; } PACKED;
 +struct snapinfo { uint32_t snap; int8_t prio; uint16_t usecnt; char zero[3]; uint64_t ctime; } PACKED;
-+struct usecount_info { uint32_t snap; int32_t usecnt_dev; } PACKED;
 +struct snaplist { uint32_t count; struct snapinfo snapshots[]; } PACKED;
 +struct stream_changelist { uint32_t snap1; uint32_t snap2; } PACKED;
 +struct changelist_stream { uint64_t chunk_count; uint32_t chunksize_bits; } PACKED;
@@ -3036,7 +3106,6 @@ diff -rup linux-2.6.19-rc3.clean/drivers/md/dm-ddsnap.h linux-2.6.19-rc3/drivers
 +struct status { uint64_t ctime; uint32_t snap; uint64_t chunk_count[]; } PACKED;
 +struct status_message { uint64_t ctime; struct overall_status meta; struct overall_status store; uint32_t write_density; uint32_t status_count; uint32_t num_columns; char status_data[]; } PACKED;
 +struct origin_sectors { uint64_t count; } PACKED;
-+
 +
 +typedef uint16_t shortcount; /* !!! what is this all about */
 +
@@ -3066,7 +3135,7 @@ diff -rup linux-2.6.19-rc3.clean/drivers/md/dm-ddsnap.h linux-2.6.19-rc3/drivers
 +/* ...decruft me */
 diff -rup linux-2.6.19-rc3.clean/net/socket.c linux-2.6.19-rc3/net/socket.c
 --- linux-2.6.19-rc3.clean/net/socket.c	2006-12-04 11:43:06.000000000 -0800
-+++ linux-2.6.19-rc3/net/socket.c	2006-12-04 11:53:37.000000000 -0800
++++ linux-2.6.19-rc3/net/socket.c	2006-12-18 11:01:54.000000000 -0800
 @@ -2252,6 +2252,12 @@ int kernel_sock_ioctl(struct socket *soc
  	return err;
  }
