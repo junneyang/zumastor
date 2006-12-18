@@ -1,0 +1,54 @@
+diff -rup linux-2.6.19.1.clean/drivers/md/Kconfig linux-2.6.19.1/drivers/md/Kconfig
+--- linux-2.6.19.1.clean/drivers/md/Kconfig	2006-12-18 11:09:41.000000000 -0800
++++ linux-2.6.19.1/drivers/md/Kconfig	2006-12-18 11:12:16.000000000 -0800
+@@ -261,6 +261,22 @@ config DM_MULTIPATH_EMC
+ 	---help---
+ 	  Multipath support for EMC CX/AX series hardware.
+ 
++config DM_DDRAID
++	tristate "Distributed Data RAID target (EXPERIMENTAL)"
++	depends on BLK_DEV_DM && EXPERIMENTAL
++	---help---
++	  This device-mapper target allows you to join together several
++	  network and/or local block devices into a raid 3.5 array.
++	  If unsure, say N.
++
++config DM_DDSNAP
++	tristate "Distributed Data Snapshot target (EXPERIMENTAL)"
++	depends on BLK_DEV_DM && EXPERIMENTAL
++	---help---
++	  This device-mapper target allows you to take multiple simultaneous
++	  read/write snapshots of a clustered or non-clustered block devices.
++	  If unsure, say N.
++
+ endmenu
+ 
+ endif
+diff -rup linux-2.6.19.1.clean/drivers/md/Makefile linux-2.6.19.1/drivers/md/Makefile
+--- linux-2.6.19.1.clean/drivers/md/Makefile	2006-12-18 11:09:41.000000000 -0800
++++ linux-2.6.19.1/drivers/md/Makefile	2006-12-18 11:12:16.000000000 -0800
+@@ -36,6 +36,8 @@ obj-$(CONFIG_DM_MULTIPATH_EMC)	+= dm-emc
+ obj-$(CONFIG_DM_SNAPSHOT)	+= dm-snapshot.o
+ obj-$(CONFIG_DM_MIRROR)		+= dm-mirror.o
+ obj-$(CONFIG_DM_ZERO)		+= dm-zero.o
++obj-$(CONFIG_DM_DDRAID)		+= dm-ddraid.o
++obj-$(CONFIG_DM_DDSNAP)		+= dm-ddsnap.o
+ 
+ quiet_cmd_unroll = UNROLL  $@
+       cmd_unroll = $(PERL) $(srctree)/$(src)/unroll.pl $(UNROLL) \
+diff -rup linux-2.6.19.1.clean/net/socket.c linux-2.6.19.1/net/socket.c
+--- linux-2.6.19.1.clean/net/socket.c	2006-12-18 11:09:43.000000000 -0800
++++ linux-2.6.19.1/net/socket.c	2006-12-18 11:12:16.000000000 -0800
+@@ -2252,6 +2252,12 @@ int kernel_sock_ioctl(struct socket *soc
+ 	return err;
+ }
+ 
++/* Cluster devices need these, or better: kernel interfaces */
++
++EXPORT_SYMBOL_GPL(sys_connect);
++EXPORT_SYMBOL_GPL(sys_recvmsg);
++EXPORT_SYMBOL_GPL(sys_socket);
++
+ /* ABI emulation layers need these two */
+ EXPORT_SYMBOL(move_addr_to_kernel);
+ EXPORT_SYMBOL(move_addr_to_user);
