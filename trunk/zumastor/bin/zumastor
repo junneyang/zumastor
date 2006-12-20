@@ -1,4 +1,3 @@
-#!/bin/bash
 # Zumastor Linux Storage Server
 # Copyright (c) 2006 Google Inc.
 # Author: Daniel Phillips <phillips@google.com>
@@ -142,9 +141,7 @@ function define_volume {
 	# FIXME: check to see if there are any snapshots in the snapshot store and initialize here
 	start_volume $vol || return 1
 
-	ddsnap create $sock -1 || return 1
 	create_device $vol -1 || return 1
-
 }
 
 function forget_volume {

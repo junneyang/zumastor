@@ -135,8 +135,6 @@ function start_volume {
 	local -r agentlog=${LOGS}/${vol}-agent.log
 	local -r serverlog=${LOGS}/${vol}-server.log
 
-	mkfifo $agent || return 1
-	mkfifo $server || return 1
 	ddsnap agent -l $agentlog $agent || return 1
 	ddsnap server -l $serverlog $sdev $odev $agent $server || return 1
 }
