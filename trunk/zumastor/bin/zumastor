@@ -139,11 +139,12 @@ function define_volume {
 	ln -sf $sdev $path/device/snapstore || return 1
 	mkdir $path/targets || return 1
 
+	# FIXME: check to see if there are any snapshots in the snapshot store and initialize here
+	start_volume $vol || return 1
+
 	ddsnap create $sock -1 || return 1
 	create_device $vol -1 || return 1
-	# FIXME: check to see if there are any snapshots in the snapshot store and initialize here
 
-	start_volume $vol || return 1
 }
 
 function forget_volume {
