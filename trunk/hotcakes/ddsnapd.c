@@ -297,6 +297,7 @@ static void commit_transaction(struct superblock *sb)
 
 	unsigned pos = next_journal_block(sb);
 	struct buffer *commit_buffer = jgetblk(sb, pos);
+	memset(commit_buffer->data, 0, sb->metadata.allocsize);
 	struct commit_block *commit = buf2block(commit_buffer);
 	*commit = (struct commit_block){ .magic = JMAGIC, .sequence = sb->image.sequence++ };
 
@@ -737,7 +738,7 @@ static u64 calc_bitmap_blocks(struct superblock *sb, u64 chunks)
 	return (chunks + (1 << (chunkshift + 3)) - 1) >> (chunkshift + 3);
 }
 
-static void init_allocation(struct superblock *sb)
+static int init_allocation(struct superblock *sb)
 {
 	int meta_flag = (sb->metadev != sb->snapdev);
 
@@ -798,6 +799,7 @@ static void init_allocation(struct superblock *sb)
 		brelse_dirty(buffer);
 	}
 	printf("\n");
+	return 0;
 }
 
 static int free_chunk(struct superblock *sb, struct allocspace *as, chunk_t chunk)
@@ -806,7 +808,13 @@ static int free_chunk(struct superblock *sb, struct allocspace *as, chunk_t chun
 	u64 bitmap_block = chunk >> bitmap_shift;
 
 	trace(printf("free chunk %Lx\n", chunk););
-	struct buffer *buffer = snapread(sb, as->asi->bitmap_base + (bitmap_block << sb->metadata.sectors_per_alloc_bits));
+	struct buffer *buffer = snapread(sb, as->asi->bitmap_base + 
+			(bitmap_block << sb->metadata.sectors_per_alloc_bits));
+	
+	if (!buffer) {
+		warn("unable to free chunk "U64FMT, chunk);
+		return 0;
+	}
 	if (!get_bitmap_bit(buffer->data, chunk & bitmap_mask)) {
 		warn("chunk %Lx already free!", (long long)chunk);
 		brelse(buffer);
@@ -852,8 +860,10 @@ static chunk_t alloc_chunk_range(struct superblock *sb, struct allocspace *as, c
 	u64 length = (range + bit + 7) >> 3;
 
 	while (1) {
-		struct buffer *buffer = snapread(sb, 
-						 as->asi->bitmap_base + (blocknum << sb->metadata.sectors_per_alloc_bits));
+		struct buffer *buffer = 
+			snapread(sb, as->asi->bitmap_base + (blocknum << sb->metadata.sectors_per_alloc_bits));
+		if (!buffer)
+			return -1;
 		unsigned char c, *p = buffer->data + offset;
 		unsigned tail = sb->metadata.allocsize - offset, n = tail > length? length: tail;
 
@@ -890,7 +900,7 @@ static chunk_t alloc_chunk_range(struct superblock *sb, struct allocspace *as, c
 static int delete_snapshot(struct superblock *sb, unsigned tag);
 // !!! possible/practical to topsort away this forward ref?
 
-static const struct snapshot * find_snapshot_to_delete(const struct snapshot * snaplist, u32 snapshots)
+static const struct snapshot *find_snapshot_to_delete(const struct snapshot * snaplist, u32 snapshots)
 {
 	const struct snapshot * snap_cand = NULL;
 	int i, min_priority = 128; /* that's max prio plus one */
@@ -914,7 +924,7 @@ static chunk_t alloc_chunk(struct superblock *sb, struct allocspace *as)
 			set_sb_dirty(sb); // !!! optimize this away
 			return (found);
 		}
-		const struct snapshot * cand_delete = find_snapshot_to_delete(sb->image.snaplist, sb->image.snapshots);
+		const struct snapshot *cand_delete = find_snapshot_to_delete(sb->image.snaplist, sb->image.snapshots);
 		err_msg = "unable to find a snapshot candidate to remove. Failing I/O.";
 		if (!cand_delete)
 			goto unable_to_delete; /* no snapshot to delete */
@@ -956,7 +966,10 @@ static struct buffer *new_block(struct superblock *sb)
 static struct buffer *new_leaf(struct superblock *sb)
 {
 	trace(printf("New leaf\n"););
-	struct buffer *buffer = new_block(sb); // !!! possible null ptr deferenced
+	struct buffer *buffer = new_block(sb); 
+	if (!buffer)
+		return buffer;
+	memset(buffer->data, 0, sb->metadata.allocsize);
 	init_leaf(buffer2leaf(buffer), sb->metadata.allocsize);
 	set_buffer_dirty(buffer);
 	return buffer;
@@ -965,7 +978,10 @@ static struct buffer *new_leaf(struct superblock *sb)
 static struct buffer *new_node(struct superblock *sb)
 {
 	trace(printf("New node\n"););
-	struct buffer *buffer = new_block(sb); // !!! null ptr
+	struct buffer *buffer = new_block(sb); 
+	if (!buffer)
+		return buffer;
+	memset(buffer->data, 0, sb->metadata.allocsize);
 	struct enode *node = buffer2node(buffer);
 	node->count = 0;
 	set_buffer_dirty(buffer);
@@ -986,7 +1002,8 @@ static int traverse_tree_range(struct superblock *sb, chunk_t start, unsigned in
 	struct enode *node;
 
 	if (leaves != 0) {
-		leafbuf = probe(sb, start, path);
+		if (!(leafbuf = probe(sb, start, path)))
+			return -ENOMEM;
 		level = levels - 1;
 		nodebuf = path[level].buffer;
 		node = buffer2node(nodebuf);
@@ -1010,6 +1027,10 @@ static int traverse_tree_range(struct superblock *sb, chunk_t start, unsigned in
 		trace(printf("do %i leaf nodes, level = %i\n", node->count, level););
 		while (path[level].pnext < node->entries + node->count) {
 			leafbuf = snapread(sb, path[level].pnext++->sector);
+			if (!leafbuf) {
+				warn("unable to read leaf at sector 0x%llx of tree traversal", level? path[level - 1].pnext++->sector: sb->image.etree_root);
+				return -EIO;
+			}
 
 start:
 			trace(printf("process leaf %Lx\n", leafbuf->sector););
@@ -1109,6 +1130,8 @@ static void show_subtree(struct superblock *sb, struct enode *node, int levels, 
 	printf("%i nodes:\n", node->count);
 	for (i = 0; i < node->count; i++) {
 		struct buffer *buffer = snapread(sb, node->entries[i].sector);
+		if (!buffer)
+			return;
 		if (i)
 			printf("pivot = %Lx\n", (long long)node->entries[i].key);
 
@@ -1125,6 +1148,8 @@ static void show_subtree(struct superblock *sb, struct enode *node, int levels, 
 static void show_tree(struct superblock *sb)
 {
 	struct buffer *buffer = snapread(sb, sb->image.etree_root);
+	if (!buffer)
+		return;
 	show_subtree(sb, buffer2node(buffer), sb->image.etree_levels - 1, 0);
 	brelse(buffer);
 }
@@ -1161,10 +1186,19 @@ static void show_tree_range(struct superblock *sb, chunk_t start, unsigned int l
  * (Not done yet.)
  */
 
+static void brelse_path(struct etree_path *path, unsigned levels)
+{
+	unsigned i;
+	for (i = 0; i < levels; i++)
+		brelse(path[i].buffer);
+}
+
 static struct buffer *probe(struct superblock *sb, u64 chunk, struct etree_path *path)
 {
 	unsigned i, levels = sb->image.etree_levels;
 	struct buffer *nodebuf = snapread(sb, sb->image.etree_root);
+	if (!nodebuf)
+		return NULL;
 	struct enode *node = buffer2node(nodebuf);
 
 	for (i = 0; i < levels; i++) {
@@ -1177,17 +1211,14 @@ static struct buffer *probe(struct superblock *sb, u64 chunk, struct etree_path 
 		path[i].buffer = nodebuf;
 		path[i].pnext = pnext;
 		nodebuf = snapread(sb, (pnext - 1)->sector);
+		if (!nodebuf) {
+			brelse_path(path, i);		
+			return NULL;
+		}
 		node = (struct enode *)nodebuf->data;
 	}
 	assert(((struct eleaf *)nodebuf->data)->magic == 0x1eaf);
 	return nodebuf;
-}
-
-static void brelse_path(struct etree_path *path, unsigned levels)
-{
-	unsigned i;
-	for (i = 0; i < levels; i++)
-		brelse(path[i].buffer);
 }
 
 static void insert_child(struct enode *node, struct index_entry *p, sector_t child, u64 childkey)
@@ -1198,20 +1229,26 @@ static void insert_child(struct enode *node, struct index_entry *p, sector_t chi
 	node->count++;
 }
 
-static void add_exception_to_tree(struct superblock *sb, struct buffer *leafbuf, u64 target, u64 exception, int snapnum, struct etree_path path[], unsigned levels)
+/* returns 0 on sucess and -errno on failure */
+static int add_exception_to_tree(struct superblock *sb, struct buffer *leafbuf, u64 target, u64 exception, int snapnum, struct etree_path path[], unsigned levels)
 {
 	if (!add_exception_to_leaf(buffer2leaf(leafbuf), target, exception, snapnum, sb->snapmask)) {
 		brelse_dirty(leafbuf);
-		return;
+		return 0;
 	}
 
 	trace(warn("adding a new leaf to the tree"););
 	struct buffer *childbuf = new_leaf(sb);
+	if (!childbuf) 
+		return -ENOMEM; /* this is the right thing to do? */
+	
 	u64 childkey = split_leaf(buffer2leaf(leafbuf), buffer2leaf(childbuf));
 	sector_t childsector = childbuf->sector;
 
-	if (add_exception_to_leaf(target < childkey ? buffer2leaf(leafbuf): buffer2leaf(childbuf), target, exception, snapnum, sb->snapmask))
-		error("can't happen");
+	if (add_exception_to_leaf(target < childkey ? buffer2leaf(leafbuf): buffer2leaf(childbuf), target, exception, snapnum, sb->snapmask)) {
+		warn("new leaf has no space");
+		return -ENOMEM;
+	}
 	brelse_dirty(leafbuf);
 	brelse_dirty(childbuf);
 
@@ -1223,12 +1260,14 @@ static void add_exception_to_tree(struct superblock *sb, struct buffer *leafbuf,
 		if (parent->count < sb->metadata.alloc_per_node) {
 			insert_child(parent, pnext, childsector, childkey);
 			set_buffer_dirty(parentbuf);
-			return;
+			return 0;
 		}
 
 		unsigned half = parent->count / 2;
 		u64 newkey = parent->entries[half].key;
-		struct buffer *newbuf = new_node(sb); // !!! handle error
+		struct buffer *newbuf = new_node(sb); 
+		if (!newbuf) 
+			return -ENOMEM;
 		struct enode *newnode = buffer2node(newbuf);
 
 		newnode->count = parent->count - half;
@@ -1251,6 +1290,8 @@ static void add_exception_to_tree(struct superblock *sb, struct buffer *leafbuf,
 
 	trace(printf("add tree level\n"););
 	struct buffer *newrootbuf = new_node(sb); // !!! handle error
+	if (!newrootbuf)
+		return -ENOMEM;
 	struct enode *newroot = buffer2node(newrootbuf);
 
 	newroot->count = 2;
@@ -1261,6 +1302,7 @@ static void add_exception_to_tree(struct superblock *sb, struct buffer *leafbuf,
 	sb->image.etree_levels++;
 	set_sb_dirty(sb);
 	brelse_dirty(newrootbuf);
+	return 0;
 }
 #define chunk_highbit ((sizeof(chunk_t) * 8) - 1)
 
@@ -1321,7 +1363,11 @@ static chunk_t make_unique(struct superblock *sb, chunk_t chunk, int snapnum)
 	struct etree_path path[levels + 1];
 	struct buffer *leafbuf = probe(sb, chunk, path);
 	chunk_t exception = 0;
+	int error;
 	trace(warn("chunk %Lx, snapnum %i", chunk, snapnum););
+
+	if (!leafbuf) 
+		return -1;
 
 	if (snapnum == -1?
 		origin_chunk_unique(buffer2leaf(leafbuf), chunk, sb->snapmask):
@@ -1337,9 +1383,14 @@ static chunk_t make_unique(struct superblock *sb, chunk_t chunk, int snapnum)
 		brelse(leafbuf); // !!! maybe add_exception_to_tree should not do this
 		goto out;
 	}
-// if (snapnum == -1)
+
 	copyout(sb, exception? (exception | (1ULL << chunk_highbit)): chunk, newex);
-	add_exception_to_tree(sb, leafbuf, chunk, newex, snapnum, path, levels);
+	if ((error = add_exception_to_tree(sb, leafbuf, chunk, newex, snapnum, path, levels)) < 0) {
+		free_exception(sb, newex);
+		brelse(leafbuf); /* !!! redundant? */
+		warn("unable to add exception to tree: %s", strerror(-error));
+		newex = -1;
+	}
 	exception = newex;
 out:
 	brelse_path(path, levels);
@@ -1351,6 +1402,10 @@ static int test_unique(struct superblock *sb, chunk_t chunk, int snapnum, chunk_
 	unsigned levels = sb->image.etree_levels;
 	struct etree_path path[levels + 1];
 	struct buffer *leafbuf = probe(sb, chunk, path);
+	
+	if (!leafbuf)
+		return -1; /* not sure what to do here */
+	
 	trace(warn("chunk %Lx, snapnum %i", chunk, snapnum););
 	int result = snapnum == -1?
 		origin_chunk_unique(buffer2leaf(leafbuf), chunk, sb->snapmask):
@@ -1590,7 +1645,7 @@ static void brelse_free(struct superblock *sb, struct buffer *buffer)
 	evict_buffer(buffer);
 }
 
-static chunk_t delete_tree_range(struct superblock *sb, u64 snapmask, chunk_t resume)
+static int delete_tree_range(struct superblock *sb, u64 snapmask, chunk_t resume)
 {
 	int levels = sb->image.etree_levels, level = levels - 1;
 	struct etree_path path[levels], hold[levels];
@@ -1600,7 +1655,8 @@ static chunk_t delete_tree_range(struct superblock *sb, u64 snapmask, chunk_t re
 	for (i = 0; i < levels; i++) // can be initializer if not dynamic array (change it?)
 		hold[i] = (struct etree_path){ };
 
-	leafbuf = probe(sb, resume, path);
+	if (!(leafbuf = probe(sb, resume, path)))
+		return -ENOMEM;
 
 	while (1) { /* in-order leaf walk */
 		trace_off(show_leaf(buffer2leaf(leafbuf)););
@@ -1664,6 +1720,10 @@ keep_prev_node:
 
 			do { /* push back down to leaf level */
 				struct buffer *nodebuf = snapread(sb, path[level++].pnext++->sector);
+				if (!nodebuf) {
+					brelse_path(path, level - 1); /* anything else needs to be freed? */
+					return -ENOMEM;
+				}
 				path[level].buffer = nodebuf;
 				path[level].pnext = buffer2node(nodebuf)->entries;
 				trace_off(printf("push to level %i, %i nodes\n", level, path_node(path, level)->count););
@@ -1676,7 +1736,10 @@ keep_prev_node:
 			trace_off(warn("flushing dirty buffers to disk"););
 			commit_transaction(sb);
 		}
-		leafbuf = snapread(sb, path[level].pnext++->sector);
+		if (!(leafbuf = snapread(sb, path[level].pnext++->sector))) {
+			brelse_path(path, level);
+			return -ENOMEM;		
+		}
 	}
 }
 
@@ -1684,6 +1747,7 @@ static int delete_snapshot(struct superblock *sb, unsigned tag)
 {
 	struct snapshot *snapshot;
 	unsigned i, bit;
+	int error;
 
 	for (i = 0; i < sb->image.snapshots; i++)
 		if (sb->image.snaplist[i].tag == tag)
@@ -1696,10 +1760,9 @@ delete:
 	trace_on(warn("Delete snaptag %u (snapnum %i)", tag, bit););
 	memmove(snapshot, snapshot + 1, (char *)(sb->image.snaplist + --sb->image.snapshots) - (char *)snapshot);
 	sb->snapmask &= ~(1ULL << bit);
-	delete_tree_range(sb, 1ULL << bit, 0); // start from the first chunk
-	// delete_snapshots_from_tree(sb, 1ULL << bit);
+	if ((error = delete_tree_range(sb, 1ULL << bit, 0)) < 0)
+		warn("unable to delete snapshot %u: %s", tag, strerror(-error));
 	set_sb_dirty(sb);
-
 	return 0;
 }
 
@@ -2047,9 +2110,12 @@ static void setup_alloc_sb(struct superblock *sb, u32 bs_bits, u32 cs_bits)
 
 static void setup_sb(struct superblock *sb, u32 bs_bits, u32 cs_bits)
 {
+	int err;
+
 	setup_alloc_sb(sb, bs_bits, cs_bits);
-	if (!(sb->copybuf = malloc_aligned(sb->copybuf_size = (32 * sb->snapdata.allocsize), 4096))) 
-	    error("unable to allocate buffer for copyout data");
+	sb->copybuf_size = 32 * sb->snapdata.allocsize;
+	if ((err = posix_memalign((void **)&(sb->copybuf), 4096, sb->copybuf_size)))
+	    error("unable to allocate buffer for copyout data: %s", strerror(err));
 	sb->snapmask = 0;
 	sb->flags = 0;
 
@@ -2099,38 +2165,47 @@ int init_snapstore(struct superblock *sb, u32 js_bytes, u32 bs_bits, u32 cs_bits
 {
 	int i, error;
 	
-
 	sb->image = (struct disksuper){ .magic = SB_MAGIC };
 	setup_sb(sb, bs_bits, cs_bits);
 	sb->image.etree_levels = 1;
 	sb->image.create_time = time(NULL);
 
 	u64 size;
-	if ((error = fd_size(sb->snapdev, &size)) < 0)
-		error("Error %i: %s determining snapshot store size", error, strerror(-error));
+	if ((error = fd_size(sb->snapdev, &size)) < 0) {
+		warn("Error %i: %s determining snapshot store size", error, strerror(-error));
+		return error;
+	}
 	sb->snapdata.asi->chunks = size >> sb->snapdata.asi->allocsize_bits;
-	if ((error = fd_size(sb->metadev, &size)) < 0)
-		error("Error %i: %s determining metadata store size", error, strerror(-error));
+	if ((error = fd_size(sb->metadev, &size)) < 0) {
+		warn("Error %i: %s determining metadata store size", error, strerror(-error));
+		return error;
+	}
 	sb->metadata.asi->chunks = size >> sb->metadata.asi->allocsize_bits;
-	if ((error = fd_size(sb->orgdev, &size)) < 0)
-		error("Error %i: %s determining origin volume size", errno, strerror(-errno));
+	if ((error = fd_size(sb->orgdev, &size)) < 0) {
+		warn("Error %i: %s determining origin volume size", errno, strerror(-errno));
+		return error;
+	}
 	sb->image.orgsectors = size >> sb->snapdata.asi->allocsize_bits;
 	sb->image.orgsectors <<= sb->snapdata.asi->allocsize_bits;
 	sb->image.orgsectors >>= SECTOR_BITS;
 	sb->image.orgoffset  = 0; //!!! FIXME: shouldn't always assume offset starts at 0
 
-	printf("cs_bits %u\n", sb->snapdata.asi->allocsize_bits);
+	trace_on(printf("cs_bits %u\n", sb->snapdata.asi->allocsize_bits););
 	u32 chunk_size = 1 << sb->snapdata.asi->allocsize_bits, js_chunks = DIVROUND(js_bytes, chunk_size);
 	trace_on(printf("chunk_size is %u & js_chunks is %u\n", chunk_size, js_chunks););
 
 	sb->image.journal_size = js_chunks;
 	sb->image.journal_next = 0;
 	sb->image.sequence = sb->image.journal_size;
-	init_allocation(sb);
+	if ((error = init_allocation(sb)) < 0) {
+		warn("Error: Unable to initialize allocation information");
+		return error;
+	}
 	set_sb_dirty(sb);
 
 	for (i = 0; i < sb->image.journal_size; i++) {
 		struct buffer *buffer = jgetblk(sb, i);
+		memset(buffer->data, 0, sb->metadata.allocsize);
 		struct commit_block *commit = (struct commit_block *)buffer->data;
 		*commit = (struct commit_block){ .magic = JMAGIC, .sequence = i };
 #ifdef TEST_JOURNAL
@@ -2217,7 +2292,9 @@ int init_snapstore(struct superblock *sb, u32 js_bytes, u32 bs_bits, u32 cs_bits
 	show_tree(sb);
 #endif
 	save_state(sb);
-
+	free(sb->copybuf);
+	free(sb->snaplocks);
+	
 #ifdef INITDEBUG5
 	printf("Let's try to load the superblock again\n");
 	load_sb(sb);
