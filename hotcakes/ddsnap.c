@@ -2029,8 +2029,12 @@ int main(int argc, char *argv[])
 			return 1;
 		}
 
+		int error = 0;
 		struct superblock *sb;
-		posix_memalign((void **)&sb, 1 << SECTOR_BITS, SB_SIZE);
+		if ((error = posix_memalign((void **)&sb, 1 << SECTOR_BITS, SB_SIZE))) {
+			warn("Error: %s unable to allocate memory for superblock", strerror(error));
+			return 1;
+		}
 		memset(sb, 0, SB_SIZE);
 		
 		init_buffers();
@@ -2047,8 +2051,10 @@ int main(int argc, char *argv[])
 
 		if (!yes) {
 			struct superblock *temp_sb;
-			posix_memalign((void **)&temp_sb, 1 << SECTOR_BITS, SB_SIZE);
-			
+			if ((error = posix_memalign((void **)&temp_sb, 1 << SECTOR_BITS, SB_SIZE))) {
+				warn("Error: %s unable to allocate temporary superblock", strerror(error));
+				return 1;
+			}
 			if (diskread(sb->metadev, temp_sb, SB_SIZE, SB_SECTOR << SECTOR_BITS) < 0)
 			warn("Unable to read superblock: %s", strerror(errno));
 
@@ -2086,7 +2092,8 @@ int main(int argc, char *argv[])
 		trace_off(printf("js_bytes is %u, bs_bits is %u, and cs_bits is %u\n", js_bytes, bs_bits, cs_bits););
 
 # ifdef MKDDSNAP_TEST
-		init_snapstore(sb, js_bytes, bs_bits, cs_bits);
+		if (init_snapstore(sb, js_bytes, bs_bits, cs_bits) < 0)
+			return 1;
 		create_snapshot(sb, 0);
 		
 		int i;
@@ -2104,7 +2111,10 @@ int main(int argc, char *argv[])
 		return 0;
 # endif /* end of test code */
 		
-		return init_snapstore(sb, js_bytes, bs_bits, cs_bits);
+		if (init_snapstore(sb, js_bytes, bs_bits, cs_bits) < 0) 
+			warn("Snapshot storage initiailization failed");
+		free(sb);
+		return 0;
 	}
 	if (strcmp(command, "agent") == 0) {
 		char const *sockname;
@@ -2237,9 +2247,13 @@ int main(int argc, char *argv[])
 			poptFreeContext(serverCon);
 			return 1;
 		}
-		
+	
+		int error = 0;	
 		struct superblock *sb;
-		posix_memalign((void **)&sb, 1 << SECTOR_BITS, SB_SIZE);
+		if ((error = posix_memalign((void **)&sb, 1 << SECTOR_BITS, SB_SIZE))) {
+			warn("Error: %s unable to allocate memory for superblock", strerror(error));
+			return 1;
+		}
 		memset(sb, 0, SB_SIZE);
 
 		init_buffers();

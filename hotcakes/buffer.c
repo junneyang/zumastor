@@ -191,10 +191,17 @@ alloc_buffer:
 		buftrace(warn("allocating a new buffer"););
 		if (buffer_count == MAX_BUFFERS) {
 			warn("Number of dirty buffers: %d", dirty_buffer_count);
-			error("Out of Memory"); /* need to handle this properly */
+			return NULL;
 		}
 		buffer = (struct buffer *)malloc(sizeof(struct buffer));
-		posix_memalign((void **)&(buffer->data), size, size); // what if malloc fails?
+		if (!buffer)
+			return NULL;
+		int error = 0;
+		if ((error = posix_memalign((void **)&(buffer->data), size, size))) {
+			warn("Error: %s unable to allocate space for buffer data", strerror(error));
+			free(buffer);
+			return NULL;
+		}
 	}
  	
 	buffer->count = 1;
@@ -219,7 +226,8 @@ struct buffer *getblk(unsigned fd, sector_t sector, unsigned size)
 			list_add_tail(&buffer->list, &lru_buffers);	
 			return buffer;
 		}
-	buffer = new_buffer(sector, size);
+	if (!(buffer = new_buffer(sector, size)))
+		return NULL;
 	buffer->fd = fd;
 	buffer->hashlist = *bucket;
 	*bucket = buffer;
@@ -228,14 +236,21 @@ struct buffer *getblk(unsigned fd, sector_t sector, unsigned size)
 
 struct buffer *bread(unsigned fd, sector_t sector, unsigned size)
 {
-	struct buffer *buffer = getblk(fd, sector, size);
-
+	int err = 0;
+	struct buffer *buffer; 
+       
+	if (!(buffer = getblk(fd, sector, size))) 
+		return NULL;
 	if (buffer_uptodate(buffer) || buffer_dirty(buffer))
 		return buffer;
-	read_buffer(buffer);
-	if (!buffer_uptodate(buffer)) {
+	if ((err = read_buffer(buffer))) {
+		warn("error: %s unable to read sector %llx", strerror(-err), sector);
 		brelse(buffer);
-		error("bad read");
+		return NULL;
+	}
+	if (!buffer_uptodate(buffer)) { // redundant with the read_buffer check?
+		brelse(buffer);
+		warn("bad read");
 		return NULL;
 	}
 	return buffer;
