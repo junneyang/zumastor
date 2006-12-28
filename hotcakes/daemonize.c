@@ -60,19 +60,6 @@ pid_t daemonize(char const *logfile, char const *pidfile)
 		 * pathnames may be relative and we open them later,
 		 * so we don't do that for now */
 
-		if (pidfile) {
-			FILE *fp;
-
-			if (!(fp = fopen(pidfile, "w"))) {
-				warn("could not open pid file \"%s\" for writing: %s", pidfile, strerror(errno));
-			} else {
-				if (fprintf(fp, "%lu\n", (unsigned long)pid) < 0)
-					warn("could not write pid file \"%s\": %s", pidfile, strerror(errno));
-				if (fclose(fp) < 0)
-					warn("error while closing pid file \"%s\" after writing: %s", pidfile, strerror(errno));
-			}
-		}
-
 		if (logfile)
 		{
 			time_t now;
@@ -94,6 +81,19 @@ pid_t daemonize(char const *logfile, char const *pidfile)
 
 		error("could not fork: %s", strerror(err));
 		return -err;
+	}
+
+	if (pidfile) {
+		FILE *fp;
+
+		if (!(fp = fopen(pidfile, "w"))) {
+			warn("could not open pid file \"%s\" for writing: %s", pidfile, strerror(errno));
+		} else {
+			if (fprintf(fp, "%lu\n", (unsigned long)pid) < 0)
+				warn("could not write pid file \"%s\": %s", pidfile, strerror(errno));
+			if (fclose(fp) < 0)
+				warn("error while closing pid file \"%s\" after writing: %s", pidfile, strerror(errno));
+		}
 	}
 
 	return pid;
