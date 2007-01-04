@@ -27,7 +27,7 @@ function dmsetup {
 
 function ddsnap {
 	case $1 in
-	create|delete|server|agent)
+	initialize|create|delete|server|agent)
 		echo ddsnap "$@"
 		;;
 	status)
@@ -46,6 +46,10 @@ function ddsnap {
 			;;
 		esac
 		;;
+	usecount)
+		echo test
+		echo New usecount: 0
+		;;
 	*)
 		return 1
 		;;
@@ -62,6 +66,16 @@ function mount {
 }
 
 function umount {
+	case $1 in
+	*)
+		echo umount $@
+		return 0
+		;;
+	esac
+}
+
+
+function dd {
 	case $1 in
 	*)
 		echo umount $@
