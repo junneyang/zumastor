@@ -595,6 +595,21 @@ gen_cleanup:
 	return err;
 }
 
+static char *malloc_snapshot_name(const char *devstem, u32 id) 
+{
+	char *snapshot_name = NULL;
+	int length = strlen(devstem) + 32; // !!! why 32?
+
+	if (!(snapshot_name = malloc(length))) {
+		warn("unable to allocate memory snapshot name");
+		return NULL;
+	}
+	
+	snprintf(buffer, length, "%s(%u)", devstem, id);
+
+	return buffer;
+}
+
 static int generate_delta(u32 mode, int level, struct change_list *cl, int deltafile, char const *devstem)
 {
 	/* Delta header set-up */
@@ -612,19 +627,17 @@ static int generate_delta(u32 mode, int level, struct change_list *cl, int delta
 
 	int err;
 
-	if (!(dev1name = malloc(strlen(devstem) + 32))) {
-		warn("unable to allocate memory for dev1name");
+	if (!(dev1name = malloc_snapshot_name(devstem, dh.src_snap))) {
+		warn("unable to allocate memory for dev2name");
 		err = -ENOMEM;
 		goto delta_cleanup;
 	}
-	sprintf(dev1name, "%s%u", devstem, dh.src_snap);
 
-	if (!(dev2name = malloc(strlen(devstem) + 32))) {
+	if (!(dev2name = malloc_snapshot_name(devstem, dh.tgt_snap))) {
 		warn("unable to allocate memory for dev2name");
 		err = -ENOMEM;
 		goto delta_free1_cleanup;
 	}
-	sprintf(dev2name, "%s%u", devstem, dh.tgt_snap);
 
 	trace_on(fprintf(stderr, "writing delta file with chunk_num="U64FMT" chunk_size=%u mode=%u\n", dh.chunk_num, dh.chunk_size, dh.mode););
 	if ((err = fdwrite(deltafile, &dh, sizeof(dh))) < 0)
@@ -814,19 +827,18 @@ static int ddsnap_send_delta(int serv_fd, u32 src_snap, u32 tgt_snap, char const
 
 	char *dev1name;
 
-	if (!(dev1name = malloc(strlen(devstem) + 32))) {
+	if (!(dev1name = malloc_snapshot_name(devstem, src_snap))) {
 		warn("unable to allocate memory for dev1name");
 		return 1;
 	}
-	sprintf(dev1name, "%s%u", devstem, src_snap);
 
 	char *dev2name;
 
-	if (!(dev2name = malloc(strlen(devstem) + 32))) {
+	if (!(dev2name = malloc_snapshot_name(devstem, tgt_snap))) 
 		warn("unable to allocate memory for dev2name");
+		free(dev1name); 
 		return 1;
 	}
-	sprintf(dev2name, "%s%u", devstem, tgt_snap);
 
 	if (generate_delta_extents(mode, level, cl, ds_fd, dev1name, dev2name, TRUE) < 0) {
 		warn("could not send delta downstream for snapshot devices %s and %s", dev1name, dev2name);
@@ -1171,11 +1183,10 @@ static int apply_delta(int deltafile, char const *devstem)
 
 	char *dev1name;
 
-	if (!(dev1name = malloc(strlen(devstem) + 32))) {
+	if (!(dev1name = malloc_snapshot_name(devstem, dh.src_snap))) {
 		warn("unable to allocate memory for dev1name");
 		return -ENOMEM;
 	}
-	sprintf(dev1name, "%s%u", devstem, dh.src_snap);
 
 	int err;
 
@@ -1533,12 +1544,11 @@ static int ddsnap_delta_server(int lsock, char const *devstem)
 
 			char *snapdev;
 
-			if (!(snapdev = malloc(strlen(devstem)+32+1))) {
+			if (!(snapdev = malloc_snapshot_name(devstem, body.snap))) {
 				snprintf(err_msg, MAX_ERRMSG_SIZE, "unable to allocate device name");
 				err_msg[MAX_ERRMSG_SIZE-1] = '\0';
 				goto end_connection;
 			}
-			sprintf(snapdev, "%s%u", devstem, body.snap);
 
 			/* FIXME: verify snapshot exists */
 
