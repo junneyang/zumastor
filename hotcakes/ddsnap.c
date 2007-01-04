@@ -605,9 +605,9 @@ static char *malloc_snapshot_name(const char *devstem, u32 id)
 		return NULL;
 	}
 	
-	snprintf(buffer, length, "%s(%u)", devstem, id);
+	snprintf(snapshot_name, length, "%s(%u)", devstem, id);
 
-	return buffer;
+	return snapshot_name;
 }
 
 static int generate_delta(u32 mode, int level, struct change_list *cl, int deltafile, char const *devstem)
@@ -826,15 +826,13 @@ static int ddsnap_send_delta(int serv_fd, u32 src_snap, u32 tgt_snap, char const
 	/* stream delta */
 
 	char *dev1name;
-
 	if (!(dev1name = malloc_snapshot_name(devstem, src_snap))) {
 		warn("unable to allocate memory for dev1name");
 		return 1;
 	}
 
 	char *dev2name;
-
-	if (!(dev2name = malloc_snapshot_name(devstem, tgt_snap))) 
+	if (!(dev2name = malloc_snapshot_name(devstem, tgt_snap))) {
 		warn("unable to allocate memory for dev2name");
 		free(dev1name); 
 		return 1;
