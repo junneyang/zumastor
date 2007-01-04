@@ -1,3 +1,4 @@
+#!/bin/bash
 # Zumastor Linux Storage Server
 # Copyright (c) 2006 Google Inc.
 # Author: Daniel Phillips <phillips@google.com>
@@ -6,12 +7,16 @@
 declare -r VOLUMES=/var/lib/zumastor/volumes
 declare -r RUNPATH=/var/run/zumastor
 declare -r LOGS=/var/log/zumastor
+declare -r RUNFILE=$RUNPATH/running
+declare -r CONFIG=/etc/zumastor
 
 # these can be modified here
 # may read from a config file in the future
 declare -r AGENTS=$RUNPATH/agents
 declare -r SERVERS=$RUNPATH/servers
 declare -r MOUNTS=$RUNPATH/mount
+declare -r CRONS=$RUNPATH/cron
+declare -r DEFAULT_PORT=$(cat $CONFIG/defaultport)
 
 declare -ar KINDS=(hourly daily weekly monthly)
 
@@ -155,6 +160,9 @@ function stop_volume {
 	rm $agent $server
 }
 
+# create_device <vol> <id>
+# Given a volume <vol> and snapshot id <id>, create a new snapshot and device
+# mapper entry for snapshot device.  If id -1 is provided, skip ddsnap create
 function create_device {
 	[ $# -eq 2 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
 	local -r vol=$1
@@ -166,11 +174,45 @@ function create_device {
 	local -r sdev=$info/device/snapstore
 	local -r odev=$info/device/origin
 	local -r name=$(volume_name $vol $id)
-	local -r mount=${MOUNTS}/$name
+
+	# FIXME TODO: input checking
+
+	# only create snapshot for non-origin
+	if [[ $id -ne -1 ]]; then
+		ddsnap create $server $id || return 1
+
+		usecount_increment $vol $id || {
+			echo setting usecount failed, removing snapshot and aborting...
+			ddsnap delete $server $id
+			return 1
+		}
+	fi
 
 	echo 0 $size ddsnap $sdev $odev $agent $id | dmsetup create $name || return 1
+}
+
+# mount_device <vol> <id>
+# Given a volume <vol> and snapshot id <id>, mount the device
+function mount_device {
+	[ $# -eq 2 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
+	local -r vol=$1
+	local -r id=$2
+	local -r name=$(volume_name $vol $id)
+	local -r mount=${MOUNTS}/$name
+
 	test -d $mount || mkdir $mount || return 1
 	mount -o ro /dev/mapper/$name $mount || { echo "unable to mount $mount"; return 1; }
+}
+
+function umount_device {
+	[ $# -eq 2 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
+	local -r vol=$1
+	local -r id=$2
+	local -r name=$(volume_name $vol $id)
+	local -r mount=${MOUNTS}/$name
+
+	umount $mount
+	rmdir $mount
 }
 
 function remove_device {
@@ -180,8 +222,31 @@ function remove_device {
 	local -r name=$(volume_name $vol $id)
 	local -r mount=${MOUNTS}/$name
 
-	umount $mount
-	rmdir $mount
 	dmsetup remove $name || return 1
 }
 
+# get_manged_snapshots <volume name>
+#   Outputs a list of snapshot numbers manged by zumastor for the given volume
+#   This is useful to iterate over rather than (ddsnap status --list)
+#   Called from zumastor init script.
+function get_managed_snapshots {
+	[ $# -eq 1 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
+	local -r vol=$1
+	local kind
+	local snappath
+	local snapshots
+
+	# !!! FIXME TODO: add hold/send
+	for kind in ${KINDS[@]}; do
+		snappath=$VOLUMES/$vol/master/snapshots/$kind
+		if [ -e $snappath ]; then
+			cat $snappath # !!! find a better way
+		fi
+	done
+
+	for snappath in $VOLUMES/$vol/targets/*/{hold,send}; do
+		cat $snappath # !!! find a better way
+	done
+
+	echo 
+}
