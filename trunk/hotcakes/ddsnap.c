@@ -1867,6 +1867,44 @@ static void cdUsage(poptContext optCon, int exitcode, char const *error, char co
 	exit(exitcode);
 }
 
+int same_BLK_device(char const *dev1,char const *dev2) {
+	struct stat dev1buf, dev2buf;
+	
+	if (stat(dev1, &dev1buf) < 0) { 
+		error("stat error on %s", dev1);
+		return -1;
+	}
+
+	if (stat(dev2, &dev2buf) < 0) {
+		error("stat error on %s", dev2);				
+		return -1;
+	}
+	
+	if (!S_ISBLK(dev1buf.st_mode)) {
+		fprintf(stderr, "the device %s must be a block device\n", dev1);
+		return -1;
+	}
+
+	if (!S_ISBLK(dev2buf.st_mode)) {
+		fprintf(stderr, "the device %s must be a block device\n", dev2);
+		return -1;			
+	}
+	
+	int dev1_rmajor = major(dev1buf.st_rdev);
+	int dev1_rminor = minor(dev1buf.st_rdev);
+	int dev2_rmajor = major(dev2buf.st_rdev);
+	int dev2_rminor = minor(dev2buf.st_rdev);
+	
+	trace_off(printf("dev1_rmajor is %d, dev1_rminor is %d, dev2_rmajor is %d, dev2_rminor is %d.\n", dev1_rmajor, dev1_rminor, dev2_rmajor, dev2_rminor););
+
+	if (dev1_rmajor == dev2_rmajor && dev1_rminor == dev2_rminor) {
+		fprintf(stderr, "the devices cannot be the same: %s, %s\n", dev1, dev2);
+		return -2;
+	}
+
+	return 0;
+}
+
 int main(int argc, char *argv[])
 {
 	char const *command;
@@ -1875,12 +1913,13 @@ int main(int argc, char *argv[])
 		POPT_TABLEEND
 	};
 
-	char *js_str = NULL, *bs_str = NULL;
+	char *js_str = NULL, *bs_str = NULL, *cs_str = NULL;
 	int yes = FALSE;
 	struct poptOption initOptions[] = {
 		{ "yes", 'y', POPT_ARG_NONE, &yes, 0, "Answer yes to all prompts", NULL},
 		{ "journal_size", 'j', POPT_ARG_STRING, &js_str, 0, "User specified journal size, i.e. 400k (default: 100 * chunk_size)", "desired journal size" },
 		{ "block_size", 'b', POPT_ARG_STRING, &bs_str, 0, "User specified block size, has to be a power of two, i.e. 8k (default: 4k)", "desired block size" },
+		{ "chunk_size", 'c', POPT_ARG_STRING, &cs_str, 0, "User specified chunk size, has to be a power of two, i.e. 8k (default: 4k)", "desired chunk size" },
 	     POPT_TABLEEND
 	};
 
@@ -2029,6 +2068,36 @@ int main(int argc, char *argv[])
 		}
 		
 		metadev = poptGetArg(initCon); /* ok if NULL */
+
+		trace_off(printf("snapdev is %s, origdev is %s, metadev is %s.\n", snapdev, origdev, metadev););
+
+		if (same_BLK_device(snapdev, origdev) < 0) {
+			poptPrintUsage(initCon, stderr, 0);
+			poptFreeContext(initCon);
+			return 1;			
+		}
+
+		if (bs_str && cs_str && (strcmp(bs_str, cs_str) != 0)) {
+
+			if (!metadev) {
+				fprintf(stderr, "%s: metadata device must be specified\n", command);
+				poptPrintUsage(initCon, stderr, 0);
+				poptFreeContext(initCon);
+				return 1;
+			}
+
+			if (same_BLK_device(snapdev, metadev) < 0) {
+				poptPrintUsage(initCon, stderr, 0);
+				poptFreeContext(initCon);
+				return 1;			
+			}			
+
+			if (same_BLK_device(origdev, metadev) < 0) {
+				poptPrintUsage(initCon, stderr, 0);
+				poptFreeContext(initCon);
+				return 1;			
+			}
+		}
 		
 		if (poptPeekArg(initCon) != NULL) {
 			fprintf(stderr, "%s: too many arguments\n", command);
@@ -2054,9 +2123,10 @@ int main(int argc, char *argv[])
 			error("Could not open origin volume %s: %s", origdev, strerror(errno));
 		
 		sb->metadev = sb->snapdev;
+
 		if (metadev && (sb->metadev = open(metadev, O_RDWR)) == -1) /* can I do an O_DIRECT on the ramdevice? */
 			error("Could not open meta volume %s: %s", metadev, strerror(errno));
-
+		
 		if (!yes) {
 			struct superblock *temp_sb;
 			if ((error = posix_memalign((void **)&temp_sb, 1 << SECTOR_BITS, SB_SIZE))) {
@@ -2078,7 +2148,7 @@ int main(int argc, char *argv[])
 
 		poptFreeContext(initCon);
 		
-		trace_off(printf("js_bytes was %u, bs_bits was %u and cs_bits was %u\n", js_bytes, bs_bits, cs_bits););
+		trace_on(printf("js_bytes was %u, bs_bits was %u and cs_bits was %u\n", js_bytes, bs_bits, cs_bits););
 
 		if (bs_str != NULL) {
 			bs_bits = strtobits(bs_str);
@@ -2087,9 +2157,23 @@ int main(int argc, char *argv[])
 				fprintf(stderr, "Invalid block size input. Try 64k\n");
 				exit(1);
 			}
+			if (!cs_str)
+				cs_bits = bs_bits;
+		}
+
+		if (cs_str != NULL) {
+			cs_bits = strtobits(cs_str);
+			if (cs_bits == INPUT_ERROR) {
+				poptPrintUsage(initCon, stderr, 0);
+				fprintf(stderr, "Invalid chunk size input. Try 64k\n");
+				exit(1);
+			}
+			if (!bs_str)
+				bs_bits = cs_bits;
 		}
 
 		if (js_str != NULL) {
+			js_bytes = strtobytes(js_str);
 			if (js_bytes == INPUT_ERROR) {
 				poptPrintUsage(initCon, stderr, 0);
 				fprintf(stderr, "Invalid journal size input. Try 400k\n");
@@ -2311,14 +2395,11 @@ int main(int argc, char *argv[])
 
 		u32 snaptag;
 
-		if (strcmp(argv[3], "-1") == 0)
-			snaptag = ~0UL; /* FIXME: we need a better way to represent the origin */
-		else 
-			if (parse_snaptag(argv[3], &snaptag) < 0) {
-				fprintf(stderr, "%s: invalid snapshot %s\n", argv[0], argv[3]);
-				return 1;
-			}
-
+		if ((parse_snaptag(argv[3], &snaptag) < 0) || (atol(argv[3]) < 0)) {
+			fprintf(stderr, "%s: invalid snapshot %s\n", argv[0], argv[3]);
+			return 1;
+		}
+		
 		int sock = create_socket(argv[2]);
 
 		int ret = create_snapshot(sock, snaptag);
