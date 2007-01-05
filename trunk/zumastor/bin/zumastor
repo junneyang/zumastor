@@ -359,16 +359,11 @@ function init_define_volume {
 	create_device $vol -1 || { echo create failed;return 1; }
 	# do not mount
 
-	echo Zeroing out origin device
-	echo Zeroing out origin device >>$log
-	echo This may take a while depending on the size of the device...
-
+	echo "`date`: zeroing out origin device" >>$log
+	echo -n Zeroing out origin device. This may take a while...
 	dd if=/dev/zero of=/dev/mapper/$vol bs=1M >> $log 2>&1
-
-	create_device $vol 0 >> $log || return 1
-
-	echo "Successfully created and initialized volume '$vol'."
-	echo "You can now create a filesystem on /dev/mapper/$vol"
+	echo done!
+	echo "`date`: zeroing out origin device completed" >>$log
 }
 
 function define_volume {
@@ -378,9 +373,6 @@ function define_volume {
 	local -r sdev=$3
 	local -r path=$VOLUMES/$vol
 	local -r sock=${SERVERS}/$vol
-
-	read -p "noinit: you must have initialized the device manually, continue? [y/N] " -t 30 \
-		|| { echo "timeout."; return 1; }
 
 	mkdir $path || return 1
 	mkdir $path/device || return 1
@@ -615,7 +607,7 @@ function run_command {
 	define)
 		case $2 in
 		volume)
-			[ $# -eq 5 ] || [ $# -eq 6 ] || { echo "usage: $0 define volume <vol> <origin> <snapstore> [noinit]"; exit 2; }
+			[ $# -eq 5 ] || [ $# -eq 6 ] || { echo "usage: $0 define volume <vol> <origin> <snapstore> [noinit|nosnap]"; exit 2; }
 			local -r vol=$3
 			local -r origin=$4
 			local -r snapstore=$5
@@ -626,9 +618,26 @@ function run_command {
 			verify_valid_device $snapstore || { echo "$0: invalid device '$snapstore'"; exit 1; }
 
 			if [[ $noinit = "noinit" ]]; then
-				define_volume $vol $origin $snapstore
+				read -p "noinit: you must have initialized the device manually, continue? [y/N] " -t 30 \
+					|| { echo "timeout."; exit 1; }
+
+				[[ $REPLY = "y" ]] || { echo "aborted."; exit 1; }
+				
+				define_volume $vol $origin $snapstore || { echo "$0: define volume '$vol' failed"; exit 1; }
 			else
-				init_define_volume $vol $origin $snapstore
+				init_define_volume $vol $origin $snapstore || { echo "$0: init volume '$vol' failed"; exit 1; }
+
+				echo "Successfully created and initialized volume '$vol'."
+
+				if [[ $noinit = "nosnap" ]]; then
+					echo "nosnap: no initial snapshot taken!"
+					echo "This volume should only be used as a replication target, not source"
+					exit 0
+				fi
+
+				create_device $vol 0 || { echo "$0: error with initial snapshot"; exit 1; }
+
+				echo "You can now create a filesystem on /dev/mapper/$vol"
 			fi
 
 			exit $? ;;

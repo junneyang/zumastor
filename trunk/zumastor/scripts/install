@@ -17,3 +17,5 @@ cp -a etc/cron.daily/zumastor /etc/cron.daily/
 cp -a etc/cron.weekly/zumastor /etc/cron.weekly/
 cp etc/init.d/zumastor /etc/init.d/
 cp -a etc/zumastor /etc/
+
+chmod 755 /etc/cron.{hourly,daily,weekly}/zumastor /etc/init.d/zumastor
