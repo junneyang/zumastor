@@ -165,7 +165,7 @@ static int create_socket(char const *sockname)
 
 static int parse_snaptag(char const *snapstr, u32 *snaptag)
 {
-	if (snapstr[0] == '\0')
+	if (snapstr[0] == '\0' || snapstr[0] == '-')
 		return -1;
 
 	unsigned long num;
@@ -2395,7 +2395,7 @@ int main(int argc, char *argv[])
 
 		u32 snaptag;
 
-		if ((parse_snaptag(argv[3], &snaptag) < 0) || (atol(argv[3]) < 0)) {
+		if (parse_snaptag(argv[3], &snaptag) < 0) {
 			fprintf(stderr, "%s: invalid snapshot %s\n", argv[0], argv[3]);
 			return 1;
 		}
@@ -2414,13 +2414,10 @@ int main(int argc, char *argv[])
 
 		u32 snaptag;
 
-		if (strcmp(argv[3], "-1") == 0)
-			snaptag = ~0UL; /* FIXME: we need a better way to represent the origin */
-		else 
-			if (parse_snaptag(argv[3], &snaptag) < 0) {
-				fprintf(stderr, "%s: invalid snapshot %s\n", argv[0], argv[3]);
-				return 1;
-			}
+		if (parse_snaptag(argv[3], &snaptag) < 0) {
+			fprintf(stderr, "%s: invalid snapshot %s\n", argv[0], argv[3]);
+			return 1;
+		}
 
 		int sock = create_socket(argv[2]);
 
