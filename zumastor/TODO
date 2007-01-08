@@ -1,16 +1,9 @@
 To do:
 
- - add use counts
-
- - Remote operations
-    - ssh to start downstream listen
-       - confirm downstream holds expected snapshot
-    - ssh to set new downstream snapshot
-    - downstream node kicks upstream on zumastor start via ssh
-
  - graceful handling of nearly full snapshot stores
-
  - snapshot and replicate commands should wait on ok/err message?
+ - track filesystem information (type, mount options)
+ - freeze filesytem before taking snapshots
 
 Done:
 
@@ -25,3 +18,11 @@ Done:
  - start ddsnap daemons
  - create/delete devmapper device on snapshot create/delete
  - mount/unmount device on snapshot create/delete
+ - add use counts
+
+ - Remote operations
+    - ssh to start downstream listen
+       - confirm downstream holds expected snapshot
+    - ssh to set new downstream snapshot
+    - downstream node kicks upstream on zumastor start via ssh
+
