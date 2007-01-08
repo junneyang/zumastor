@@ -192,7 +192,7 @@ function replicate_snapshot {
 	local -r vol=$1
 	local -r host=$2
 	local -r snap=$3
-	local -r target_dir=$VOLUMES/$vol/target/$host
+	local -r target_dir=$VOLUMES/$vol/targets/$host
 	local -r send_file=$target_dir/send
 	local -r hold_file=$target_dir/hold
 	local -r server=$SERVERS/$vol
@@ -209,20 +209,18 @@ function replicate_snapshot {
 		echo "$0: $send_file shouldn't exist"
 		# !!! FIXME handle some other way - abort
 		#replicate_wait $vol $host || echo "$0: error waiting"
-		return 0
+		return 1
 	fi
 
-	echo $snap > $send_file || echo "$0: error writing snapshot id '$snap' to '$send_file'"
-	old_snap=`cat $hold_file`
+	echo $snap > $send_file || { echo "$0: error writing snapshot id '$snap' to '$send_file'"; return 1; }
 
-	rem_snap=$(run_remote $hostname "zumastor receive $vol $port start")
+	old_snap=$(cat $hold_file) || { echo "initial replication"; old_snap=0; }
 
-	if [[ $? -ne 0 ]]; then
-		echo "$0: starting remote snapshot receive failed: $?, aborting"
-		return 0
-	else
-		echo "remote snapshot id $rem_snap listen started"
-	fi
+	port=$(cat $port_file) || { echo "$0: error reading port from '$port_file'"; return 1; }
+	rem_snap=$(run_remote $host "zumastor receive $vol $port start") || \
+		{ echo "$0: starting remote snapshot receive failed"; return 1; }
+
+	echo "remote snapshot id $rem_snap listen started"
 
 	# increment the use count on the snapshot
 	usecount_increment $vol $snap
@@ -232,7 +230,7 @@ function replicate_snapshot {
 	ddsnap delta send -r -g 5 $server $old_snap $snap /dev/mapper/$vol\($old_snap\) \
 		/dev/mapper/$vol\($snap\) $rem_snap $host
 
-	run_remote $hostname "zumastor receive $vol $port done"
+	run_remote $host "zumastor receive $vol $port done"
 
 	# FIXME TODO on failure, clean up, remove and delete send file
 
@@ -425,11 +423,13 @@ function define_target {
 	local -r vol=$1
 	local -r host=$2
 	local -r port=$3
+	local -r period=$3
 	local -r path=$VOLUMES/$vol/targets/$host
 
 	mkdir $path || return 1
 	mkfifo $path/trigger || return 1
 	echo $port > $path/port || return 1
+	echo $period > $path/period || return 1
 	zumastor start target $vol $host || return 1
 }
 
@@ -555,15 +555,19 @@ function replication_cycle {
 	local next
 	local hold
 
-	hold=$(cat $holdfile) || { echo "$0: error reading $holdfile"; exit 1; }
+	hold=$(cat $holdfile) || { echo "inital replication cycle"; next=0; }
+
+	# FIXME TODO - don't assume next snapshot number
+	[[ $hold -ge 0 ]] && next=$(( $hold + 1 ))
 
 	create_device $vol $next
 	mount_device $vol $next
 
-	# !!! NFS failover here
+	# !!! FIXME TODO NFS failover here
+
 	echo $next > $holdfile
 
-	remove_device $vol $hold
+	[[ $hold -ge 0 ]] && { umount_device $vol $hold; remove_device $vol $hold; }
 
 }
 
@@ -642,9 +646,10 @@ function run_command {
 
 			exit $? ;;
 		target)
-			[ $# -eq 4 ] || { echo "usage: $0 define target <vol> <host>[:port]"; exit 2; }
+			[ $# -eq 5 ] || { echo "usage: $0 define target <vol> <host>[:port] <period>"; exit 2; }
 			local -r vol=$3
 			local host=$4
+			local period=$5
 			local port=${host/*:/}
 
 			# check to see if port was specified, if so, strip it off the host
@@ -658,7 +663,7 @@ function run_command {
 			verify_managed_vol $vol || { echo "$0: volume '$vol' is not a managed volume"; exit 1; }
 			verify_valid_host $host || { echo "$0: invalid host '$host'"; exit 1; }
 
-			define_target $vol $host $port
+			define_target $vol $host $port $period
 			exit $? ;;
 		master)
 			[ $# -eq 5 ] || { echo "usage: $0 define master <vol> <kind> <count>"; exit 2; }
