@@ -179,13 +179,8 @@ function create_device {
 
 	# only create snapshot for non-origin
 	if [[ $id -ne -1 ]]; then
+		sync
 		ddsnap create $server $id || return 1
-
-		usecount_increment $vol $id || {
-			echo setting usecount failed, removing snapshot and aborting...
-			ddsnap delete $server $id
-			return 1
-		}
 	fi
 
 	echo 0 $size ddsnap $sdev $odev $agent $id | dmsetup create $name || return 1
