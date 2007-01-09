@@ -17,6 +17,7 @@ declare -r SERVERS=$RUNPATH/servers
 declare -r MOUNTS=$RUNPATH/mount
 declare -r CRONS=$RUNPATH/cron
 declare -r DEFAULT_PORT=$(cat $CONFIG/defaultport)
+declare -r SSH_COMMAND=$(cat $CONFIG/ssh_command)
 
 declare -ar KINDS=(hourly daily weekly monthly)
 

@@ -128,7 +128,7 @@ function run_remote  {
 	if [[ $host = "localhost" ]]; then
 		echo $command | sh
 	else
-		echo $command | ssh $host
+		echo $command | $SSH_COMMAND $host
 	fi
 }
 
@@ -209,8 +209,8 @@ function replicate_snapshot {
 	echo "remote snapshot id $rem_snap listen started"
 
 	# send the changes since the last snapshot via ddsnap delta send
-	echo running ddsnap delta send -r -g 5 $server $old_snap $snap /dev/mapper/$vol $rem_snap $host
-	ddsnap delta send -r -g 5 $server $old_snap $snap /dev/mapper/$vol $rem_snap $host
+	echo running ddsnap delta send -r -g 5 $server $old_snap $snap /dev/mapper/$vol $rem_snap $host:$port
+	ddsnap delta send -r -g 5 $server $old_snap $snap /dev/mapper/$vol $rem_snap $host:$port
 
 	run_remote $host "zumastor receive $vol $port done"
 
@@ -221,6 +221,8 @@ function replicate_snapshot {
 
 	# this will remove if reference count is zero
 	usecount_decrement $vol $old_snap
+
+	return 0
 }
 
 function run_master {
@@ -281,12 +283,7 @@ function run_target {
 	while true; do
 		[[ -r $fifo ]] || { echo "$0: $fifo not readable" >> $log; return 1; }
 		# !!! FIXME TODO Implement skipping to most recent snapshot if there is a backlog
-		read snap <$fifo || snap=timeout
-
-		if [[ $snap = "timeout" ]]; then
-			echo "`date`: $period sec timeout elapsed, waking up" >> $log
-			snap=wakeup
-		fi
+		read snap <$fifo || { echo "$0: error reading $fifo"; return 1; }
 
 		if [[ $snap = "wakeup" ]]; then
 			[[ -e $master_fifo ]] || echo "$0: error: wakeup on non master volume '$vol'" >> $log
@@ -297,7 +294,7 @@ function run_target {
 			# FIXME TODO subtract time thats passed since period
 			sleep $period; \
 			send_to_fifo $master_fifo "target $host" || echo $0: error writing to fifo >> $log; \
-			}
+			} || { echo "`date`: $0 replicate error" >> $log; }
 		fi
 	done &
 }
@@ -423,12 +420,6 @@ function define_target {
 	local -r period=$4
 	local -r path=$VOLUMES/$vol/targets/$host
 
-	local -r myhost=`hostname -s`
-	local rem_host
-
-	rem_host=$(run_remote $host "cat $VOLUMES/$vol/source/hostname") && [[ $rem_host = $myhost ]] || \
-		{ echo "set '$myhost' (not '$rem_host') as source for '$vol' on '$host' first!"; return 1; }
-
 	mkdir $path || return 1
 	mkfifo $path/trigger || return 1
 	echo $port > $path/port || return 1
@@ -512,6 +503,7 @@ function set_source {
 	local -r period=$3
 	local -r path=$VOLUMES/$vol
 	local conv
+	local -r myhost=`hostname -s`
 
 	if [ -d $path/master ]; then
 		read -p "$vol is currently a master, convert to a downstream volume? [n] " conv
@@ -524,6 +516,9 @@ function set_source {
 		echo "$0: already set as a downstream volume for " $(cat $path/source/hostname)
 		return 1
 	fi
+
+	conv=$(run_remote $host "ls $VOLUMES/$vol/targets/$myhost/trigger 2>/dev/null") && [[ $conv = $myhost ]] || \
+		{ echo "setup '$myhost' as target for volume '$vol' on '$host' first!"; return 1; }
 
 	mkdir -p $path/source || return 1
 	echo $host > $path/source/hostname
