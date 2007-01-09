@@ -4,6 +4,7 @@ To do:
  - snapshot and replicate commands should wait on ok/err message?
  - track filesystem information (type, mount options)
  - freeze filesytem before taking snapshots
+ - forget volume clean up source dir
 
 Done:
 
@@ -26,3 +27,4 @@ Done:
     - ssh to set new downstream snapshot
     - downstream node kicks upstream on zumastor start via ssh
 
+ - make "receive" commands log locally
