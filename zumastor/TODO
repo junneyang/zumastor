@@ -5,6 +5,12 @@ To do:
  - track filesystem information (type, mount options)
  - freeze filesytem before taking snapshots
  - forget volume clean up source dir
+ - use sudo to not require root keys
+ - get rid of Pseudo-terminal will not be allocated because stdin is not a terminal. message
+ - better success/failure messages
+ - many FIXME TODO's in code, many input validation
+ - for replication, check "hold" snapshot status, if no block have changed,
+   skip this replication cycle
 
 Done:
 
