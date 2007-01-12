@@ -1435,17 +1435,15 @@ static int usecount(int sock, u32 snaptag, int32_t usecnt_dev)
 	unsigned maxbuf = 500;
 	char buf[maxbuf];
 
+	/* read message header */
 	if ((err = readpipe(sock, &head, sizeof(head))) < 0) {
 		warn("unable to read usecount message head: %s", strerror(-err));
 		return 1;
 	}
-	assert(head.length < maxbuf); // !!! don't die
-	if ((err = readpipe(sock, buf, head.length)) < 0) {
-		warn("unable to read usecount message body: %s", strerror(-err));
-		return 1;
-	}
 
 	trace_on(printf("reply = %x\n", head.code););
+
+	/* check for error before reading message body */
 	if (head.code != USECOUNT_OK) {
 		if (head.code != USECOUNT_ERROR) {
 			unknown_message_handler(sock, &head);
@@ -1459,7 +1457,15 @@ static int usecount(int sock, u32 snaptag, int32_t usecnt_dev)
 		warn("server reason for usecount failure: %s", usecnt_err->msg);
 		free(usecnt_err);
 		return 1;
-	}		
+	}
+
+	assert(head.length < maxbuf); // !!! don't die
+
+	/* read message body */
+	if ((err = readpipe(sock, buf, head.length)) < 0) {
+		warn("unable to read usecount message body: %s", strerror(-err));
+		return 1;
+	}
 	printf("New usecount: %u\n", (unsigned int)((struct usecount_ok *)buf)->usecount);
  
 	return 0; // should we return usecount here too?
