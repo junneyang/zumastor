@@ -503,6 +503,7 @@ function set_source {
 	local -r period=$3
 	local -r path=$VOLUMES/$vol
 	local conv
+	local rempath
 	local -r myhost=`hostname -s`
 
 	if [ -d $path/master ]; then
@@ -517,7 +518,8 @@ function set_source {
 		return 1
 	fi
 
-	conv=$(run_remote $host "ls $VOLUMES/$vol/targets/$myhost/trigger 2>/dev/null") && [[ $conv = $myhost ]] || \
+	rempath=$VOLUMES/$vol/targets/$myhost/trigger
+	conv=$(run_remote $host "ls $rempath 2>/dev/null") && [[ $conv = $rempath ]] || \
 		{ echo "setup '$myhost' as target for volume '$vol' on '$host' first!"; return 1; }
 
 	mkdir -p $path/source || return 1
