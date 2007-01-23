@@ -394,7 +394,7 @@ function init_define_volume {
 	ln -sf $sdev $path/device/snapstore || return 1
 	mkdir $path/targets || return 1
 
-	log $log "initializing volume '$vol', origindev '$odev', snapdev '$sdev'"
+	log "initializing volume '$vol', origindev '$odev', snapdev '$sdev'" $log
 	ddsnap initialize $sdev $odev 2>>$log || { echo init failed ;  return 1 ; }
 
 	start_volume $vol || { echo start failed ;return 1; }
@@ -402,11 +402,11 @@ function init_define_volume {
 	create_device $vol -1 || { echo create failed;return 1; }
 	# do not mount
 
-	log $log "zeroing out origin device"
+	log "zeroing out origin device" $log
 	echo -n Zeroing out origin device. This may take a while...
 	dd if=/dev/zero of=/dev/mapper/$vol bs=1M >> $log 2>&1
 	echo done!
-	log $log "zeroing out origin device completed"
+	log "zeroing out origin device completed" $log
 }
 
 function define_volume {
