@@ -17,7 +17,7 @@ includes = $(kernel)
 flags = -g -Wall -D_FILE_OFFSET_BITS=64
 #flags = -g -Wall -Wno-parentheses -Wbad-function-cast -Wcast-align -Wwrite-strings -Wstrict-prototypes -Wnested-externs -Wredundant-decls -Wendif-labels -Wcast-qual -D_FILE_OFFSET_BITS=64
 
-all: $(binaries)
+all: $(binaries) ddsnap.8.gz
 .PHONY: all
 
 xdelta/xdelta3.o:
@@ -68,13 +68,17 @@ ddsnap: ddsnap.c buffer.o ddsnapd.o ddsnap.agent.o ddsnap.common.o xdelta/xdelta
 devspam: tests/devspam.c trace.h
 	cd tests && cc devspam.c $(flags) -I$(includes) -o ../devspam
 
+ddsnap.8.gz: ./man/ddsnap.8
+	gzip -c ./man/ddsnap.8 > ddsnap.8.gz
+
 clean:
-	rm -f build.h $(binaries) *.o xdelta/*.o a.out
+	rm -f build.h $(binaries) *.o xdelta/*.o a.out ddsnap.8.gz
 .PHONY: clean
 
 install: $(binaries)
 	mkdir -p $(instdir) || true
 	cp $(binaries) $(instdir)
+	gzip -c ./man/ddsnap.8 > ${DESTDIR}/usr/share/man/man8/ddsnap.8.gz
 .PHONY: install
 
 kernel:

@@ -659,7 +659,8 @@ function replication_cycle {
 	# FIXME TODO - we have to umount -l first, because umount always removes the topmost
 	# filesystem :(, so we need to freeze access here
 	if [[ $hold != "initial" ]]; then
-		# TODO NFS suspend here
+		# NFS suspend 
+		echo "foo" > /proc/fs/nfsd/suspend
 		log "umounting snapshot $hold " $log
 		umount_device $vol $hold >> $log 2>&1
 	fi
@@ -668,7 +669,8 @@ function replication_cycle {
 	mount_device $vol $next unqualified >> $log 2>&1
 
 	if [[ $hold != "initial" ]]; then
-		# TODO NFS resume here
+		# NFS resume 
+		cat /proc/fs/nfsd/suspend > /dev/null
 		log "removing snapshot $hold " $log
 		usecount_decrement $vol $hold >> $log 2>&1
 	fi

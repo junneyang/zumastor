@@ -1,0 +1,10 @@
+Source: ddsnap
+Section: unknown
+Priority: optional
+Maintainer: Andrew Middlesworth <drewm@google.com>
+Build-Depends: debhelper (>= 4.0.0), libpopt-dev, zlib1g-dev
+Standards-Version: 0.1.0
+
+Package: ddsnap
+Architecture: i386
+Description: Ddsnap userspace daemons
