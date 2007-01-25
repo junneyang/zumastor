@@ -3,31 +3,17 @@
 rm ${DESTDIR}/lib/zumastor >/dev/null 2>&1 # in case of symlink
 rm ${DESTDIR}/var/lib/zumastor >/dev/null 2>&1 # in case of symlink
 rm ${DESTDIR}/var/run/zumastor >/dev/null 2>&1 # in case of symlink
-
-mkdir -p ${DESTDIR}/bin/
-mkdir -p ${DESTDIR}/lib/
-mkdir -p ${DESTDIR}/var/lib/
-mkdir -p ${DESTDIR}/var/run/
-mkdir -p ${DESTDIR}/var/log/
-
-mkdir -p ${DESTDIR}/etc/cron.hourly/
-mkdir -p ${DESTDIR}/etc/cron.daily/
-mkdir -p ${DESTDIR}/etc/cron.weekly/
-mkdir -p ${DESTDIR}/etc/init.d/
-mkdir -p ${DESTDIR}/etc/
-
-cp bin/zumastor ${DESTDIR}/bin/
-cp -a lib/zumastor ${DESTDIR}/lib/
-cp -a var/lib/zumastor ${DESTDIR}/var/lib/
-cp -a var/run/zumastor ${DESTDIR}/var/run/
-cp -a var/log/zumastor ${DESTDIR}/var/log/
-
 rm ${DESTDIR}/etc/zumastor >/dev/null 2>&1 # in case of symlink
 
-cp -a etc/cron.hourly/zumastor ${DESTDIR}/etc/cron.hourly/
-cp -a etc/cron.daily/zumastor ${DESTDIR}/etc/cron.daily/
-cp -a etc/cron.weekly/zumastor ${DESTDIR}/etc/cron.weekly/
-cp etc/init.d/zumastor ${DESTDIR}/etc/init.d/
-cp -a etc/zumastor ${DESTDIR}/etc/
+echo ${DESTDIR}
+mkdir -p ${DESTDIR}
+echo ${DESTDIR}/t.tar
+tar -cv --exclude=.svn --exclude=Makefile --exclude=TODO --exclude=notes.packaging --exclude=debian --exclude=scripts -f ${DESTDIR}/t.tar *
+
+cd ${DESTDIR}
+tar xvf t.tar
+cd -
+
+rm ${DESTDIR}/t.tar
 
 chmod 755 ${DESTDIR}/etc/cron.{hourly,daily,weekly}/zumastor ${DESTDIR}/etc/init.d/zumastor
