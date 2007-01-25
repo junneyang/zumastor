@@ -195,24 +195,11 @@ function replicate_snapshot {
 	local -r server=$SERVERS/$vol
 	local -r port_file=$target_dir/port
 	local -r myhost=`hostname -s`
-	local old_snap
-	local rem_snap
-	local port
-	local oldchunks
-	local chunks
+	local old_snap rem_snap port
 
 	log "replication for snapshot '$snap' on volume '$vol' to '$host'"
 
 	old_snap=$(cat $hold_file) || { echo "initial replication"; old_snap=0; }
-
-	# first check to see if there is anything to send...
-	oldchunks=`ddsnap status /var/run/zumastor/servers/$vol $old_snap| tail -1 | awk '{print $7}'`
-	chunks=`ddsnap status /var/run/zumastor/servers/$vol $snap| tail -1 | awk '{print $7}'`
-	if [[ "$chunks" == "$oldchunks" ]]; then
-		log "skipping replication cycle because there are no updates"
-		usecount_decrement $vol $snap
-		return 0
-	fi
 
 	rem_snap=$(run_remote $host "cat $VOLUMES/$vol/source/hostname") && [[ $rem_snap = $myhost ]] || \
 		{ log "set '$myhost' as source for '$vol' on '$host' first!"; usecount_decrement $vol $snap; return 1; }
