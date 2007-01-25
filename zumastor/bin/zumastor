@@ -374,10 +374,11 @@ function stop_target {
 }
 
 function init_define_volume {
-	[ $# -eq 3 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
+	[ $# -eq 3 ] || [ $# -eq 4 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
 	local -r vol=$1
 	local -r odev=$2
 	local -r sdev=$3
+	local -r mdev=$4
 	local -r path=$VOLUMES/$vol
 	local -r sock=${SERVERS}/$vol
 	local -r log=$LOGS/$vol-init.log
@@ -391,10 +392,11 @@ function init_define_volume {
 	mkdir $path/device || return 1
 	ln -sf $odev $path/device/origin  || return 1
 	ln -sf $sdev $path/device/snapstore || return 1
+	[ -z $mdev ] || ln -sf $mdev $path/device/meta || return 1
 	mkdir $path/targets || return 1
 
 	log "initializing volume '$vol', origindev '$odev', snapdev '$sdev'" $log
-	ddsnap initialize $sdev $odev 2>>$log || { echo init failed ;  return 1 ; }
+	ddsnap initialize $sdev $odev $mdev 2>>$log || { echo init failed ;  return 1 ; }
 
 	start_volume $vol || { echo start failed ;return 1; }
 
@@ -409,10 +411,11 @@ function init_define_volume {
 }
 
 function define_volume {
-	[ $# -eq 3 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
+	[ $# -eq 3 ] || [ $# -eq 4 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
 	local -r vol=$1
 	local -r odev=$2
 	local -r sdev=$3
+	local -r mdev=$4
 	local -r path=$VOLUMES/$vol
 	local -r sock=${SERVERS}/$vol
 
@@ -420,6 +423,7 @@ function define_volume {
 	mkdir $path/device || return 1
 	ln -sf $odev $path/device/origin  || return 1
 	ln -sf $sdev $path/device/snapstore || return 1
+	[ -z $mdev ] || ln -sf $mdev $path/device/meta || return 1
 	mkdir $path/targets || return 1
 
 	start_volume $vol || { echo start failed ;return 1; }
@@ -728,15 +732,28 @@ function run_command {
 	define)
 		case $2 in
 		volume)
-			[ $# -eq 5 ] || [ $# -eq 6 ] || { echo "usage: $0 define volume <vol> <origin> <snapstore> [noinit|nosnap]"; exit 2; }
+			[[ $# -ge 5 ]] || [[ $# -le 7 ]] || { echo "usage: $0 define volume <vol> <origin> <snapstore> [<metadev>] [noinit|nosnap]"; exit 2; }
 			local -r vol=$3
 			local -r origin=$4
 			local -r snapstore=$5
-			local -r noinit=$6
+			local metadev=""
+			local noinit=""
+			
+			if [[ $# -eq 6 ]]; then
+				if [[ $6 = "noinit" || $6 = "nosnap" ]]; then
+					noinit=$6
+				else
+					metadev=$6
+				fi
+			elif [[ $# -eq 7 ]]; then
+				$metadev=$6
+				$noinit=$7
+			fi
 
 			verify_valid_volname $vol || { echo "$0: invalid volume name '$vol'"; exit 1; }
 			verify_valid_device $origin || { echo "$0: invalid device '$origin'"; exit 1; }
 			verify_valid_device $snapstore || { echo "$0: invalid device '$snapstore'"; exit 1; }
+			[ -z $meta ] || verify_valid_device $metadev || { echo "$0: invalid device '$meta'"; exit 1; }
 
 			if [[ $noinit = "noinit" ]]; then
 				read -p "noinit: you must have initialized the device manually, continue? [y/N] " -t 30 \
@@ -744,9 +761,9 @@ function run_command {
 
 				[[ $REPLY = "y" ]] || { echo "aborted."; exit 1; }
 				
-				define_volume $vol $origin $snapstore || { echo "$0: define volume '$vol' failed"; exit 1; }
+				define_volume $vol $origin $snapstore $metadev || { echo "$0: define volume '$vol' failed"; exit 1; }
 			else
-				init_define_volume $vol $origin $snapstore || { echo "$0: init volume '$vol' failed"; exit 1; }
+				init_define_volume $vol $origin $snapstore $metadev || { echo "$0: init volume '$vol' failed"; exit 1; }
 
 				echo "Successfully created and initialized volume '$vol'."
 
