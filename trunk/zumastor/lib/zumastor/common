@@ -136,13 +136,17 @@ function start_volume {
 	local -r info=$VOLUMES/$vol
 	local -r sdev=$info/device/snapstore
 	local -r odev=$info/device/origin
+	local mdev=$info/device/meta
 	local -r agent=${AGENTS}/$vol
 	local -r server=${SERVERS}/$vol
 	local -r agentlog=${LOGS}/${vol}-agent.log
 	local -r serverlog=${LOGS}/${vol}-server.log
+	
+	# see if the meta device symlink exists, otherwise set mdev variable to empty string	
+	[[ -h $mdev ]] || mdev=""	
 
 	ddsnap agent -l $agentlog $agent || return 1
-	ddsnap server -l $serverlog $sdev $odev $agent $server || return 1
+	ddsnap server -l $serverlog $sdev $odev $mdev $agent $server || return 1
 }
 
 function stop_volume {
@@ -151,12 +155,16 @@ function stop_volume {
 	local -r info=$VOLUMES/$vol
 	local -r sdev=$info/device/snapstore
 	local -r odev=$info/device/origin
+	local mdev=$info/device/meta
 	local -r agent=${AGENTS}/$vol
 	local -r server=${SERVERS}/$vol
 	local -r agentlog=${LOGS}/${vol}-agent.log
 	local -r serverlog=${LOGS}/${vol}-server.log
 
-	pkill -f "ddsnap server -l $serverlog $sdev $odev $agent $server"
+	# see if the meta device symlink exists, otherwise set mdev variable to empty string	
+	[[ -h $mdev ]] || mdev=""	
+
+	pkill -f "ddsnap server -l $serverlog $sdev $odev $mdev $agent $server"
 	pkill -f "ddsnap agent -l $agentlog $agent"
 	rm $agent $server
 }
