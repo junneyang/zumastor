@@ -299,8 +299,8 @@ function run_target {
 	local -r sleep_pid=$VOLUMES/$vol/targets/$host/.sleeppid
 	local snap state period spid
 
-	read period < $period_file || { log "couldn't read $period_file" $log; return 1; }
-	[[ $period -ge 0 ]] || { log "invalid period '$period' specified" $log; return 1; }
+	[[ -e $period_file ]] && read period < $period_file || log "no period specified" $log
+	[[ -z $period ]] || [[ $period -ge 0 ]] || { log "invalid period '$period' specified" $log; return 1; }
 
 	[ -r $fifo ] && [ -p $fifo ] || { log "target replication trigger '$fifo' is missing" $log; return 1; }
 
@@ -329,7 +329,7 @@ function run_target {
 		replicate_snapshot $vol $host $snap >> $log 2>&1 &&
 		if [[ $? == 0 ]]; then #success 
 			log "successfully replicated snapshot $snap" $log
-			(
+			[[ -z $period ]] || (
 				pid=$!
 				log "sleeper starting" $log
 				spid=""; read spid < $sleep_pid 2> /dev/null
@@ -470,7 +470,7 @@ function forget_volume {
 }
 
 function define_target {
-	[ $# -eq 4 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
+	[[ $# -eq 3 ]] || [[ $# -eq 4 ]] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
 	local -r vol=$1
 	local -r host=$2
 	local -r port=$3
@@ -480,7 +480,7 @@ function define_target {
 	mkdir $path || return 1
 	mkfifo $path/trigger || return 1
 	echo $port > $path/port || return 1
-	echo $period > $path/period || return 1
+	[[ -z $period ]] || echo $period > $path/period || return 1
 	zumastor start target $vol $host || return 1
 }
 
@@ -566,7 +566,7 @@ function forget_master {
 }
 
 function set_source {
-	[ $# -eq 3 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
+	[[ $# -eq 2 ]] || [[ $# -eq 3 ]] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
 	local -r vol=$1
 	local -r host=$2
 	local -r period=$3
@@ -593,7 +593,7 @@ function set_source {
 
 	mkdir -p $path/source || return 1
 	echo $host > $path/source/hostname || return 1
-	echo $period > $path/source/period || return 1
+	[[ -z $period ]] || echo $period > $path/source/period || return 1
 
 	# FIXME TODO - snapshot 0 may be used for the source for chained replication, therefore
 	# we arbitrarily pick 1, because no other snapshots should exist
@@ -611,15 +611,23 @@ function trigger_snapshot {
 }
 
 function trigger_replication {
-	[ $# -eq 2 ] || [ $# -eq 3 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
+	[[ $# -eq 2 ]] || [[ $# -eq 3 ]] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
 	local -r vol=$1
 	local -r host=$2
 	local snap=$3
-	local -r fifo=$VOLUMES/$vol/targets/$host/trigger
+	local -r target_fifo=$VOLUMES/$vol/targets/$host/trigger
+	local -r master_fifo=$VOLUMES/$vol/master/trigger
 
-	# !!! update snap if empty
 
-	send_to_fifo $fifo $snap || return 1
+	if [[ -z $snap ]]; then
+		# no snapshot specified, asking the master for a new one
+		send_to_fifo $master_fifo "target $host" || return 1
+	else
+		# increase reference count to pin snapshot
+		usecount_increment $vol $snap
+		# send specified snapshot
+		send_to_fifo $fifo $snap || { usecount_decrement $vol $snap; return 1; }
+	fi
 }
 
 # replication_cycle -
@@ -631,12 +639,11 @@ function replication_cycle {
 	local -r path=${VOLUMES}/$vol
 	local -r holdfile=$path/source/hold
 	local -r log=${LOGS}/${vol}-source.log
-	local next
-	local hold
+	local next hold junk
 
 	hold=$(cat $holdfile)
 
-	if [[ $hold == "" ]]; then
+	if [[ -z $hold ]]; then
 		hold=initial
 		next=0
 	else
@@ -659,8 +666,8 @@ function replication_cycle {
 	# FIXME TODO - we have to umount -l first, because umount always removes the topmost
 	# filesystem :(, so we need to freeze access here
 	if [[ $hold != "initial" ]]; then
-		# NFS suspend 
-		echo "foo" > /proc/fs/nfsd/suspend
+		# NFS suspend
+		echo "foo" > /proc/fs/nfsd/suspend 2>/dev/null
 		log "umounting snapshot $hold " $log
 		umount_device $vol $hold >> $log 2>&1
 	fi
@@ -670,7 +677,7 @@ function replication_cycle {
 
 	if [[ $hold != "initial" ]]; then
 		# NFS resume 
-		cat /proc/fs/nfsd/suspend > /dev/null
+		cat /proc/fs/nfsd/suspend > /dev/null 2>&1
 		log "removing snapshot $hold " $log
 		usecount_decrement $vol $hold >> $log 2>&1
 	fi
@@ -700,7 +707,7 @@ function nag_daemon {
 	host=$(cat $path/source/hostname)
 	period=$(cat $path/source/period)
 
-	[[ $period -gt 0 ]] || { echo "$0: period file error"; exit 1; }
+	[[ $period -gt 0 ]] || { log "no polling period specified for $vol, nothing to do"; return 1; }
 
 	# daemonize (close stdin, stdout, stderr)
 	exec 0</dev/null 1>/dev/null 2>/dev/null
@@ -757,7 +764,7 @@ function run_command {
 
 			exit $? ;;
 		target)
-			[ $# -eq 5 ] || { echo "usage: $0 define target <vol> <host>[:port] <period>"; exit 2; }
+			[[ $# -eq 4 ]] || [[ $# -eq 5 ]] || { echo "usage: $0 define target <vol> <host>[:port] [period]"; exit 2; }
 			local -r vol=$3
 			local host=$4
 			local period=$5
@@ -789,15 +796,13 @@ function run_command {
 			set_master $vol $kind $count
 			exit $? ;;
 		source)
-			[ $# -eq 5 ] || { echo "usage: $0 define source <vol> <host> <period>"; exit 2; }
+			[[ $# -eq 4 ]] || [[ $# -eq 5 ]] || { echo "usage: $0 define source <vol> <host> [period]"; exit 2; }
 			local -r vol=$3
 			local -r host=$4
 			local -r period=$5
 
 			verify_managed_vol $vol || { echo "$0: volume '$vol' is not a managed volume"; exit 1; }
 			verify_valid_host $host || { echo "$0: invalid host '$host'"; exit 1; }
-
-			[[ $period -gt 0 ]] || { echo "$0: invalid period '$period'"; exit 1; }
 
 			set_source $vol $host $period
 			exit $? ;;
@@ -917,7 +922,7 @@ function run_command {
 		exit $?
 		;;
 	replicate)
-		[ $# -eq 4 ] || { echo "usage: $0 replicate <vol> <host> <snap>"; exit 2; }
+		[[ $# -eq 3 ]] || [[ $# -eq 4 ]] || { echo "usage: $0 replicate <vol> <host> [snap]"; exit 2; }
 		local -r vol=$2
 		local -r host=$3
 		local -r snap=$4
@@ -926,9 +931,7 @@ function run_command {
 		verify_existing_target $vol $host || { echo "$0: host '$host' is not a target for volume '$vol'"; exit 1; }
 		[ -z $snap ] || verify_existing_snap $vol $snap || { echo "$0: invalid snapshot '$snap' for volume '$vol'"; exit 1; }
 
-		# !!! FIXME TODO <snap> is supposed to be optional and use the most current
-		# snapshot if omitted.  Also, it should do nothing if a more curreny snapshot
-		# has already been replicated
+		# <snap> is optional and a new snapshot is taken if omitted
 		trigger_replication $vol $host $snap
 		exit $?
 		;;
