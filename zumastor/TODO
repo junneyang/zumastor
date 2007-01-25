@@ -7,6 +7,7 @@ To do:
  - use sudo to not require root keys
  - better success/failure messages
  - many FIXME TODO's in code, many input validation
+ - recover from interrupted replication
 
 Done:
 

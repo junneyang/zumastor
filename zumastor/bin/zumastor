@@ -69,7 +69,7 @@ function new_snapshot {
 	num=${#snapshots[@]}
 	snapshots[$num]=$next
 
-	create_device $vol $next
+	create_snapshot $vol $next
 	mount_device $vol $next
 
 	if [[ $num -ge $max ]]; then
@@ -123,7 +123,7 @@ function new_target_snapshot {
 	log "new snapshot will be '$next'"
 
 	# need to create the device in order for ddsnap delta send to work
-	create_device $vol $next
+	create_snapshot $vol $next
 	# but we don't need to mount it
 
 	send_to_fifo $target_fifo $next || return 1
@@ -206,8 +206,8 @@ function replicate_snapshot {
 	old_snap=$(cat $hold_file) || { echo "initial replication"; old_snap=0; }
 
 	# first check to see if there is anything to send...
-	oldchunks=`ddsnap status /var/run/zumastor/servers/testvol $old_snap| tail -1 | awk '{print $7}'`
-	chunks=`ddsnap status /var/run/zumastor/servers/testvol $snap| tail -1 | awk '{print $7}'`
+	oldchunks=`ddsnap status /var/run/zumastor/servers/$vol $old_snap| tail -1 | awk '{print $7}'`
+	chunks=`ddsnap status /var/run/zumastor/servers/$vol $snap| tail -1 | awk '{print $7}'`
 	if [[ "$chunks" == "$oldchunks" ]]; then
 		log "skipping replication cycle because there are no updates"
 		usecount_decrement $vol $snap
@@ -265,7 +265,6 @@ function run_master {
 	# daemonize (close stdin, stdout, stderr)
 	#exec 0</dev/null 1>/dev/null 2>/dev/null
 
-	echo mounting volume $vol...
 	mount_device $vol -1
 
 	# we reopen the log for each write so rotation works
@@ -425,7 +424,7 @@ function define_volume {
 
 	start_volume $vol || { echo start failed ;return 1; }
 
-	create_device $vol -1 || { echo create failed;return 1; }
+	create_snapshot $vol -1 || { echo create failed;return 1; }
 
 	return 0
 }
@@ -597,7 +596,7 @@ function set_source {
 
 	# FIXME TODO - snapshot 0 may be used for the source for chained replication, therefore
 	# we arbitrarily pick 1, because no other snapshots should exist
-	create_device $vol 1 || return 1
+	create_snapshot $vol 1 || return 1
 	echo 1 > $path/source/hold || return 1
 }
 
@@ -654,7 +653,7 @@ function replication_cycle {
 	log "replication cycle beginning - snapshot ($hold, $next)..." $log
 
 	log "creating device..." $log
-	create_device $vol $next >> $log 2>&1
+	create_snapshot $vol $next >> $log 2>&1
 
 	log "setting holdfile to $next" $log
 	echo $next > $holdfile
@@ -705,9 +704,9 @@ function nag_daemon {
 	local -r myhost=`hostname -s`
 
 	host=$(cat $path/source/hostname)
-	period=$(cat $path/source/period)
+	period=$(cat $path/source/period 2>/dev/null)
 
-	[[ $period -gt 0 ]] || { log "no polling period specified for $vol, nothing to do"; return 1; }
+	[[ $period -gt 0 ]] || { log "no polling period specified for $vol, nothing to do" $log; return 0; }
 
 	# daemonize (close stdin, stdout, stderr)
 	exec 0</dev/null 1>/dev/null 2>/dev/null
@@ -757,7 +756,8 @@ function run_command {
 					exit 0
 				fi
 
-				create_device $vol 0 || { echo "$0: error with initial snapshot"; exit 1; }
+				create_snapshot $vol 0 || { echo "$0: error with initial snapshot"; exit 1; }
+				echo 0 > $VOLUMES/$vol/zero
 
 				echo "You can now create a filesystem on /dev/mapper/$vol"
 			fi
