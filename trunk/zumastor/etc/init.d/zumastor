@@ -66,9 +66,10 @@ function stop_zumastor {
 		fi
 
 		for id in $(get_managed_snapshots $vol); do
+			umount_device $vol $id 2>/dev/null
 			remove_device $vol $id
 		done
-		remove_device $vol 0
+		umount_device $vol -1 2>/dev/null
 		remove_device $vol -1
 
 		stop_volume $vol
