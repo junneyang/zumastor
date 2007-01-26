@@ -7,4 +7,5 @@ Standards-Version: 0.1.0
 
 Package: ddsnap
 Architecture: i386
+Depends: dmsetup, libpopt0, zlib1g
 Description: Ddsnap userspace daemons
