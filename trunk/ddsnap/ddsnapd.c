@@ -292,7 +292,8 @@ static void commit_transaction(struct superblock *sb)
 		unsigned pos = next_journal_block(sb);
 		jtrace(warn("journal data sector = %Lx [%u]", buffer->sector, pos););
 		assert(buffer_dirty(buffer));
-		write_buffer_to(buffer, journal_sector(sb, pos));
+		if (write_buffer_to(buffer, journal_sector(sb, pos)))
+			jtrace(warn("unable to write dirty blocks to journal"););
 	}
 
 	unsigned pos = next_journal_block(sb);
@@ -308,14 +309,16 @@ static void commit_transaction(struct superblock *sb)
 		assert(buffer_dirty(buffer));
 		assert(commit->entries < sb->max_commit_blocks);
 		commit->sector[commit->entries++] = buffer->sector;
-		write_buffer(buffer); // deletes it from dirty (fixme: fragile)
+		if (write_buffer(buffer)) // deletes it from dirty (fixme: fragile)
+			jtrace(warn("unable to write commit block to journal"););
 		// we hope the order we just listed these is the same as committed above
 	}
 
 	jtrace(warn("commit journal block [%u]", pos););
 	commit->checksum = 0;
 	commit->checksum = -checksum_block(sb, (void *)commit);
-	write_buffer_to(commit_buffer, journal_sector(sb, pos));
+	if (write_buffer_to(commit_buffer, journal_sector(sb, pos)))
+		jtrace(warn("unable to write checksum fro commit block"););
 	brelse(commit_buffer);
 }
 
@@ -867,7 +870,7 @@ static chunk_t alloc_chunk_range(struct superblock *sb, struct allocspace *as, c
 		unsigned char c, *p = buffer->data + offset;
 		unsigned tail = sb->metadata.allocsize - offset, n = tail > length? length: tail;
 
-		trace_off(printf("search %u bytes of bitmap %Lx from offset %u\n", n, blocknum, offset););
+		trace(printf("search %u bytes of bitmap %Lx from offset %u\n", n, blocknum, offset););
 		// dump_buffer(buffer, 4086, 10);
 
 		for (length -= n; n--; p++)
@@ -1394,6 +1397,7 @@ static chunk_t make_unique(struct superblock *sb, chunk_t chunk, int snapnum)
 	exception = newex;
 out:
 	brelse_path(path, levels);
+	trace(warn("returning exception: %Lx", exception););
 	return exception;
 }
 
@@ -2635,7 +2639,7 @@ static int incoming(struct superblock *sb, struct client *client)
 		client->snap = (tag == (u32)~0UL) ? -1 : tag_snapnum(sb, tag);
 		client->flags = USING;
 		
-		trace(fprintf(stderr, "got identify request, setting id="U64FMT" snap=%i (tag=%u), sending chunksize_bits=%u\n", client->id, client->snap, tag, sb->image.chunksize_bits););
+		trace(fprintf(stderr, "got identify request, setting id="U64FMT" snap=%i (tag=%u), sending chunksize_bits=%u\n", client->id, client->snap, tag, sb->snapdata.asi->allocsize_bits););
 		warn("client id %llu, snaptag %u (snapnum %i)", client->id, tag, client->snap);
 
 		if (client->snap != -1) {
@@ -2743,7 +2747,7 @@ static int incoming(struct superblock *sb, struct client *client)
 		load_sb(sb);
 		if (sb->image.flags & SB_BUSY) {
 			warn("Server was not shut down properly");
-			jtrace(show_journal(sb););
+			//jtrace(show_journal(sb););
 			recover_journal(sb);
 		} else {
 			sb->image.flags |= SB_BUSY;

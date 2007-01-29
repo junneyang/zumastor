@@ -2130,7 +2130,7 @@ int main(int argc, char *argv[])
 		
 		sb->metadev = sb->snapdev;
 
-		if (metadev && (sb->metadev = open(metadev, O_RDWR)) == -1) /* can I do an O_DIRECT on the ramdevice? */
+		if (metadev && (sb->metadev = open(metadev, O_RDWR | O_DIRECT)) == -1) 
 			error("Could not open meta volume %s: %s", metadev, strerror(errno));
 		
 		if (!yes) {
@@ -2363,7 +2363,7 @@ int main(int argc, char *argv[])
 			error("Could not open origin volume %s: %s", origdev, strerror(errno));
 		
 		sb->metadev = sb->snapdev;
-		if (metadev && (sb->metadev = open(metadev, O_RDWR)) == -1) /* can I do an O_DIRECT on the ramdevice? */
+		if (metadev && (sb->metadev = open(metadev, O_RDWR | O_DIRECT)) == -1) 
 			error("Could not open meta volume %s: %s", metadev, strerror(errno));
 
 		if (diskread(sb->metadev, &sb->image, SB_SIZE, SB_SECTOR << SECTOR_BITS) < 0)
