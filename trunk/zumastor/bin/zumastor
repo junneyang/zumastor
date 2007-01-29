@@ -242,7 +242,7 @@ function run_master {
 	[ $# -eq 1 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
 	local -r vol=$1
 	local -r fifo=$VOLUMES/$vol/master/trigger
-	local -r log=${LOGS}/${vol}-master.log
+	local -r log=${LOGS}/$vol/master.log
 	local -r cron=${CRONS}/$vol
 	local kind
 
@@ -280,7 +280,7 @@ function run_target {
 
 	local -r fifo=$VOLUMES/$vol/targets/$host/trigger
 	local -r period_file=$VOLUMES/$vol/targets/$host/period
-	local -r log=${LOGS}/${vol}-target-${host}.log
+	local -r log=${LOGS}/$vol/target-${host}.log
 	local -r master_fifo=$VOLUMES/$vol/master/trigger
 	local -r sleep_pid=$VOLUMES/$vol/targets/$host/.sleeppid
 	local snap state period spid
@@ -368,13 +368,14 @@ function init_define_volume {
 	local -r mdev=$4
 	local -r path=$VOLUMES/$vol
 	local -r sock=${SERVERS}/$vol
-	local -r log=$LOGS/$vol-init.log
+	local -r log=$LOGS/$vol/init.log
 
 	read -p "All data on origin $odev will be destroyed, continue? (y/N) " -t 30 \
 		|| { echo "timeout."; return 1; }
 
 	if [[ $REPLY != "y" ]]; then return 1; fi
 
+	mkdir $LOGS/$vol || return 1
 	mkdir $path || return 1
 	mkdir $path/device || return 1
 	ln -sf $odev $path/device/origin  || return 1
@@ -406,6 +407,7 @@ function define_volume {
 	local -r path=$VOLUMES/$vol
 	local -r sock=${SERVERS}/$vol
 
+	mkdir $LOGS/$vol || return 1
 	mkdir $path || return 1
 	mkdir $path/device || return 1
 	ln -sf $odev $path/device/origin  || return 1
@@ -415,7 +417,7 @@ function define_volume {
 
 	start_volume $vol || { echo start failed ;return 1; }
 
-	create_snapshot $vol -1 || { echo create failed;return 1; }
+	create_device $vol -1 || { echo create failed;return 1; }
 
 	return 0
 }
@@ -425,8 +427,8 @@ function forget_volume {
 	local -r vol=$1
 	local -r path=$VOLUMES/$vol
 	local -r sock=${SERVERS}/$vol
-	local -r agentlog=${LOGS}/${vol}-agent.log
-	local -r serverlog=${LOGS}/${vol}-server.log
+	local -r agentlog=${LOGS}/$vol/agent.log
+	local -r serverlog=${LOGS}/$vol/server.log
 
 	local id host targets
 
@@ -455,7 +457,10 @@ function forget_volume {
 
 	rmdir $path/targets
 	rm -rf $path/device
-	#rm $agentlog $serverlog
+	[[ -e $path/zero ]] && rm $path/zero
+
+	[[ -d $LOGS/.archived ]] || mkdir $LOGS/.archived
+	mv $LOGS/$vol $LOGS/.archived/`date +%s`.$vol
 	rmdir $path || return 1
 }
 
@@ -628,7 +633,7 @@ function replication_cycle {
 	local -r sock=${SERVERS}/$vol
 	local -r path=${VOLUMES}/$vol
 	local -r holdfile=$path/source/hold
-	local -r log=${LOGS}/${vol}-source.log
+	local -r log=${LOGS}/$vol/source.log
 	local next hold junk
 
 	hold=$(cat $holdfile)
@@ -683,7 +688,7 @@ function nag_daemon {
 	[ $# -eq 1 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
 	local -r vol=$1
 	local -r path=$VOLUMES/$vol
-	local -r log=${LOGS}/${vol}-nag.log
+	local -r log=${LOGS}/$vol/nag.log
 	local -r cron=${CRONS}/$vol
 	local period
 	local kind

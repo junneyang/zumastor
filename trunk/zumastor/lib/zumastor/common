@@ -139,8 +139,8 @@ function start_volume {
 	local mdev=$info/device/meta
 	local -r agent=${AGENTS}/$vol
 	local -r server=${SERVERS}/$vol
-	local -r agentlog=${LOGS}/${vol}-agent.log
-	local -r serverlog=${LOGS}/${vol}-server.log
+	local -r agentlog=${LOGS}/${vol}/agent.log
+	local -r serverlog=${LOGS}/${vol}/server.log
 	
 	# see if the meta device symlink exists, otherwise set mdev variable to empty string	
 	[[ -h $mdev ]] || mdev=""	
@@ -158,8 +158,8 @@ function stop_volume {
 	local mdev=$info/device/meta
 	local -r agent=${AGENTS}/$vol
 	local -r server=${SERVERS}/$vol
-	local -r agentlog=${LOGS}/${vol}-agent.log
-	local -r serverlog=${LOGS}/${vol}-server.log
+	local -r agentlog=${LOGS}/${vol}/agent.log
+	local -r serverlog=${LOGS}/${vol}/server.log
 
 	# see if the meta device symlink exists, otherwise set mdev variable to empty string	
 	[[ -h $mdev ]] || mdev=""	
