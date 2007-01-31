@@ -216,12 +216,14 @@ function mount_device {
 	local -r id=$2
 	local -r name=$(volume_name $vol $id)
 	local mount=${MOUNTS}/$name
+	local options=ro
 
 	# to support mounting arbitrary snapshots to the unqualified volume mountpoint
 	[[ $3 == "unqualified" ]] && mount=${MOUNTS}/$vol
+	[[ $3 == "rw" ]] && options="rw,errors=remount-ro"
 
 	test -d $mount || mkdir $mount || return 1
-	mount -o ro /dev/mapper/$name $mount || { echo "unable to mount /dev/mapper/$name on $mount"; return 1; }
+	mount -o $options /dev/mapper/$name $mount || { echo "unable to mount /dev/mapper/$name on $mount"; return 1; }
 }
 
 function umount_device {
