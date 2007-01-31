@@ -252,7 +252,7 @@ function run_master {
 	# daemonize (close stdin, stdout, stderr)
 	#exec 0</dev/null 1>/dev/null 2>/dev/null
 
-	mount_device $vol -1
+	mount_device $vol -1 rw
 
 	# we reopen the log for each write so rotation works
 	pid=""
