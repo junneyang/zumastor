@@ -724,7 +724,7 @@ function run_command {
 	define)
 		case $2 in
 		volume)
-			[[ $# -ge 5 ]] || [[ $# -le 7 ]] || { echo "usage: $0 define volume <vol> <origin> <snapstore> [<metadev>] [noinit|nosnap]"; exit 2; }
+			[[ $# -ge 5 ]] && [[ $# -le 7 ]] || { echo "usage: $0 define volume <vol> <origin> <snapstore> [<metadev>] [noinit|nosnap]"; exit 2; }
 			local -r vol=$3
 			local -r origin=$4
 			local -r snapstore=$5
