@@ -356,13 +356,13 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 			int ret = create_delta_chunk(extent_data1, extent_data2, delta_data, extent_size, (int *)&delta_size);
 
 			/* If delta is larger than chunk_size, we want to just copy over the raw chunk */
-			if (ret == BUFFER_SIZE_ERROR) {
+			if ((ret == BUFFER_SIZE_ERROR) || (delta_size == extent_size)) {
 				trace_off(printf("buffer size error\n"););
 				memcpy(delta_data, extent_data2, extent_size);
 				delta_size = extent_size;
-			} else if (ret < 0)
+			} else if (ret < 0) {
 				goto gen_create_error;
-			if (ret >= 0) {
+			}else if (ret >= 0) {
 				/* sanity test for delta creation */
 				unsigned char *delta_test = malloc(extent_size);
 				ret = apply_delta_chunk(extent_data1, delta_test, delta_data, extent_size, delta_size);
