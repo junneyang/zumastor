@@ -20,6 +20,10 @@
 #define METADATA_ALLOC(SB) ((SB)->image.alloc[0])
 #define SNAPDATA_ALLOC(SB) ((SB)->image.alloc[((SB)->metadev == (SB)->snapdev) ? 0 : 1])
 
+#define DDSNAPD_CLIENT_ERROR -1
+#define DDSNAPD_AGENT_ERROR -2
+#define DDSNAPD_CAUGHT_SIGNAL -3
+
 struct superblock
 {
 	/* Persistent, saved to disk */

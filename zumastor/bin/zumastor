@@ -569,6 +569,7 @@ function set_source {
 	local conv
 	local rempath
 	local -r myhost=`hostname -s`
+	local -r mysize=$(ddsnap status $SERVERS/$vol --size) || return 1
 
 	if [ -d $path/master ]; then
 		read -p "$vol is currently a master, convert to a downstream volume? [n] " conv
@@ -585,6 +586,10 @@ function set_source {
 	rempath=$VOLUMES/$vol/targets/$myhost/trigger
 	conv=$(run_remote $host "ls $rempath 2>/dev/null") && [[ $conv = $rempath ]] || \
 		{ echo "setup '$myhost' as target for volume '$vol' on '$host' first!"; return 1; }
+
+	conv=$(run_remote $host "ddsnap status $SERVERS/$vol --size")
+
+	[[ $conv -gt $mysize ]] && { echo "upstream volume ($conv) is larger than local ($mysize), cannot set source" ; return 1; }
 
 	mkdir -p $path/source || return 1
 	echo $host > $path/source/hostname || return 1
@@ -956,11 +961,11 @@ function run_command {
 			#tree -Fx --noreport $opt $VOLUMES
 			pushd $VOLUMES >/dev/null
 			[[ `ls | wc -l` -gt 0 ]] && for vol in *; do
+				echo VOLUME $vol:
 				if [ -e $SERVERS/$vol ]; then
-					echo VOLUME $vol:
-					ddsnap status $SERVERS/$vol
+					ddsnap status $SERVERS/$vol && echo Status: running || echo Status: failed
 				else
-					echo VOLUME $vol: not running
+					echo Status: not running
 				fi
 				echo "Configuration:"
 				tree -Fx --noreport $opt $VOLUMES/$vol
@@ -1005,6 +1010,10 @@ function run_command {
 			# the request came from, in the future, to avoid doing something
 			# wrong, such as replicatin from 2 hosts, check the $SSH_CLIENT
 			# environment variable
+
+			# kill listen first in case it is already listening (previous replication interrupted)
+			pkill -f "ddsnap delta listen /dev/mapper/$vol 0.0.0.0:$port"
+
 			rpid=$(ddsnap delta listen /dev/mapper/$vol 0.0.0.0:$port)
 
 			# if successful, ouput should be "pid = <pid>"

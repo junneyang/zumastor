@@ -2371,7 +2371,7 @@ int main(int argc, char *argv[])
 
 		poptFreeContext(serverCon);
 		
-		int listenfd, getsigfd, agentfd;
+		int listenfd, getsigfd, agentfd, ret;
 		
 		if (snap_server_setup(agent_sockname, server_sockname, &listenfd, &getsigfd, &agentfd) < 0)
 			error("Could not setup snapshot server\n");
@@ -2388,10 +2388,12 @@ int main(int argc, char *argv[])
 				return 0;
 			}
 		}
-		if (snap_server(sb, listenfd, getsigfd, agentfd) < 0)
-			error("Could not start snapshot server\n");
+
+		/* should only return on an error */
+		if ((ret = snap_server(sb, listenfd, getsigfd, agentfd)) < 0)
+			warn("server exited with error %i", ret);
 	
-		return 0; /* not reached */
+		return 0;
 	}
 	if (strcmp(command, "create") == 0) {
 		if (argc != 4) {

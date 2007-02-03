@@ -3234,11 +3234,11 @@ int snap_server(struct superblock *sb, int listenfd, int getsigfd, int agentfd)
 	unsigned maxclients = 100, clients = 0, others = 3;
 	struct client *clientvec[maxclients];
 	struct pollfd pollvec[others+maxclients];
-	int err = 0; /* FIXME: we never use this */
+	int err = 0;
 
-	pollvec[0] = (struct pollfd){ .fd = listenfd, .events = (POLLIN | POLLHUP | POLLERR) };
-	pollvec[1] = (struct pollfd){ .fd = getsigfd, .events = (POLLIN | POLLHUP | POLLERR) };
-	pollvec[2] = (struct pollfd){ .fd = agentfd, .events = (POLLIN | POLLHUP | POLLERR) };
+	pollvec[0] = (struct pollfd){ .fd = listenfd, .events = POLLIN };
+	pollvec[1] = (struct pollfd){ .fd = getsigfd, .events = POLLIN };
+	pollvec[2] = (struct pollfd){ .fd = agentfd, .events = POLLIN };
 
 	signal(SIGINT, sighandler);
 	signal(SIGTERM, sighandler);
@@ -3276,7 +3276,7 @@ int snap_server(struct superblock *sb, int listenfd, int getsigfd, int agentfd)
 			*client = (struct client){ .sock = clientfd };
 			clientvec[clients] = client;
 			pollvec[others+clients] = 
-				(struct pollfd){ .fd = clientfd, .events = (POLLIN | POLLHUP | POLLERR) };
+				(struct pollfd){ .fd = clientfd, .events = POLLIN };
 			clients++;
 		}
 
@@ -3293,12 +3293,18 @@ int snap_server(struct superblock *sb, int listenfd, int getsigfd, int agentfd)
 				signal(SIGINT, SIG_DFL);
 				kill(getpid(), sig); /* commit harikiri */ /* FIXME: use raise()? */
 			}
+			err = DDSNAPD_CAUGHT_SIGNAL;
 			goto done;
 		}
 
 		/* Agent message? */
-		if (pollvec[2].revents)
-			incoming(sb, &(struct client){ .sock = agentfd, .id = -2, .snap = -2 });
+		if (pollvec[2].revents) {
+			if (pollvec[2].revents & (POLLHUP|POLLERR)) { /* agent went away */
+				err = DDSNAPD_AGENT_ERROR;
+				goto done;
+			} else
+				incoming(sb, &(struct client){ .sock = agentfd, .id = -2, .snap = -2 });
+		}
 
 		/* Client message? */
 		unsigned i = 0;
@@ -3340,6 +3346,7 @@ int snap_server(struct superblock *sb, int listenfd, int getsigfd, int agentfd)
 
 				if (result == -2) { // !!! wrong !!!
 					cleanup(sb);
+					err = DDSNAPD_CLIENT_ERROR;
 					goto done;
 				}
 			}
