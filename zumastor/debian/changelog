@@ -1,3 +1,16 @@
+zumastor (0.4.rc4) unstable; urgency=low
+
+  * Fixed updaterc information to use dh_installinit instead 
+    Various other fixes to zumastor script 
+
+ -- Robert Nelson <rlnelson@localhost.localdomain>  Tue,  6 Feb 2007 14:59:20 -0800
+
+zumastor (0.4.rc3) unstable; urgency=low
+
+  * Metadevice addition; NFS rollover integration 
+
+ -- Robert Nelson <rlnelson@localhost.localdomain>  Mon, 29 Jan 2007 15:03:02 -0800
+
 zumastor (0.4.rc2) unstable; urgency=low
 
   * Added rc scripts to zumastor init.d script
