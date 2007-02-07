@@ -90,6 +90,7 @@ start)
 stop)
 	stop_zumastor
 	[ -e $RUNFILE ] && rm $RUNFILE
+	exit 0
 
 	;;
 

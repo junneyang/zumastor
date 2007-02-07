@@ -347,14 +347,14 @@ function stop_master {
 
 	rm -f $cron
 	log "killing master daemon" $log
-	pkill -f "zumastor start master $vol" || return 1
+	pkill -f "zumastor start master $vol$" || return 1
 }
 
 function stop_nag {
 	[ $# -eq 1 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
 	local -r vol=$1
 
-	pkill -f "zumastor start source $vol" || return 1
+	pkill -f "zumastor start source $vol$" || return 1
 }
 
 function stop_target {
@@ -362,7 +362,7 @@ function stop_target {
 	local -r vol=$1
 	local -r host=$2
 
-	pkill -f "zumastor start target $vol $host" || return 1
+	pkill -f "zumastor start target $vol $host$" || return 1
 	rm $VOLUMES/$vol/targets/$host/.sleeppid 2> /dev/null
 }
 
@@ -1047,7 +1047,7 @@ function run_command {
 			# environment variable
 
 			# kill listen first in case it is already listening (previous replication interrupted)
-			pkill -f "ddsnap delta listen /dev/mapper/$vol 0.0.0.0:$port"
+			pkill -f "ddsnap delta listen /dev/mapper/$vol 0.0.0.0:$port$"
 
 			rpid=$(ddsnap delta listen /dev/mapper/$vol 0.0.0.0:$port)
 
@@ -1058,7 +1058,7 @@ function run_command {
 			[[ $rpid -gt 1 ]] && echo $snap
 			exit $? ;;
 		done)
-			pkill -f "ddsnap delta listen /dev/mapper/$vol 0.0.0.0:$port"
+			pkill -f "ddsnap delta listen /dev/mapper/$vol 0.0.0.0:$port$"
 			replication_cycle $vol
 
 			exit $? ;;
@@ -1073,6 +1073,6 @@ function run_command {
 
 
 [[ -d $VOLUMES ]] || { echo "$0: cannot find zumastor database in '$VOLUMES'"; exit 1; }
-[[ $1 == "status" ]] || [[ -e $RUNFILE ]] || { echo "$0: zumastor not running, start with '/etc/init.d/zumastor start' first"; exit 1; }
+[[ $1 == "stop" ]] || [[ $1 == "status" ]] || [[ -e $RUNFILE ]] || { echo "$0: zumastor not running, start with '/etc/init.d/zumastor start' first"; exit 1; }
 run_command "$@"
 
