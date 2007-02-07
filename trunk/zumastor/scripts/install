@@ -8,7 +8,7 @@ rm ${DESTDIR}/etc/zumastor >/dev/null 2>&1 # in case of symlink
 echo ${DESTDIR}
 mkdir -p ${DESTDIR}
 echo ${DESTDIR}/t.tar
-tar -cv --exclude=doc --exclude=man --exclude=build-stamp --exclude=configure-stamp --exclude=.svn --exclude=Makefile --exclude=TODO --exclude=notes.packaging --exclude=debian --exclude=scripts -f ${DESTDIR}/t.tar *
+tar -cv --exclude=.svn -f ${DESTDIR}/t.tar bin etc lib usr var
 
 cd ${DESTDIR}
 tar xvf t.tar
