@@ -194,19 +194,20 @@ function replicate_snapshot {
 	local -r hold_file=$target_dir/hold
 	local -r server=$SERVERS/$vol
 	local -r port_file=$target_dir/port
-	local -r myhost=`hostname -s`
-	local old_snap rem_snap port
+	local old_snap rem_snap port send
 
 	log "replication for snapshot '$snap' on volume '$vol' to '$host'"
 
 	old_snap=$(cat $hold_file) || { echo "initial replication"; old_snap=0; }
 
-	rem_snap=$(run_remote $host "cat $VOLUMES/$vol/source/hostname") && [[ $rem_snap = $myhost ]] || \
-		{ log "set '$myhost' as source for '$vol' on '$host' first!"; usecount_decrement $vol $snap; return 1; }
+	rem_snap=$(run_remote $host "cat $VOLUMES/$vol/source/hostname") && [[ $rem_snap = $MYHOSTNAME ]] || \
+		{ log "set '$MYHOSTNAME' as source for '$vol' on '$host' first!"; usecount_decrement $vol $snap; return 1; }
 
-	if [ -e $send_file ]; then
-		log "$send_file shouldn't exist"
-		return 1
+	if [[ -e $send_file ]]; then
+		log "$send_file exists, cleaning up previous replication cycle"
+		send=$(cat $send_file)
+		[[ -z $send ]] || { log "dropping usecount for $vol($snap)"; usecount_decrement $vol $send; }
+		rm $send_file
 	fi
 
 	echo $snap > $send_file || { log "error writing snapshot id '$snap' to '$send_file'"; \
@@ -339,8 +340,13 @@ function stop_master {
 	[ $# -eq 1 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
 	local -r vol=$1
 	local -r cron=${CRONS}/$vol
+	local -r log=${LOGS}/$vol/master.log
+
+	log "stop master called, umounting volume" $log
+	umount_device $vol -1 2>/dev/null
 
 	rm -f $cron
+	log "killing master daemon" $log
 	pkill -f "zumastor start master $vol" || return 1
 }
 
@@ -472,10 +478,21 @@ function define_target {
 	local -r period=$4
 	local -r path=$VOLUMES/$vol/targets/$host
 
-	mkdir $path || return 1
-	mkfifo $path/trigger || return 1
+	if [[ -e $path ]]; then
+		echo "$0: '$host' already set as target, updating configuration"
+	else
+		mkdir $path || return 1
+		mkfifo $path/trigger || return 1
+	fi
+
 	echo $port > $path/port || return 1
-	[[ -z $period ]] || echo $period > $path/period || return 1
+	if [[ -z $period ]]; then
+		rm $path/period 2> /dev/null
+	else
+		echo $period > $path/period || return 1
+	fi
+
+	stop_target $vol $host 2>/dev/null
 	zumastor start target $vol $host || return 1
 }
 
@@ -520,12 +537,11 @@ function set_master {
 	local -r kind=$2
 	local -r count=$3
 	local -r path=$VOLUMES/$vol
-	local new
-	local conv
+	local new conv
 
 	if [ -d $path/source ]; then
 		read -p "$vol is currently a downstream volume, convert to master? [n] " conv
-		[ X$conv = Xy ] || [ X$conv = Xyes ] || return 1
+		[[ $conv == "y" ]] || [[ $conv == "yes" ]] || return 1
 
 		rm -rf $path/source
 	fi
@@ -556,6 +572,7 @@ function forget_master {
 	local -r vol=$1
 	local -r path=$VOLUMES/$vol
 
+	# FIXME TODO clean up cron-created snapshots
 	stop_master $vol
 	[ -d $path/master ] && rm -rf $path/master
 }
@@ -566,39 +583,45 @@ function set_source {
 	local -r host=$2
 	local -r period=$3
 	local -r path=$VOLUMES/$vol
-	local conv
-	local rempath
-	local -r myhost=`hostname -s`
 	local -r mysize=$(ddsnap status $SERVERS/$vol --size) || return 1
+	local -r oldhost=$(cat $path/source/hostname 2>/dev/null)
+	local conv rempath new=yes
 
 	if [ -d $path/master ]; then
-		read -p "$vol is currently a master, convert to a downstream volume? [n] " conv
-		[ X$conv = Xy ] || [ X$conv = Xyes ] || return 1
+		read -p "volume '$vol' is currently a master, convert to a downstream volume? [n] " conv
+		[[ $conv == "y" ]] || [[ $conv == "yes" ]] || return 1
 
 		forget_master $vol
 	fi
 
-	if [ -e $path/source/hostname ]; then
-		echo "$0: already set as a downstream volume for " $(cat $path/source/hostname)
-		return 1
-	fi
-
-	rempath=$VOLUMES/$vol/targets/$myhost/trigger
+	rempath=$VOLUMES/$vol/targets/$MYHOSTNAME/trigger
 	conv=$(run_remote $host "ls $rempath 2>/dev/null") && [[ $conv = $rempath ]] || \
-		{ echo "setup '$myhost' as target for volume '$vol' on '$host' first!"; return 1; }
+		{ echo "setup '$MYHOSTNAME' as target for volume '$vol' on '$host' first!"; return 1; }
 
 	conv=$(run_remote $host "ddsnap status $SERVERS/$vol --size")
-
 	[[ $conv -gt $mysize ]] && { echo "upstream volume ($conv) is larger than local ($mysize), cannot set source" ; return 1; }
 
-	mkdir -p $path/source || return 1
+	if [[ -e $path/source ]]; then
+		new=no
+		if [[ $oldhost != $MYHOSTNAME ]]; then
+			read -p "source already set to '$oldhost', change to '$host'? [n] " conv
+			[[ $conv == "y" ]] || [[ $conv == "yes" ]] || return 1
+		fi
+	fi
+
+	[[ $new == "yes" ]] && { mkdir -p $path/source || return 1; }
 	echo $host > $path/source/hostname || return 1
-	[[ -z $period ]] || echo $period > $path/source/period || return 1
+
+	if [[ -z $period ]]; then
+		rm $path/source/period 2>/dev/null
+	else
+		echo $period > $path/source/period || return 1
+	fi
 
 	# FIXME TODO - snapshot 0 may be used for the source for chained replication, therefore
 	# we arbitrarily pick 1, because no other snapshots should exist
-	create_snapshot $vol 1 || return 1
-	echo 1 > $path/source/hold || return 1
+	[[ $new == "yes" ]] && { create_snapshot $vol 1 || return 1; }
+	[[ $new == "yes" ]] && { echo 1 > $path/source/hold || return 1; }
 }
 
 function trigger_snapshot {
@@ -699,11 +722,6 @@ function nag_daemon {
 	local kind
 	local host
 
-	# FIXME TODO: It is a bad assumption that we use the short hostname
-	# unless we enforece this.  Perhaps we should always use IPs?  This
-	# would also elimiate ns failure or latency as an issue.
-	local -r myhost=`hostname -s`
-
 	host=$(cat $path/source/hostname)
 	period=$(cat $path/source/period 2>/dev/null)
 
@@ -720,7 +738,7 @@ function nag_daemon {
 		fi
 
 		log "sending wakeup to $host:" $log
-		run_remote $host "echo target $myhost > $VOLUMES/$vol/master/trigger" >> $log 2>&1
+		run_remote $host "echo target $MYHOSTNAME > $VOLUMES/$vol/master/trigger" >> $log 2>&1
 		sleep $period
 	done &
 }
@@ -743,8 +761,8 @@ function run_command {
 					metadev=$6
 				fi
 			elif [[ $# -eq 7 ]]; then
-				$metadev=$6
-				$noinit=$7
+				metadev=$6
+				noinit=$7
 			fi
 
 			verify_valid_volname $vol || { echo "$0: invalid volume name '$vol'"; exit 1; }
@@ -881,8 +899,16 @@ function run_command {
 		source)
 			[ $# -eq 3 ] || { echo "usage: $0 start source <vol>"; exit 2; }
 			local -r vol=$3
+			local -r holdfile=$VOLUMES/$vol/source/hold
+			local -r log=${LOGS}/$vol/source.log
+			local -r snap=$(cat $holdfile 2>/dev/null)
 
 			verify_managed_vol $vol || { echo "$0: volume '$vol' is not a managed volume"; exit 1; }
+
+			if [[ ! -z $snap ]]; then
+				log "mounting $vol($snap) on source start" $log
+				mount_device $vol $snap unqualified >> $log 2>&1
+			fi
 
 			nag_daemon $vol
 			exit $? ;;
@@ -914,10 +940,19 @@ function run_command {
 		source)
 			[ $# -eq 3 ] || { echo "usage: $0 stop source <vol>"; exit 2; }
 			local -r vol=$3
+			local -r holdfile=$VOLUMES/$vol/source/hold
+			local -r log=${LOGS}/$vol/source.log
+			local -r snap=$(cat $holdfile 2>/dev/null)
 
 			verify_managed_vol $vol || { echo "$0: volume '$vol' is not a managed volume"; exit 1; }
 
 			stop_nag $vol
+
+			if [[ ! -z $snap ]]; then
+				log "umounting $vol($snap) on source stop" $log
+				umount_device $vol $snap unqualified >> $log 2>&1
+			fi
+
 			exit $? ;;
 		*)
 			echo "usage: $0 stop master|target|source"

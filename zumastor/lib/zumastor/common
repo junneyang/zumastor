@@ -21,6 +21,11 @@ declare -r SSH_COMMAND=$(cat $CONFIG/ssh_command)
 
 declare -ar KINDS=(hourly daily weekly monthly)
 
+# FIXME TODO - this is where we decide the hostname must be the fqdn of the
+# machine.  This has to be consistent so one machine can identify itself to
+# the other.  We do this rather than trying to resolve hostnames.
+declare -r MYHOSTNAME=`uname -n`
+
 function find_in {
 	[ $# -ge 1 ] || { echo "$0: too few arguments ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
 	local -r item=$1

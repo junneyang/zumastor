@@ -8,7 +8,7 @@ rm ${DESTDIR}/etc/zumastor >/dev/null 2>&1 # in case of symlink
 echo ${DESTDIR}
 mkdir -p ${DESTDIR}
 echo ${DESTDIR}/t.tar
-tar -cv --exclude=build-stamp --exclude=configure-stamp --exclude=.svn --exclude=Makefile --exclude=TODO --exclude=notes.packaging --exclude=debian --exclude=scripts -f ${DESTDIR}/t.tar *
+tar -cv --exclude=doc --exclude=man --exclude=build-stamp --exclude=configure-stamp --exclude=.svn --exclude=Makefile --exclude=TODO --exclude=notes.packaging --exclude=debian --exclude=scripts -f ${DESTDIR}/t.tar *
 
 cd ${DESTDIR}
 tar xvf t.tar
@@ -17,3 +17,5 @@ cd -
 rm ${DESTDIR}/t.tar
 
 chmod 755 ${DESTDIR}/etc/cron.{hourly,daily,weekly}/zumastor ${DESTDIR}/etc/init.d/zumastor
+mkdir -p ${DESTDIR}/usr/share/man/man8 2>/dev/null
+gzip -c ./man/zumastor.8 > ${DESTDIR}/usr/share/man/man8/zumastor.8.gz
