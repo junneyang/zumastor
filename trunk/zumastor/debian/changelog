@@ -1,3 +1,13 @@
+zumastor (0.4.rc5) unstable; urgency=low
+
+  * fixed minor bug when specifying metadata dev and noinit
+  * added man page
+  * switched to fqdn for hostnames
+  * changed already defined commands to reconfigure
+
+ -- Shapor Naghibzadeh <shapor@google.com>  Tue,  6 Feb 2007 14:06:32 -0800
+
+=======
 zumastor (0.4.rc4) unstable; urgency=low
 
   * Fixed updaterc information to use dh_installinit instead 
