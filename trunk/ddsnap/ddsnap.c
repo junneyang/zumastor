@@ -44,7 +44,7 @@
 #define XDELTA 1
 #define RAW (1 << 1)
 #define TEST (1 << 2)
-#define OPT_COMP (1 << 3)
+#define BEST_COMP (1 << 3)
 
 #define DEF_GZIP_COMP 0
 #define MAX_GZIP_COMP 9
@@ -404,8 +404,8 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 		deh.compress = FALSE;
 		deh.data_length = delta_size;
 
-		if (mode == OPT_COMP) {
-			trace_off(printf("within opt_comp mode\n"););
+		if (mode == BEST_COMP) {
+			trace_off(printf("within best_comp mode\n"););
 
 			int ext2_comp_ret = compress2(ext2_comp_delta, (unsigned long *) &ext2_comp_size, extent_data2, extent_size, level);
 
@@ -1939,11 +1939,11 @@ int main(int argc, char *argv[])
 		POPT_TABLEEND
 	};
 
-	int xd = FALSE, raw = FALSE, test = FALSE, gzip_level = DEF_GZIP_COMP, opt_comp = FALSE;
+	int xd = FALSE, raw = FALSE, test = FALSE, gzip_level = DEF_GZIP_COMP, best_comp = FALSE;
 	struct poptOption cdOptions[] = {
 		{ "xdelta", 'x', POPT_ARG_NONE, &xd, 0, "Delta file format: xdelta chunk", NULL },
 		{ "raw", 'r', POPT_ARG_NONE, &raw, 0, "Delta file format: raw chunk from later snapshot", NULL },
-		{ "optcomp", 'o', POPT_ARG_NONE, &opt_comp, 0, "Delta file format: optimal compression (slowest)", NULL},
+		{ "best", 'b', POPT_ARG_NONE, &best_comp, 0, "Delta file format: best compression (slowest)", NULL},
 		{ "test", 't', POPT_ARG_NONE, &test, 0, "Delta file format: xdelta chunk, raw chunk from earlier snapshot and raw chunk from later snapshot", NULL },
 		{ "gzip", 'g', POPT_ARG_INT, &gzip_level, 0, "Compression via gzip", "compression_level"},
 		POPT_TABLEEND
@@ -2682,18 +2682,18 @@ int main(int argc, char *argv[])
 			}
 
 			/* Make sure the options are mutually exclusive */
-			if (xd+raw+test+opt_comp > 1) {
-				fprintf(stderr, "%s %s: Too many chunk options were selected.\nPlease select only one: -x, -r, -t or -o\n", argv[0], argv[1]);
+			if (xd+raw+test+best_comp > 1) {
+				fprintf(stderr, "%s %s: Too many chunk options were selected.\nPlease select only one: -x, -r, -t or -b\n", argv[0], argv[1]);
 				poptPrintUsage(cdCon, stderr, 0);
 				poptFreeContext(cdCon);
 				return 1;
 			}
 
-			u32 mode = (test ? TEST : (raw ? RAW : (xd? XDELTA : OPT_COMP)));
-			if (opt_comp)
+			u32 mode = (test ? TEST : (raw ? RAW : (xd? XDELTA : BEST_COMP)));
+			if (best_comp)
 				gzip_level = MAX_GZIP_COMP;
 		
-			trace_on(fprintf(stderr, "xd=%d raw=%d test=%d opt_comp=%d mode=%u gzip_level=%d\n", xd, raw, test, opt_comp, mode, gzip_level););
+			trace_on(fprintf(stderr, "xd=%d raw=%d test=%d best_comp=%d mode=%u gzip_level=%d\n", xd, raw, test, best_comp, mode, gzip_level););
 
 			char const *changelist, *deltafile, *devstem;
 
@@ -2744,18 +2744,18 @@ int main(int argc, char *argv[])
 			}
 
 			/* Make sure the options are mutually exclusive */
-			if (xd+raw+test+opt_comp > 1) {
+			if (xd+raw+test+best_comp > 1) {
 				fprintf(stderr, "%s %s: Too many chunk options were selected.\nPlease select only one: -x, -r, -t or -o\n", argv[0], argv[1]);
 				poptPrintUsage(cdCon, stderr, 0);
 				poptFreeContext(cdCon);
 				return 1;
 			}
 
-			u32 mode = (test ? TEST : (raw ? RAW : (xd ? XDELTA : OPT_COMP)));
-			if (opt_comp)
+			u32 mode = (test ? TEST : (raw ? RAW : (xd ? XDELTA : BEST_COMP)));
+			if (best_comp)
 				gzip_level = MAX_GZIP_COMP;
 
-			trace_on(fprintf(stderr, "xd=%d raw=%d test=%d opt_comp=%d mode=%u gzip_level=%d\n", xd, raw, test, opt_comp, mode, gzip_level););
+			trace_on(fprintf(stderr, "xd=%d raw=%d test=%d best_comp=%d mode=%u gzip_level=%d\n", xd, raw, test, best_comp, mode, gzip_level););
 
 			char const *sockname, *snaptag1str, *snaptag2str, *devstem, *snaptagremstr, *hoststr;
 
