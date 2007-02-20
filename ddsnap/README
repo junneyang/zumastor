@@ -5,10 +5,10 @@ A few main points:
 
   * The scripts/ directory offers some helpful tools for using ddsnap.
 
-  * Join the hotcakes irc channel for support:
+  * Join the zumastor irc channel for support:
 
        /server irc.oftc.net
-       /join #hotcakes
+       /join #zumastor
 
   * Email us and volunteer to help with things!  Our gmail names are on the
     main project page -- http://code.google.com/p/zumastor/
@@ -16,19 +16,17 @@ A few main points:
 
 Get started!
 
-Check out our sources (if you haven't already!):
+Check out the source (if you haven't already!):
 
-  - svn checkout http://hotcakes.googlecode.com/svn/trunk/ hotcakes
+  - svn checkout http://zumastor.googlecode.com/svn/trunk/ zumastor
 
-  - The rest of this document will be from the root ./hotcakes/hotcakes/
+Set up Linux 2.6.19.1:
 
-Set up Linux 2.6.17:
-
-  - Get a 2.6.17 or older kernel.org tree, it already has device mapper
+  - Get a 2.6.19.1 or other kernel.org tree, it already has device mapper
 
   - Apply the ddsnap-2.6.XX patch. From the root of the 2.6 tree:
 
-      patch -p1 < /path/to/hotcakes/patches/hotcakes-2.6.XX
+      patch -p1 < /path/to/zumastor/ddsnap/patches/zumastor-2.6.XX
 
   - Make sure that device mapper and the dm_dd* are selected to be installed 
     as modules. In addition, device-mapper should be enabled too.
