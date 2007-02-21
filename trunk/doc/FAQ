@@ -14,6 +14,11 @@ A. A few things:
   3) it knows about NVRAM for increased performance
 
 Q. What can I do to help?
-A. Give it a try.  Let us know what you think on the mailing list at
-http://groups.google.com/group/zumastor
-or on the #zumastor channel on irc.oftc.net
+A. A few things:
+  1) Give it a try.  Let us know what you think on the mailing list at
+     http://groups.google.com/group/zumastor
+     or on the #zumastor channel on irc.oftc.net
+  2) There are known issues we could use help debugging/fixing, see the
+     known issues on the project page
+  3) Groovy new features.  Code welcome!
+
