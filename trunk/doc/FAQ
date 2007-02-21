@@ -1,8 +1,9 @@
 Zumastor FAQ
 
-Q. What is zumastor?
-A. In a nutshell, it's an effort to bring enterprise storage to Linux.  Many
-more details can be found on the project page (and the whitepaper) at:
+Q. What is Zumastor?
+A. In a nutshell, it's an effort to bring enterprise storage features to
+Linux.  Many more details can be found on the project page (and the
+whitepaper) at:
 http://zumastor.googlepages.com
 
 Q. What does ddsnap do that LVM snapshotting doesn't?
