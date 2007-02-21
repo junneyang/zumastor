@@ -1,0 +1,18 @@
+Zumastor FAQ
+
+Q. What is zumastor?
+A. In a nutshell, it's an effort to bring enterprise storage to Linux.  Many
+more details can be found on the project page (and the whitepaper) at:
+http://zumastor.googlepages.com
+
+Q. What does ddsnap do that LVM snapshotting doesn't?
+A. A few things:
+  1) performance doesn't degrade with number of snapshots (see whitepaper)
+  2) the snapshot store is shared so it doesn't bloat up with number of
+     snapshots
+  3) it knows about NVRAM for increased performance
+
+Q. What can I do to help?
+A. Give it a try.  Let us know what you think on the mailing list at
+http://groups.google.com/group/zumastor
+or on the #zumastor channel on irc.oftc.net
