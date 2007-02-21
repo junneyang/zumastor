@@ -11,7 +11,9 @@ ddraid_deps = $(deps) ddraid.h $(kernel)/dm-ddraid.h
 
 ddraid_binaries = mkddraid ddraidd ddraid-agent
 ddsnap_binaries = ddsnap
-binaries =  $(ddraid_binaries) $(ddsnap_binaries) devspam
+# ddraid temporarily removed
+#binaries =  $(ddraid_binaries) $(ddsnap_binaries) devspam
+binaries =  $(ddsnap_binaries) devspam
 
 includes = $(kernel)
 flags = -g -Wall -D_FILE_OFFSET_BITS=64
