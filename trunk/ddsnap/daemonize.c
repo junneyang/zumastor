@@ -1,3 +1,6 @@
+#define _XOPEN_SOURCE 600
+#define _GNU_SOURCE /* need this for O_DIRECT */
+
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -7,9 +10,24 @@
 #include <errno.h>
 #include <signal.h>
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <sys/time.h>
+#include <fcntl.h>
 #include "trace.h"
 #include "daemonize.h"
+
+#define BUFSIZE 512
+
+int set_flags(int fd, long args) {
+	int mode = fcntl(fd, F_GETFL);
+
+	if (mode < 0) 
+		return -errno;
+	if (fcntl(fd, F_SETFL, mode | args) < 0)
+		return -errno;
+
+	return 0;
+}
 
 /* FIXME: handle log file rotations on SIGHUP */
 
@@ -51,9 +69,20 @@ pid_t daemonize(char const *logfile, char const *pidfile)
 			error("could not reopen stderr\n");
 
 		dup2(fileno(stderr), fileno(stdout));
+	
+		int err;
+		char *buffer_stdout, *buffer_stderr;
+		if ((err = posix_memalign((void **)&buffer_stdout, BUFSIZE, BUFSIZE)))
+	  		error("unable to allocate buffer for stdout: %s", strerror(err));
+		if ((err = posix_memalign((void **)&buffer_stderr, BUFSIZE, BUFSIZE)))
+	  		error("unable to allocate buffer for stderr: %s", strerror(err));
+		setvbuf(stdout, buffer_stdout, _IOLBF, BUFSIZE);
+		setvbuf(stderr, buffer_stderr, _IOLBF, BUFSIZE);
 
-		setvbuf(stdout, NULL, _IOLBF, 0);
-		setvbuf(stderr, NULL, _IOLBF, 0);
+		if (set_flags(fileno(stdout), O_SYNC)
+				|| set_flags(fileno(stderr), O_SYNC))
+			error("unable to set stdout and stderr flags to O_DIRECT: %s"
+					, strerror(errno));
 
 		/* FIXME: technically we should chdir to the fs root
 		 * to avoid making random filesystems busy, but some
