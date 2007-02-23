@@ -75,14 +75,7 @@ function verify_valid_host {
 }
 
 function verify_valid_number {
-	[ $# -eq 1 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
-	local -r num=$1
-
-	# allow only strings of digits 
-	[[ $num ]] || return 1
-	echo "$num" | grep -E '[^0-9]' >/dev/null && return 1
-
-	return 0
+	[[ $# = 1 && $1 && ! $1 =~ [^0-9] ]]
 }
 
 function verify_managed_vol {
