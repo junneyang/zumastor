@@ -531,13 +531,11 @@ function forget_source {
 	return 0
 }
 
-function set_master {
-	[ $# -eq 3 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
+function define_master {
+	[ $# -eq 1 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
 	local -r vol=$1
-	local -r kind=$2
-	local -r count=$3
 	local -r path=$VOLUMES/$vol
-	local new conv
+	local conv
 
 	if [ -d $path/source ]; then
 		read -p "$vol is currently a downstream volume, convert to master? [n] " conv
@@ -546,12 +544,21 @@ function set_master {
 		rm -rf $path/source
 	fi
 
-	[ -d $path/master ] || new=yes
+	mkdir $path/master || return 1
+	mkdir $path/master/schedule || return 1
 
-	if [ $new ]; then
-		mkdir $path/master || return 1
-		mkdir $path/master/schedule || return 1
-	fi
+	echo 1 >$path/master/next || return 1
+	mkdir $path/master/snapshots || return 1
+	mkfifo $path/master/trigger || return 1
+	zumastor start master $vol || return 1
+}
+
+function set_master_schedule {
+	[ $# -eq 3 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
+	local -r vol=$1
+	local -r kind=$2
+	local -r count=$3
+	local -r path=$VOLUMES/$vol
 
 	if [ $count -gt 0 ]; then
 		echo $count >$path/master/schedule/$kind || return 1
@@ -559,12 +566,6 @@ function set_master {
 		rm -f $path/master/schedule/$kind
 	fi
 
-	if [ $new ]; then
-		echo 1 >$path/master/next || return 1
-		mkdir $path/master/snapshots || return 1
-		mkfifo $path/master/trigger || return 1
-		zumastor start master $vol || return 1
-	fi
 }
 
 function forget_master {
@@ -595,8 +596,8 @@ function set_source {
 	fi
 
 	rempath=$VOLUMES/$vol/targets/$MYHOSTNAME/trigger
-	conv=$(run_remote $host "ls $rempath 2>/dev/null") && [[ $conv = $rempath ]] || \
-		{ echo "setup '$MYHOSTNAME' as target for volume '$vol' on '$host' first!"; return 1; }
+	#conv=$(run_remote $host "ls $rempath 2>/dev/null") && [[ $conv = $rempath ]] || \
+	#	{ echo "setup '$MYHOSTNAME' as target for volume '$vol' on '$host' first!"; return 1; }
 
 	conv=$(run_remote $host "ddsnap status $SERVERS/$vol --size")
 	[[ $conv -gt $mysize ]] && { echo "upstream volume ($conv) is larger than local ($mysize), cannot set source" ; return 1; }
@@ -742,337 +743,370 @@ function nag_daemon {
 		sleep $period
 	done &
 }
-function run_command {
-	case $1 in
-	define)
-		case $2 in
-		volume)
-			[[ $# -ge 5 ]] && [[ $# -le 7 ]] || { echo "usage: $0 define volume <vol> <origin> <snapstore> [<metadev>] [noinit|nosnap]"; exit 2; }
-			local -r vol=$3
-			local -r origin=$4
-			local -r snapstore=$5
-			local metadev=""
-			local noinit=""
-			
-			if [[ $# -eq 6 ]]; then
-				if [[ $6 = "noinit" || $6 = "nosnap" ]]; then
-					noinit=$6
-				else
-					metadev=$6
-				fi
-			elif [[ $# -eq 7 ]]; then
-				metadev=$6
-				noinit=$7
-			fi
-
-			verify_valid_volname $vol || { echo "$0: invalid volume name '$vol'"; exit 1; }
-			verify_valid_device $origin || { echo "$0: invalid device '$origin'"; exit 1; }
-			verify_valid_device $snapstore || { echo "$0: invalid device '$snapstore'"; exit 1; }
-			[ -z $meta ] || verify_valid_device $metadev || { echo "$0: invalid device '$meta'"; exit 1; }
-
-			if [[ $noinit = "noinit" ]]; then
-				read -p "noinit: you must have initialized the device manually, continue? [y/N] " -t 30 \
-					|| { echo "timeout."; exit 1; }
-
-				[[ $REPLY = "y" ]] || { echo "aborted."; exit 1; }
-				
-				define_volume $vol $origin $snapstore $metadev || { echo "$0: define volume '$vol' failed"; exit 1; }
-			else
-				init_define_volume $vol $origin $snapstore $metadev || { echo "$0: init volume '$vol' failed"; exit 1; }
-
-				echo "Successfully created and initialized volume '$vol'."
-
-				if [[ $noinit = "nosnap" ]]; then
-					echo "nosnap: no initial snapshot taken!"
-					echo "This volume should only be used as a replication target, not source"
-					exit 0
-				fi
-
-				create_snapshot $vol 0 || { echo "$0: error with initial snapshot"; exit 1; }
-				echo 0 > $VOLUMES/$vol/zero
-
-				echo "You can now create a filesystem on /dev/mapper/$vol"
-			fi
-
-			exit $? ;;
-		target)
-			[[ $# -eq 4 ]] || [[ $# -eq 5 ]] || { echo "usage: $0 define target <vol> <host>[:port] [period]"; exit 2; }
-			local -r vol=$3
-			local host=$4
-			local period=$5
-			local port=${host/*:/}
-
-			# check to see if port was specified, if so, strip it off the host
-			if [[ $host != $port ]]; then
-				host=${host/:*/}
-			else
-				# otherwise use the default port
-				port=$DEFAULT_PORT
-			fi
-
-			verify_managed_vol $vol || { echo "$0: volume '$vol' is not a managed volume"; exit 1; }
-			verify_valid_host $host || { echo "$0: invalid host '$host'"; exit 1; }
-
-			define_target $vol $host $port $period
-			exit $? ;;
-		master)
-			[ $# -eq 5 ] || { echo "usage: $0 define master <vol> <kind> <count>"; exit 2; }
-			local -r vol=$3
-			local -r kind=$4
-			local -r count=$5
-
-			verify_managed_vol $vol || { echo "$0: volume '$vol' is not a managed volume"; exit 1; }
-			find_in $kind ${KINDS[@]} || { echo "$0: unknown snapshot type '$kind'"; exit 1; }
-			verify_valid_number $count || { echo "$0: bad snapshot count '$count'"; exit 1; }
-
-			set_master $vol $kind $count
-			exit $? ;;
-		source)
-			[[ $# -eq 4 ]] || [[ $# -eq 5 ]] || { echo "usage: $0 define source <vol> <host> [period]"; exit 2; }
-			local -r vol=$3
-			local -r host=$4
-			local -r period=$5
-
-			verify_managed_vol $vol || { echo "$0: volume '$vol' is not a managed volume"; exit 1; }
-			verify_valid_host $host || { echo "$0: invalid host '$host'"; exit 1; }
-
-			set_source $vol $host $period
-			exit $? ;;
-		*)
-			echo "usage: $0 define volume|target|master|source"
-			exit 2 ;;
-		esac
-		;;
-	forget)
-		case $2 in
-		volume)
-			[ $# -eq 3 ] || { echo "usage: $0 forget volume <vol>"; exit 2; }
-			local -r vol=$3
-
-			verify_managed_vol $vol || { echo "$0: volume '$vol' is not a managed volume"; exit 1; }
-
-			forget_volume $vol
-			exit $? ;;
-		target)
-			[ $# -eq 4 ] || { echo "usage: $0 forget target <vol> <host>"; exit 2; }
-			local -r vol=$3
-			local -r host=$4
-
-			verify_managed_vol $vol || { echo "$0: volume '$vol' is not a managed volume"; exit 1; }
-			verify_valid_host $host || { echo "$0: invalid host '$host'"; exit 1; }
-
-			forget_target $vol $host
-			exit $? ;;
-		source)
-			[ $# -eq 3 ] || { echo "usage: $0 forget source <vol>"; exit 2; }
-			local -r vol=$3
-
-			verify_managed_vol $vol || { echo "$0: volume '$vol' is not a managed volume"; exit 1; }
-
-			forget_source $vol
-			exit $? ;;
-		*)
-			echo "usage: $0 forget volume|target|source"
-			exit 2 ;;
-		esac
-		;;
-	start)
-		case $2 in
-		master)
-			[ $# -eq 3 ] || { echo "usage: $0 start master <vol>"; exit 2; }
-			local -r vol=$3
-
-			verify_managed_vol $vol || { echo "$0: volume '$vol' is not a managed volume"; exit 1; }
-
-			run_master $vol
-			exit $? ;;
-		target)
-			[ $# -eq 4 ] || { echo "usage: $0 start target <vol> <host>"; exit 2; }
-			local -r vol=$3
-			local -r host=$4
-
-			verify_managed_vol $vol || { echo "$0: volume '$vol' is not a managed volume"; exit 1; }
-			verify_valid_host $host || { echo "$0: invalid host '$host'"; exit 1; }
-
-			run_target $vol $host
-			exit $? ;;
-		source)
-			[ $# -eq 3 ] || { echo "usage: $0 start source <vol>"; exit 2; }
-			local -r vol=$3
-			local -r holdfile=$VOLUMES/$vol/source/hold
-			local -r log=${LOGS}/$vol/source.log
-			local -r snap=$(cat $holdfile 2>/dev/null)
-
-			verify_managed_vol $vol || { echo "$0: volume '$vol' is not a managed volume"; exit 1; }
-
-			if [[ ! -z $snap ]]; then
-				log "mounting $vol($snap) on source start" $log
-				mount_device $vol $snap unqualified >> $log 2>&1
-			fi
-
-			nag_daemon $vol
-			exit $? ;;
-		*)
-			echo "usage: $0 start master|target|source"
-			exit 2 ;;
-		esac
-		;;
-	stop)
-		case $2 in
-		master)
-			[ $# -eq 3 ] || { echo "usage: $0 stop master <vol>"; exit 2; }
-			local -r vol=$3
-
-			verify_managed_vol $vol || { echo "$0: volume '$vol' is not a managed volume"; exit 1; }
-
-			stop_master $vol
-			exit $? ;;
-		target)
-			[ $# -eq 4 ] || { echo "usage: $0 stop target <vol> <host>"; exit 2; }
-			local -r vol=$3
-			local -r host=$4
-
-			verify_managed_vol $vol || { echo "$0: volume '$vol' is not a managed volume"; exit 1; }
-			verify_valid_host $host || { echo "$0: invalid host '$host'"; exit 1; }
-
-			stop_target $vol $host || exit 1
-			exit $? ;;
-		source)
-			[ $# -eq 3 ] || { echo "usage: $0 stop source <vol>"; exit 2; }
-			local -r vol=$3
-			local -r holdfile=$VOLUMES/$vol/source/hold
-			local -r log=${LOGS}/$vol/source.log
-			local -r snap=$(cat $holdfile 2>/dev/null)
-
-			verify_managed_vol $vol || { echo "$0: volume '$vol' is not a managed volume"; exit 1; }
-
-			stop_nag $vol
-
-			if [[ ! -z $snap ]]; then
-				log "umounting $vol($snap) on source stop" $log
-				umount_device $vol $snap unqualified >> $log 2>&1
-			fi
-
-			exit $? ;;
-		*)
-			echo "usage: $0 stop master|target|source"
-			exit 2 ;;
-		esac
-		;;
-	snapshot)
-		[ $# -eq 3 ] || { echo "usage: $0 snapshot <vol> <kind>"; exit 2; }
-		local -r vol=$2
-		local -r kind=$3
-
-		verify_managed_vol $vol || { echo "$0: volume '$vol' is not a managed volume"; exit 1; }
-		find_in $kind ${KINDS[@]} || { echo "$0: unknown snapshot type '$kind'"; exit 1; }
-
-		trigger_snapshot $vol $kind
-		exit $?
-		;;
-	replicate)
-		[[ $# -eq 3 ]] || [[ $# -eq 4 ]] || { echo "usage: $0 replicate <vol> <host> [snap]"; exit 2; }
-		local -r vol=$2
-		local -r host=$3
-		local -r snap=$4
-
-		verify_managed_vol $vol || { echo "$0: volume '$vol' is not a managed volume"; exit 1; }
-		verify_existing_target $vol $host || { echo "$0: host '$host' is not a target for volume '$vol'"; exit 1; }
-		[ -z $snap ] || verify_existing_snap $vol $snap || { echo "$0: invalid snapshot '$snap' for volume '$vol'"; exit 1; }
-
-		# <snap> is optional and a new snapshot is taken if omitted
-		trigger_replication $vol $host $snap
-		exit $?
-		;;
-	status)
-		[ $# -lt 4 ] || { echo "usage: $0 status [-f] [<vol> [<snap>]]"; exit 2; }
-
-		# !!! zero or one arguments means to call tree for now
-		if [ $# -lt 3 ]; then
-			local -r opt=$2
-			local vol
-
-			# for debugging
-			#tree -Fx --noreport $opt $VOLUMES
-			pushd $VOLUMES >/dev/null
-			[[ `ls | wc -l` -gt 0 ]] && for vol in *; do
-				echo VOLUME $vol:
-				if [ -e $SERVERS/$vol ]; then
-					ddsnap status $SERVERS/$vol && echo Status: running || echo Status: failed
-				else
-					echo Status: not running
-				fi
-				echo "Configuration:"
-				tree -Fx --noreport $opt $VOLUMES/$vol
-				echo
-			done 2> /dev/null
-			popd >/dev/null
-			echo RUN STATUS:
-			tree -Fx --noreport $opt $RUNPATH
-			exit $?
-		else
-			local -r vol=$2
-			local -r snap=$3
-			local -r sock=${SERVERS}/$vol
-
-			verify_managed_vol $vol || { echo "$0: volume '$vol' is not a managed volume"; exit 1; }
-			[ -z $snap ] || verify_existing_snap $vol $snap || { echo "$0: invalid snapshot '$snap' for volume '$vol'"; exit 1; }
-
-			ddsnap status $sock $snap
-			exit $?
-		fi
-		;;
-	receive)
-		# called via upstream host's ssh command to start/stop listen
-		[ $# -eq 4 ] || { echo "usage: $0 receive <vol> <port> {start|done}"; exit 2; }
-		local -r vol=$2
-		local -r port=$3
-		local -r startstop=$4
-		local -r holdfile=$VOLUMES/$vol/source/hold
-		local rpid
-		local snap
-
-		verify_managed_vol $vol || { echo "$0: volume '$vol' is not a managed volume"; exit 1; }
-
-		case $startstop in
-		start)
-			# !!! FIXME TODO if the hold file doesn't exist
-			# assume we are initializing replication at snapshot 0
-			snap=$(cat $holdfile 2>/dev/null) || snap=0
-
-			# start the listen daemon
-			# FIXME TODO - for now we listen on 0.0.0.0 and we don't check where
-			# the request came from, in the future, to avoid doing something
-			# wrong, such as replicatin from 2 hosts, check the $SSH_CLIENT
-			# environment variable
-
-			# kill listen first in case it is already listening (previous replication interrupted)
-			pkill -f "ddsnap delta listen /dev/mapper/$vol 0.0.0.0:$port$"
-
-			rpid=$(ddsnap delta listen /dev/mapper/$vol 0.0.0.0:$port)
-
-			# if successful, ouput should be "pid = <pid>"
-			rpid=${rpid/pid = /}
-
-			# if successful, send the hold snapid back to the caller
-			[[ $rpid -gt 1 ]] && echo $snap
-			exit $? ;;
-		done)
-			pkill -f "ddsnap delta listen /dev/mapper/$vol 0.0.0.0:$port$"
-			replication_cycle $vol
-
-			exit $? ;;
-		esac
-		;;
-	esac
-
-	[ $# -gt 0 ] && echo "Error in command: $@"
-	echo "Usage: $0 {define|forget|start|stop|snapshot|replicate|status} [<subarguments>...]"
-	exit 2
-}
-
 
 [[ -d $VOLUMES ]] || { echo "$0: cannot find zumastor database in '$VOLUMES'"; exit 1; }
 [[ $1 == "stop" ]] || [[ $1 == "status" ]] || [[ -e $RUNFILE ]] || { echo "$0: zumastor not running, start with '/etc/init.d/zumastor start' first"; exit 1; }
-run_command "$@"
 
+case $1 in
+define)
+	case $2 in
+	volume)
+		[[ $# -ge 5 ]] && [[ $# -le 7 ]] || { echo "usage: $0 define volume <vol> <origin> <snapstore> [<metadev>] [noinit|nosnap]"; exit 2; }
+		declare vol=$3
+		declare origin=$4
+		declare snapstore=$5
+		declare metadev=""
+		declare noinit=""
+		
+		if [[ $# -eq 6 ]]; then
+			if [[ $6 = "noinit" || $6 = "nosnap" ]]; then
+				noinit=$6
+			else
+				metadev=$6
+			fi
+		elif [[ $# -eq 7 ]]; then
+			metadev=$6
+			noinit=$7
+		fi
+
+		verify_valid_volname $vol || { echo "$0: invalid volume name '$vol'"; exit 1; }
+		verify_valid_device $origin || { echo "$0: invalid device '$origin'"; exit 1; }
+		verify_valid_device $snapstore || { echo "$0: invalid device '$snapstore'"; exit 1; }
+		[ -z $meta ] || verify_valid_device $metadev || { echo "$0: invalid device '$meta'"; exit 1; }
+
+		if [[ $noinit = "noinit" ]]; then
+			read -p "noinit: you must have initialized the device manually, continue? [y/N] " -t 30 \
+				|| { echo "timeout."; exit 1; }
+
+			[[ $REPLY = "y" ]] || { echo "aborted."; exit 1; }
+			
+			define_volume $vol $origin $snapstore $metadev || { echo "$0: define volume '$vol' failed"; exit 1; }
+		else
+			init_define_volume $vol $origin $snapstore $metadev || { echo "$0: init volume '$vol' failed"; exit 1; }
+
+			echo "Successfully created and initialized volume '$vol'."
+
+			if [[ $noinit = "nosnap" ]]; then
+				echo "nosnap: no initial snapshot taken!"
+				echo "This volume should only be used as a replication target, not source"
+				exit 0
+			fi
+
+			create_snapshot $vol 0 || { echo "$0: error with initial snapshot"; exit 1; }
+			echo 0 > $VOLUMES/$vol/zero
+
+			echo "You can now create a filesystem on /dev/mapper/$vol"
+		fi
+
+		exit $? ;;
+	target)
+		[[ $# -eq 4 ]] || [[ $# -eq 5 ]] || { echo "usage: $0 define target <vol> <host>[:port] [period]"; exit 2; }
+		declare vol=$3
+		declare host=$4
+		declare period=$5
+		declare port=${host/*:/}
+
+		# check to see if port was specified, if so, strip it off the host
+		if [[ $host != $port ]]; then
+			host=${host/:*/}
+		else
+			# otherwise use the default port
+			port=$DEFAULT_PORT
+		fi
+
+		verify_managed_vol $vol || { echo "$0: volume '$vol' is not a managed volume"; exit 1; }
+		verify_valid_host $host || { echo "$0: invalid host '$host'"; exit 1; }
+
+		define_target $vol $host $port $period
+		exit $? ;;
+	master)
+		declare args arg kind i
+		declare -a token value
+
+		declare name="$0 $1 $2"
+		shift 2
+		args=`getopt -oh:d:w:m: -l help,hourly:,daily:,weekly:,monthly: -n"$name" -- "$@"` || \
+			{ echo "usage: $name <vol> [Options]"; exit 2; }
+
+		eval set -- "$args" # remove getopt quotes and set new arguments
+
+		until [[ $1 = -- ]] ; do
+			case "$1" in
+			--help)
+				echo "usage: $name <vol> [Options]"
+				echo "Options"
+				echo "  -h, --hourly=N    set hourly snapshot limit"
+				echo "  -d, --daily=N     set daily snapshot limit"
+				echo "  -w, --weekly=N    set weekly snapshot limit"
+				echo "  -m, --monthly=N   set monthly snapshot limit"
+				exit;;
+			-h|--hourly) kind=hourly;;
+			-d|--daily) kind=daily;;
+			-w|--weekly) kind=weekly;;
+			-m|--monthly) kind=monthly;;
+			*) echo whoops; exit 9;;
+			esac
+			verify_valid_number $2 || { echo $2 is not a valid $kind limit; exit 1; }
+			token+=($kind)
+			value+=($2)
+			shift 2
+		done
+
+		shift # remove --
+		[[ $# = 1 ]] || { echo "usage: $name <vol> [Options]"; exit 2; }
+
+		declare vol=$1
+
+		verify_managed_vol $vol || { echo "$0: volume '$vol' is not a managed volume"; exit 1; }
+
+		if [ ! -e $VOLUMES/$vol/master ]; then
+			define_master $vol || exit $?
+		fi
+
+		for (( i=0; i < ${#token[@]}; i++)) do
+			set_master_schedule $vol ${token[i]} ${value[i]} || exit $?
+		done
+
+		exit 0 ;;
+	source)
+		[[ $# -eq 4 ]] || [[ $# -eq 5 ]] || { echo "usage: $0 define source <vol> <host> [period]"; exit 2; }
+		declare vol=$3
+		declare host=$4
+		declare period=$5
+
+		verify_managed_vol $vol || { echo "$0: volume '$vol' is not a managed volume"; exit 1; }
+		verify_valid_host $host || { echo "$0: invalid host '$host'"; exit 1; }
+
+		set_source $vol $host $period
+		exit $? ;;
+	*)
+		echo "usage: $0 define volume|target|master|source"
+		exit 2 ;;
+	esac
+	;;
+forget)
+	case $2 in
+	volume)
+		[ $# -eq 3 ] || { echo "usage: $0 forget volume <vol>"; exit 2; }
+		declare vol=$3
+
+		verify_managed_vol $vol || { echo "$0: volume '$vol' is not a managed volume"; exit 1; }
+
+		forget_volume $vol
+		exit $? ;;
+	target)
+		[ $# -eq 4 ] || { echo "usage: $0 forget target <vol> <host>"; exit 2; }
+		declare vol=$3
+		declare host=$4
+
+		verify_managed_vol $vol || { echo "$0: volume '$vol' is not a managed volume"; exit 1; }
+		verify_valid_host $host || { echo "$0: invalid host '$host'"; exit 1; }
+
+		forget_target $vol $host
+		exit $? ;;
+	source)
+		[ $# -eq 3 ] || { echo "usage: $0 forget source <vol>"; exit 2; }
+		declare vol=$3
+
+		verify_managed_vol $vol || { echo "$0: volume '$vol' is not a managed volume"; exit 1; }
+
+		forget_source $vol
+		exit $? ;;
+	*)
+		echo "usage: $0 forget volume|target|source"
+		exit 2 ;;
+	esac
+	;;
+start)
+	case $2 in
+	master)
+		[ $# -eq 3 ] || { echo "usage: $0 start master <vol>"; exit 2; }
+		declare vol=$3
+
+		verify_managed_vol $vol || { echo "$0: volume '$vol' is not a managed volume"; exit 1; }
+
+		run_master $vol
+		exit $? ;;
+	target)
+		[ $# -eq 4 ] || { echo "usage: $0 start target <vol> <host>"; exit 2; }
+		declare vol=$3
+		declare host=$4
+
+		verify_managed_vol $vol || { echo "$0: volume '$vol' is not a managed volume"; exit 1; }
+		verify_valid_host $host || { echo "$0: invalid host '$host'"; exit 1; }
+
+		run_target $vol $host
+		exit $? ;;
+	source)
+		[ $# -eq 3 ] || { echo "usage: $0 start source <vol>"; exit 2; }
+		declare vol=$3
+		declare holdfile=$VOLUMES/$vol/source/hold
+		declare log=${LOGS}/$vol/source.log
+		declare snap=$(cat $holdfile 2>/dev/null)
+
+		verify_managed_vol $vol || { echo "$0: volume '$vol' is not a managed volume"; exit 1; }
+
+		if [[ ! -z $snap ]]; then
+			log "mounting $vol($snap) on source start" $log
+			mount_device $vol $snap unqualified >> $log 2>&1
+		fi
+
+		nag_daemon $vol
+		exit $? ;;
+	*)
+		echo "usage: $0 start master|target|source"
+		exit 2 ;;
+	esac
+	;;
+stop)
+	case $2 in
+	master)
+		[ $# -eq 3 ] || { echo "usage: $0 stop master <vol>"; exit 2; }
+		declare vol=$3
+
+		verify_managed_vol $vol || { echo "$0: volume '$vol' is not a managed volume"; exit 1; }
+
+		stop_master $vol
+		exit $? ;;
+	target)
+		[ $# -eq 4 ] || { echo "usage: $0 stop target <vol> <host>"; exit 2; }
+		declare vol=$3
+		declare host=$4
+
+		verify_managed_vol $vol || { echo "$0: volume '$vol' is not a managed volume"; exit 1; }
+		verify_valid_host $host || { echo "$0: invalid host '$host'"; exit 1; }
+
+		stop_target $vol $host || exit 1
+		exit $? ;;
+	source)
+		[ $# -eq 3 ] || { echo "usage: $0 stop source <vol>"; exit 2; }
+		declare vol=$3
+		declare holdfile=$VOLUMES/$vol/source/hold
+		declare log=${LOGS}/$vol/source.log
+		declare snap=$(cat $holdfile 2>/dev/null)
+
+		verify_managed_vol $vol || { echo "$0: volume '$vol' is not a managed volume"; exit 1; }
+
+		stop_nag $vol
+
+		if [[ ! -z $snap ]]; then
+			log "umounting $vol($snap) on source stop" $log
+			umount_device $vol $snap unqualified >> $log 2>&1
+		fi
+
+		exit $? ;;
+	*)
+		echo "usage: $0 stop master|target|source"
+		exit 2 ;;
+	esac
+	;;
+snapshot)
+	[ $# -eq 3 ] || { echo "usage: $0 snapshot <vol> <kind>"; exit 2; }
+	declare vol=$2
+	declare kind=$3
+
+	verify_managed_vol $vol || { echo "$0: volume '$vol' is not a managed volume"; exit 1; }
+	find_in $kind ${KINDS[@]} || { echo "$0: unknown snapshot type '$kind'"; exit 1; }
+
+	trigger_snapshot $vol $kind
+	exit $?
+	;;
+replicate)
+	[[ $# -eq 3 ]] || [[ $# -eq 4 ]] || { echo "usage: $0 replicate <vol> <host> [snap]"; exit 2; }
+	declare vol=$2
+	declare host=$3
+	declare snap=$4
+
+	verify_managed_vol $vol || { echo "$0: volume '$vol' is not a managed volume"; exit 1; }
+	verify_existing_target $vol $host || { echo "$0: host '$host' is not a target for volume '$vol'"; exit 1; }
+	[ -z $snap ] || verify_existing_snap $vol $snap || { echo "$0: invalid snapshot '$snap' for volume '$vol'"; exit 1; }
+
+	# <snap> is optional and a new snapshot is taken if omitted
+	trigger_replication $vol $host $snap
+	exit $?
+	;;
+status)
+	[ $# -lt 4 ] || { echo "usage: $0 status [-f] [<vol> [<snap>]]"; exit 2; }
+
+	# !!! zero or one arguments means to call tree for now
+	if [ $# -lt 3 ]; then
+		declare opt=$2
+		declare vol
+
+		# for debugging
+		#tree -Fx --noreport $opt $VOLUMES
+		pushd $VOLUMES >/dev/null
+		[[ `ls | wc -l` -gt 0 ]] && for vol in *; do
+			echo VOLUME $vol:
+			if [ -e $SERVERS/$vol ]; then
+				ddsnap status $SERVERS/$vol && echo Status: running || echo Status: failed
+			else
+				echo Status: not running
+			fi
+			echo "Configuration:"
+			tree -Fx --noreport $opt $VOLUMES/$vol
+			echo
+		done 2> /dev/null
+		popd >/dev/null
+		echo RUN STATUS:
+		tree -Fx --noreport $opt $RUNPATH
+		exit $?
+	else
+		declare vol=$2
+		declare snap=$3
+		declare sock=${SERVERS}/$vol
+
+		verify_managed_vol $vol || { echo "$0: volume '$vol' is not a managed volume"; exit 1; }
+		[ -z $snap ] || verify_existing_snap $vol $snap || { echo "$0: invalid snapshot '$snap' for volume '$vol'"; exit 1; }
+
+		ddsnap status $sock $snap
+		exit $?
+	fi
+	;;
+receive)
+	# called via upstream host's ssh command to start/stop listen
+	[ $# -eq 4 ] || { echo "usage: $0 receive <vol> <port> {start|done}"; exit 2; }
+	declare vol=$2
+	declare port=$3
+	declare startstop=$4
+	declare holdfile=$VOLUMES/$vol/source/hold
+	declare rpid
+	declare snap
+
+	verify_managed_vol $vol || { echo "$0: volume '$vol' is not a managed volume"; exit 1; }
+
+	case $startstop in
+	start)
+		# !!! FIXME TODO if the hold file doesn't exist
+		# assume we are initializing replication at snapshot 0
+		snap=$(cat $holdfile 2>/dev/null) || snap=0
+
+		# start the listen daemon
+		# FIXME TODO - for now we listen on 0.0.0.0 and we don't check where
+		# the request came from, in the future, to avoid doing something
+		# wrong, such as replicatin from 2 hosts, check the $SSH_CLIENT
+		# environment variable
+
+		# kill listen first in case it is already listening (previous replication interrupted)
+		pkill -f "ddsnap delta listen /dev/mapper/$vol 0.0.0.0:$port$"
+
+		rpid=$(ddsnap delta listen /dev/mapper/$vol 0.0.0.0:$port)
+
+		# if successful, ouput should be "pid = <pid>"
+		rpid=${rpid/pid = /}
+
+		# if successful, send the hold snapid back to the caller
+		[[ $rpid -gt 1 ]] && echo $snap
+		exit $? ;;
+	done)
+		pkill -f "ddsnap delta listen /dev/mapper/$vol 0.0.0.0:$port$"
+		replication_cycle $vol
+
+		exit $? ;;
+	esac
+	;;
+esac
+
+[ $# -gt 0 ] && echo "Error in command: $@"
+echo "Usage: $0 {define|forget|start|stop|snapshot|replicate|status} [<subarguments>...]"
+exit 2
