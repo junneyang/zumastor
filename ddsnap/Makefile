@@ -55,15 +55,6 @@ ddraidd: ddraid.c diskio.o buffer.o $(ddraid_deps)
 ddraid-agent: ddraid.agent.c $(ddraid_deps)
 	cc ddraid.agent.c $(flags) -I$(includes) -lpthread -o ddraid-agent -lpopt
 
-#mkddsnap: ddsnapd.c ddsnap.common.o diskio.o buffer.o $(ddsnap_deps)
-#	cc -DCREATE ddsnapd.c $(flags) -I$(includes) ddsnap.common.o diskio.o buffer.o -o mkddsnap -lpopt
-
-#ddsnapd: ddsnapd.c ddsnap.common.o diskio.o buffer.o daemonize.o $(ddsnap_deps)
-#	cc -DSERVER ddsnapd.c $(flags) -I$(includes) ddsnap.common.o diskio.o buffer.o daemonize.o -o ddsnapd -lpopt
-
-#ddsnap-agent: ddsnap.agent.c daemonize.o $(ddsnap_deps)
-#	cc ddsnap.agent.c $(flags) -I$(includes) daemonize.o -o ddsnap-agent -lpopt
-
 ddsnap: ddsnap.c buffer.o ddsnapd.o ddsnap.agent.o ddsnap.common.o xdelta/xdelta3.o delta.o diskio.o daemonize.o $(ddsnap_deps) build.h
 	cc ddsnap.c $(flags) -I$(includes) buffer.o ddsnapd.o ddsnap.agent.o ddsnap.common.o xdelta/xdelta3.o delta.o diskio.o daemonize.o -o ddsnap -lpopt -lz
 
@@ -89,7 +80,7 @@ kernel:
 kern:
 	cd ../../.. && make bzImage SUBDIRS=drivers/md
 
-build.h: $(ddsnap_agent_deps) $(ddsnapd_deps) $(ddsnap_deps) $(ddraid_deps)
+build.h: $(ddsnap_agent_deps) $(ddsnapd_deps) $(ddsnap_deps) 
 	rm -f $@
 	@echo '/*' > $@
 	@echo ' * This file is generated automatically by the Makefile.' >> $@
