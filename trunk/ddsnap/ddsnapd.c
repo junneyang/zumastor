@@ -27,6 +27,7 @@
 #include <netdb.h> // gethostbyname2_r
 #include <linux/fs.h> // BLKGETSIZE
 #include <popt.h>
+#include <sys/prctl.h>
 #include "buffer.h"
 #include "daemonize.h"
 #include "ddsnap.h"
@@ -37,6 +38,12 @@
 #include "list.h"
 #include "sock.h"
 #include "trace.h"
+
+/* XXX - Hack, this number needs to be the same as the 
+ * kernel headers. Make sure that these are same when
+ * building with a new kernel. 
+ */
+#define PR_SET_LESS_THROTTLE    21  
 
 #define trace trace_off
 #define jtrace trace_off
@@ -3244,6 +3251,11 @@ int snap_server(struct superblock *sb, int listenfd, int getsigfd, int agentfd)
 	signal(SIGTERM, sighandler);
 	signal(SIGPIPE, SIG_IGN);
 
+	if ((err = prctl(PR_SET_LESS_THROTTLE, 0, 0, 0, 0))) {
+		warn("can not set process to throttle less, error:i %s",
+				strerror(errno));
+	}
+	
 	while (1) {
 		trace(warn("Waiting for activity"););
 
