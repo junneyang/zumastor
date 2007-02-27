@@ -1,11 +1,11 @@
 Source: ddsnap
 Section: unknown
 Priority: optional
-Maintainer: Andrew Middlesworth <drewm@google.com>
+Maintainer: Jane Chiu <jchiu@google.com>
 Build-Depends: debhelper (>= 4.0.0), libpopt-dev, zlib1g-dev
 Standards-Version: 0.1.0
 
 Package: ddsnap
-Architecture: i386
+Architecture: any
 Depends: dmsetup, libpopt0, zlib1g
-Description: Ddsnap userspace daemons
+Description: ddsnap userspace daemons for block level snapshot and replication
