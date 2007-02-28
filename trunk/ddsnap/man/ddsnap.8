@@ -39,14 +39,14 @@ ddsnap \- block level snapshot and replication
 .I socket_name changelist_name snapshot1 snapshot2
 .br
 .B ddsnap delta create
-[\-x|--xdelta] [-r|--raw] [-t|--test] [-o|--optcomp] [-g|--gzip \fIcompression_level\fP] 
+[\-x|--xdelta] [-r|--raw] [-b|--best] [-g|--gzip \fIcompression_level\fP] 
 .I changelist deltafile_name snapshot_device_stem
 .br
 .B ddsnap delta apply 
 .I deltafile_name snapshot_device_stem
 .br
 .B ddsnap delta send
-[\-x|--xdelta] [-r|--raw] [-t|--test] [-o|--optcomp] [-g|--gzip \fIcompression_level\fP] 
+[\-x|--xdelta] [-r|--raw] [-b|--best] [-g|--gzip \fIcompression_level\fP] 
 .I socket_name snapshot1 snapshot2 snapshot_device_stem remote_snapshot
 \fIhost\fP[\fI:port\fP]
 .br
@@ -89,13 +89,10 @@ Generates a delta file containing only xdelta in chunk level. The blockwise delt
 .IP \fB\-r|--raw
 .br
 Generates a delta file containing raw chunks from snapshot2.
-.IP \fB\-t|--test
+.IP \fB\-b|--best
 .br
-Generates a delta file containing xdelta in chunk level, raw chunk from snapshot1 and raw chunk from snapshot2.
-.IP \fB\-o|--optcomp
-.br
-Generates a Idelta file with the most optimal compression. For any given chunk, the \-o option compares the xdelta and gzipped (at level 9) compression of the chunk against the gzipped (at level 9) compression of the chunk and writes the smaller one into the Idelta file.
-The -o mode is the slowest of all the modes.  Using the -o option nullifies any value specified by the -g option.  Whenever -o is used, gzip compression is automatically maximized to 9.
+Generates a delta file with the most optimal compression. For any given chunk, the \-b option compares the xdelta and gzipped (at level 9) compression of the chunk against the gzipped (at level 9) compression of the chunk and writes the smaller one into the delta file.
+The -b mode is the slowest of all the modes.  Using the -b option nullifies any value specified by the -g option.  Whenever -b is used, gzip compression is automatically maximized to 9.
 .IP \fB\-g\ \fIcompression_level\fB|--gzip=\fIcompression_level
 .br
 Generates a delta file with user specified mode and then further compress the delta file with gzip at the user specified gzip compression level (an int between 0 to 9). Level 0 indicates no compression and level 9 indicates maximum compression. Defaults at level 6.
@@ -157,7 +154,7 @@ Reports snapshot usage statistics.
 .br
 Creates a changelist from snapshot1 and snapshot2 with the given changelist_name.
 .IP \fBdelta\ \fBcreate\fP 
-[\-x|--xdelta] [-r|--raw] [-t|--test] [-o|--optcomp] [-g|--gzip \fIcompression_level\fP] 
+[\-x|--xdelta] [-r|--raw] [-b|--best] [-g|--gzip \fIcompression_level\fP] 
 .I changelist_name deltafile_name snapshot_device_stem
 .br
 Creates a deltafile from the given \fIchangelist\fP and snapshot device stem with the given deltafile_name. Defaults to optimal mode if no option was selected.
@@ -166,7 +163,7 @@ Creates a deltafile from the given \fIchangelist\fP and snapshot device stem wit
 .br
 Applies the deltafile to the given device.
 .IP \fBdelta\ \fBsend\fP 
-[\-x|--xdelta] [-r|--raw] [-t|--test] [-o|--optcomp] [-g|--gzip \fIcompression_level\fP] 
+[\-x|--xdelta] [-r|--raw] [-b|--best] [-g|--gzip \fIcompression_level\fP] 
 .I socket_name snapshot1 snapshot2 snapshot_device_stem remote_snapshot
 \fIhost\fP[\fI:port\fP]
 .br
