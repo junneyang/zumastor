@@ -47,7 +47,7 @@ void flush_buffers(void);
 void show_buffer(struct buffer *buffer);
 void show_active_buffers(void);
 void show_buffers(void);
-void init_buffers(void);
+void init_buffers(unsigned bufsize, unsigned mem_pool_size);
 
 static inline int buffer_dirty(struct buffer *buffer)
 {

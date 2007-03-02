@@ -42,8 +42,8 @@ LIST_HEAD(lru_buffers);
 unsigned buffer_count;
 LIST_HEAD(free_buffers);
 
-#define MAX_BUFFERS 10000 /* 2*chunksize*MAX_BUFFERS is the maximum memory used */
-#define MAX_FREE_BUFFERS   (MAX_BUFFERS/10) /* free 10 percent of the buffers */
+static unsigned max_buffers = 10000;
+static unsigned max_free_buffers = 1000; /* free 10 percent of the buffers */ 
 
 void set_buffer_dirty(struct buffer *buffer)
 {
@@ -167,7 +167,7 @@ struct buffer *new_buffer(sector_t sector, unsigned size)
 	struct buffer *buffer = NULL;
 
 	/* check if we hit the MAX_BUFFER limit and if there are any free buffers avail */
-	if ( ((buffer = remove_buffer_free()) != NULL) || buffer_count < MAX_BUFFERS)
+	if ( ((buffer = remove_buffer_free()) != NULL) || buffer_count < max_buffers)
 		goto alloc_buffer;
 
         buftrace(printf("need to purge a buffer from the lru list\n"););
@@ -180,7 +180,7 @@ struct buffer *new_buffer(sector_t sector, unsigned size)
                         remove_buffer_lru(buffer_evict);
 			remove_buffer_hash(buffer_evict); /* remove from hashlist */
 			add_buffer_free(buffer_evict);
-                        if(++count == MAX_FREE_BUFFERS)
+                        if(++count == max_free_buffers)
                                 break;
                 }
         }
@@ -189,7 +189,7 @@ struct buffer *new_buffer(sector_t sector, unsigned size)
 alloc_buffer:	
 	if (!buffer) {
 		buftrace(warn("allocating a new buffer"););
-		if (buffer_count == MAX_BUFFERS) {
+		if (buffer_count == max_buffers) {
 			warn("Number of dirty buffers: %d", dirty_buffer_count);
 			return NULL;
 		}
@@ -197,7 +197,7 @@ alloc_buffer:
 		if (!buffer)
 			return NULL;
 		int error = 0;
-		if ((error = posix_memalign((void **)&(buffer->data), size, size))) {
+		if ((error = posix_memalign((void **)&(buffer->data), (1 << SECTOR_BITS), size))) {
 			warn("Error: %s unable to allocate space for buffer data", strerror(error));
 			free(buffer);
 			return NULL;
@@ -348,12 +348,60 @@ void dump_buffer(struct buffer *buffer, unsigned offset, unsigned length)
 }
 #endif
 
-void init_buffers(void)
+int allocate_buffers(unsigned bufsize) {
+	struct buffer *buffers = (struct buffer *)malloc(max_buffers*sizeof(struct buffer));
+	char *data_pool = NULL;
+	int i, error = -ENOMEM; /* if malloc fails */
+
+	buftrace(warn("Pre-allocating buffers..."););
+	if (!buffers)
+		goto buffers_allocation_failure;
+	buftrace(warn("Pre-allocating data for buffers..."););
+	if ((error = posix_memalign((void **)&data_pool, (1 << SECTOR_BITS), max_buffers*bufsize)))
+		goto data_allocation_failure;
+		
+	/* let's clear out the buffer array and data */
+	memset(buffers, 0, max_buffers*sizeof(struct buffer));
+	memset(data_pool, 0, max_buffers*bufsize);
+
+	for(i = 0; i < max_buffers; i++) {
+		buffers[i].data = (data_pool + i*bufsize);
+		add_buffer_free(&buffers[i]);
+	}
+
+	return 0; /* sucess on pre-allocation of buffers */
+	
+data_allocation_failure:
+	/* go back to on demand allocation */
+	warn("Error: %s unable to allocate space for buffer data", strerror(error));
+	free(buffers);
+buffers_allocation_failure:
+	warn("Unable to pre-allocate buffers. Using on demand allocation for buffers");
+	return error;	
+}
+
+/* mem_pool_size defines "roughly" the amount of memory allocated for
+ * buffers. I use the term "roughly" since it doesn't take into 
+ * consideration the size of the buffer struct and the overhead for 
+ * posix_memalign(). From empirical tests, the additional memory
+ * is negligible.
+ */
+
+void init_buffers(unsigned bufsize, unsigned mem_pool_size)
 {
+	assert(bufsize);
 	memset(buffer_table, 0, sizeof(buffer_table));
 	INIT_LIST_HEAD(&dirty_buffers);
 	dirty_buffer_count = 0;
 	INIT_LIST_HEAD(&lru_buffers);
 	buffer_count = 0;
 	INIT_LIST_HEAD(&free_buffers);
+
+	/* calculate number of max buffers to a fixed size, independent of chunk size */
+	max_buffers = mem_pool_size / bufsize;	
+	max_free_buffers = max_buffers / 10;		
+	
+#ifdef _PRE_ALLOCATE_BUFFERS
+	allocate_buffers(bufsize);
+#endif
 }

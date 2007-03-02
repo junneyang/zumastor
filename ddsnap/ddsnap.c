@@ -2077,7 +2077,6 @@ int main(int argc, char *argv[])
 		}
 		memset(sb, 0, SB_SIZE);
 		
-		init_buffers();
 		
 		if ((sb->snapdev = open(snapdev, O_RDWR | O_DIRECT)) == -1)
 			error("Could not open snapshot store %s: %s", snapdev, strerror(errno));
@@ -2165,6 +2164,9 @@ int main(int argc, char *argv[])
 		show_tree(sb);
 		return 0;
 # endif /* end of test code */
+		
+		unsigned bufsize = 1 << bs_bits;
+		init_buffers(bufsize, (1 << 25)); /* preallocate 32Mb of buffers */
 		
 		if (init_snapstore(sb, js_bytes, bs_bits, cs_bits) < 0) 
 			warn("Snapshot storage initiailization failed");
@@ -2311,8 +2313,6 @@ int main(int argc, char *argv[])
 		}
 		memset(sb, 0, SB_SIZE);
 
-		init_buffers();
-		
 		if ((sb->snapdev = open(snapdev, O_RDWR | O_DIRECT)) == -1)
 			error("Could not open snapshot store %s: %s", snapdev, strerror(errno));
 		
@@ -2329,6 +2329,9 @@ int main(int argc, char *argv[])
 		poptFreeContext(serverCon);
 		
 		int listenfd, getsigfd, agentfd, ret;
+		
+		unsigned bufsize = 1 << METADATA_ALLOC(sb).allocsize_bits;	
+		init_buffers(bufsize, (1 << 27)); /* preallocate 128Mb of buffers */
 		
 		if (snap_server_setup(agent_sockname, server_sockname, &listenfd, &getsigfd, &agentfd) < 0)
 			error("Could not setup snapshot server\n");
