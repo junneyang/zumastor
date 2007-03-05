@@ -938,33 +938,23 @@ static int apply_delta_extents(int deltafile, u32 chunk_size, u64 chunk_count, c
 				goto apply_compbuf_error;
 			if (comp_ret == Z_DATA_ERROR)
 				goto apply_compdata_error;		
-		        
-			if (deh.mode == RAW)
-			        memcpy(updated, delta_data, extent_size);
-			else { //xdelta gzip compression
-				trace_off(printf("read %llx chunk delta extent data starting at chunk "U64FMT"/offset "U64FMT" from \"%s\"\n", deh.num_of_chunks, chunk_num, extent_addr, dev1name););
-				int apply_ret = apply_delta_chunk(extent_data, updated, delta_data, extent_size, uncomp_size);
-				trace_off(printf("apply_ret %d\n", apply_ret););
-				if (apply_ret < 0)
-					goto apply_chunk_error;
-			}
-		}
-		/* gzip compression was not used */
-		else {
+		} else {
 			if ((err = fdread(deltafile, delta_data, deh.extents_delta_length)) < 0)
 				goto apply_deltaread_error;
-			uncomp_size = deh.extents_delta_length;				
-			//if the mode is RAW or XDELTA RAW then copy the delta file directly to updated (no uncompression)
-			if (deh.mode == RAW || uncomp_size == extent_size)
-				memcpy(updated, delta_data, extent_size);
-			if (deh.mode == XDELTA) {
-				trace_off(printf("read %llx chunk delta extent data starting at chunk "U64FMT"/offset "U64FMT" from \"%s\"\n", deh.num_of_chunks, chunk_num, extent_addr, dev1name););
-				int apply_ret = apply_delta_chunk(extent_data, updated, delta_data, extent_size, uncomp_size);
-				trace_off(printf("apply_ret %d\n", apply_ret););
-				if (apply_ret < 0)
-					goto apply_chunk_error;
-			}
+			uncomp_size = deh.extents_delta_length;		
 		}
+		
+		//if the mode is RAW or XDELTA RAW then copy the delta file directly to updated (no uncompression)
+		if (deh.mode == RAW)
+			memcpy(updated, delta_data, extent_size);
+		if (deh.mode == XDELTA) {
+			trace_off(printf("read %llx chunk delta extent data starting at chunk "U64FMT"/offset "U64FMT" from \"%s\"\n", deh.num_of_chunks, chunk_num, extent_addr, dev1name););
+			int apply_ret = apply_delta_chunk(extent_data, updated, delta_data, extent_size, uncomp_size);
+			trace_off(printf("apply_ret %d\n", apply_ret););
+			if (apply_ret < 0)
+				goto apply_chunk_error;
+		}
+		
 	      
 		if (deh.ext2_chksum != checksum((const unsigned char *)updated, extent_size)) 
 		       goto apply_checksum_error;			  
@@ -1072,12 +1062,6 @@ apply_checksum_error:
 	if (progress)
 		printf("\n");
 	warn("checksum failed for "U64FMT" chunk extent with start address of "U64FMT, deh.num_of_chunks, extent_addr);
-	goto apply_freeall_cleanup;
-
-apply_testread_error:
-	if (progress)
-		printf("\n");
-	warn("could not read test data for "U64FMT" chunk extent with start address of "U64FMT" from delta stream: %s", deh.num_of_chunks, extent_addr, strerror(-err));
 	goto apply_freeall_cleanup;
 
 apply_write_error:
