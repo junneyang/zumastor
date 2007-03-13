@@ -601,6 +601,7 @@ vol_free_cleanup:
 		free(gzip_delta);
 
 vol_cleanup:
+	free(reply);
 	return err;
 }
 
@@ -1845,55 +1846,11 @@ static struct status *get_snap_status(struct status_message *message, unsigned i
 
 static int ddsnap_get_status(int serv_fd, u32 snaptag, int verbose)
 {
-	int err;
-
-	if ((err = outbead(serv_fd, STATUS, struct status_request, snaptag))) {
-		warn("unable to send status request: %s", strerror(-err));
-		return 1;
-	}
-
-	struct head head;
-
-	if ((err = readpipe(serv_fd, &head, sizeof(head))) < 0) {
-		warn("received incomplete packet header: %s", strerror(-err));
-		return 1;
-	}
-
-	if (head.code != STATUS_OK) {
-		if (head.code != STATUS_ERROR) {
-			unknown_message_handler(serv_fd, &head);
-			return 1;
-		}
-		error_message_handler(serv_fd, "server reason why status failed", head.length);
-		return 1;
-	}
-
-	if (head.length < sizeof(struct status_message)) {
-		warn("status length mismatch: expected >=%u, actual %u", sizeof(struct status_message), head.length);
-		return 1;
-	}
-
 	struct status_message *reply;
+	reply = generate_status(serv_fd, snaptag);
 
-	if (!(reply = malloc(head.length))) {
-		warn("unable to allocate %u bytes for reply buffer", head.length);
+	if (!reply)
 		return 1;
-	}
-
-	/* We won't bother to check that the lengths match because it would
-	 * be ugly to read in the structure in pieces.
-	 */
-	if ((err = readpipe(serv_fd, reply, head.length)) < 0) {
-		warn("received incomplete status message: %s", strerror(-err));
-		free(reply);
-		return 1;
-	}
-
-	if (reply->status_count > reply->num_columns) {
-		warn("mismatched snapshot status count (%u) and the number of columns (%u)", reply->status_count, reply->num_columns);
-		free(reply);
-		return 1;
-	}
 
 	if (reply->store.chunksize_bits == 0 && reply->store.used == 0 && reply->store.free == 0) {
 		printf("Chunk size: %lu\n", 1UL << reply->meta.chunksize_bits);
