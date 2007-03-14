@@ -39,14 +39,14 @@ ddsnap \- block level snapshot and replication
 .I socket_name changelist_name snapshot1 snapshot2
 .br
 .B ddsnap delta create
-[\-x|--xdelta] [-r|--raw] [-b|--best] [-g|--gzip \fIcompression_level\fP] 
+[-o|--overwrite] [-d|--difference] [-b|--best] [-g|--gzip \fIcompression_level\fP] 
 .I changelist deltafile_name snapshot_device_stem
 .br
 .B ddsnap delta apply 
 .I deltafile_name snapshot_device_stem
 .br
 .B ddsnap delta send
-[\-x|--xdelta] [-r|--raw] [-b|--best] [-g|--gzip \fIcompression_level\fP] 
+[-o|--overwrite] [-d|--difference] [-b|--best] [-g|--gzip \fIcompression_level\fP] 
 .I socket_name snapshot1 snapshot2 snapshot_device_stem remote_snapshot
 \fIhost\fP[\fI:port\fP]
 .br
@@ -83,16 +83,16 @@ Specifies the preferred process id file.
 .IP \fB\-v|--verbose
 .br
 Gives lots of information about what's happening.
-.IP \fB\-x|--xdelta
+.IP \fB\-o|--overwrite
 .br
-Generates a delta file containing only xdelta in chunk level. The blockwise delta is compressed by taking a binary difference between source and destination chunks and compressing the result via xdelta algorithm.
-.IP \fB\-r|--raw
+The delta file contains the literal contents of each destination snapshot chunk from the difference list.  Generating a delta this way only requires reading one snapshot volume and applying it to the destination volume does not require any reading at all, so this method is very fast.  However, the delta file can be quite large.
+.IP \fB\-d|--difference
 .br
-Generates a delta file containing raw chunks from snapshot2.
+Generates a delta file containing only binary differenced extents. The chunk level delta is compressed by taking a binary difference between source and destination chunks and compressing the result via the xdelta algorithm.
 .IP \fB\-b|--best
 .br
-Generates a delta file with the most optimal compression. For any given chunk, the \-b option compares the xdelta and gzipped (at level 9) compression of the chunk against the gzipped (at level 9) compression of the chunk and writes the smaller one into the delta file.
-The -b mode is the slowest of all the modes.  Using the -b option nullifies any value specified by the -g option.  Whenever -b is used, gzip compression is automatically maximized to 9.
+Generates a delta file by trying both binary differencing and straight compression methods, choosing the best method for each extent of the output delta.  Uses more CPU and disk bandwidth in return for slightly smaller delta files.
+This option overrides the \-o and \-d options.
 .IP \fB\-g\ \fIcompression_level\fB|--gzip=\fIcompression_level
 .br
 Generates a delta file with user specified mode and then further compress the delta file with gzip at the user specified gzip compression level (an int between 0 to 9). Level 0 indicates no compression and level 9 indicates maximum compression. Defaults at level 6.
@@ -154,7 +154,7 @@ Reports snapshot usage statistics.
 .br
 Creates a changelist from snapshot1 and snapshot2 with the given changelist_name.
 .IP \fBdelta\ \fBcreate\fP 
-[\-x|--xdelta] [-r|--raw] [-b|--best] [-g|--gzip \fIcompression_level\fP] 
+[-o|--overwrite] [-d|--difference] [-b|--best] [-g|--gzip \fIcompression_level\fP] 
 .I changelist_name deltafile_name snapshot_device_stem
 .br
 Creates a deltafile from the given \fIchangelist\fP and snapshot device stem with the given deltafile_name. Defaults to optimal mode if no option was selected.
@@ -163,7 +163,7 @@ Creates a deltafile from the given \fIchangelist\fP and snapshot device stem wit
 .br
 Applies the deltafile to the given device.
 .IP \fBdelta\ \fBsend\fP 
-[\-x|--xdelta] [-r|--raw] [-b|--best] [-g|--gzip \fIcompression_level\fP] 
+[-o|--overwrite] [-d|--difference] [-b|--best] [-g|--gzip \fIcompression_level\fP] 
 .I socket_name snapshot1 snapshot2 snapshot_device_stem remote_snapshot
 \fIhost\fP[\fI:port\fP]
 .br
@@ -202,7 +202,7 @@ sudo ./\fBddsnap delta changelist\fP \fI/tmp/server\fP \fIchangelist0\-1\fP \fI0
 # Creating a deltafile named \fIdeltafile0\-1\fP based on \fIchangelist0-1\fP, \fI/dev/mapper/snapshot(0)\fP and \fI/dev/mapper/snapshot(1)\fP in \fIraw\fP mode
 .TP
 .B
-sudo ./\fBddsnap delta create\fP \fI\-r\fP \fIchangelist0-1\fP \fIdeltafile0-1\fP \fI/dev/mapper/snapshot\fP
+sudo ./\fBddsnap delta create\fP \fI\-o\fP \fIchangelist0-1\fP \fIdeltafile0-1\fP \fI/dev/mapper/snapshot\fP
 .PP
 # Applying a deltafile name \fIdeltafile0\-1\fP to a device named \fI/dev/mapper/vol\fP
 .TP
@@ -239,6 +239,6 @@ Man page written by Jane Chiu.  Original ddsnap snapshots coded by Daniel Philli
 This program uses zlib compression library and popt library.  Many people sent patches, lent machines, gave advice and were generally helpful.
 .SH THANKS
 .TP
-Thanks to Google, Red Hat and Sistina Software for supporting this work.  Special thanks to: Mike Todd, Joseph Dries, Douglas Merril and Matthew O'Keefe.
+Thanks to Google, Red Hat and Sistina Software for supporting this work.  Special thanks to: Mike Todd, Joseph Dries and Matthew O'Keefe.
 .TP
 The home page of \fBddsnap\fP is \fBhttp://code.google.com/p/zumastor\fP.  This site may cover questions unanswered by this manual page.  Mailing lists for support and development are available at zumastor@googlegroups.com
