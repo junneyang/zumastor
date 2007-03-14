@@ -380,7 +380,8 @@ found:
 			warn("Unable to handle pending IO server %Lx", (long long)bio->bi_sector);
 			kmem_cache_free(pending_cache, pending);
 			bio_io_error(bio, bio->bi_size);
-			return -1;
+			/* we need to call bio_io_error to release the bio buffer for all bio requests */
+			continue;
 		}
 
 		if (chunks != pending->chunks) {

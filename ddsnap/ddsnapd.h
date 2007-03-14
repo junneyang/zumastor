@@ -42,7 +42,7 @@ struct superblock
 			u8 bit;    // internal snapshot number, not derived from tag
 			s8 prio;   // 0=normal, 127=highest, -128=lowestdrop
 			u16 usecnt; // use count on snapshot device (just use a bit?)
-			char reserved[7];
+			char reserved[7];  // change me to 4 !!!
 		} snaplist[MAX_SNAPSHOTS]; // entries are contiguous, in creation order
 		u32 snapshots;
 		u32 etree_levels;
