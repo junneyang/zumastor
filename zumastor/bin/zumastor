@@ -376,11 +376,6 @@ function init_define_volume {
 	local -r sock=${SERVERS}/$vol
 	local -r log=$LOGS/$vol/init.log
 
-	read -p "All data on origin $odev will be destroyed, continue? (y/N) " -t 30 \
-		|| { echo "timeout."; return 1; }
-
-	if [[ $REPLY != "y" ]]; then return 1; fi
-
 	mkdir $LOGS/$vol || return 1
 	mkdir $path || return 1
 	mkdir $path/device || return 1
@@ -751,50 +746,51 @@ case $1 in
 define)
 	case $2 in
 	volume)
-		[[ $# -ge 5 ]] && [[ $# -le 7 ]] || { echo "usage: $0 define volume <vol> <origin> <snapstore> [<metadev>] [noinit|nosnap]"; exit 2; }
-		declare vol=$3
-		declare origin=$4
-		declare snapstore=$5
+		declare args arg i
 		declare metadev=""
-		declare noinit=""
-		
-		if [[ $# -eq 6 ]]; then
-			if [[ $6 = "noinit" || $6 = "nosnap" ]]; then
-				noinit=$6
-			else
-				metadev=$6
-			fi
-		elif [[ $# -eq 7 ]]; then
-			metadev=$6
-			noinit=$7
-		fi
+		declare noinit="noinit"
+		declare name="$0 $1 $2"
 
+		shift 2
+		args=`getopt -om:hi -l help,metadev:,initialize -n"$name" -- "$@"` || \
+			{ echo "usage: $name <vol> <origin> <snapstore> [Options]"; exit 2; }
+
+		eval set -- "$args" # remove getopt quotes and set new arguments
+
+		until [[ $1 = -- ]] ; do
+			case "$1" in
+			-h|--help)
+				echo "usage: $name <vol> <origin> <snapstore> [Options]"
+				echo "Options"
+				echo "  -h, --help              show this help"
+				echo "  -i, --initialize        initialize the volume with zeros (will destroy data)"
+				echo "  -m, --metadev <metadev> sets the metadata device (default is snapstore)"
+				exit;;
+			-i|--initialize) noinit="";;
+			-m|--metadev) metadev=$2; shift 1;;
+			*) echo whoops; exit 9;;
+			esac
+			shift 1
+		done
+
+		shift # remove --
+		[[ $# = 3 ]] || { echo "usage: $name <vol> <origin> <snapstore> [Options]"; exit 2; }
+
+		declare vol=$1
+		declare origin=$2
+		declare snapstore=$3
+		
 		verify_valid_volname $vol || { echo "$0: invalid volume name '$vol'"; exit 1; }
 		verify_valid_device $origin || { echo "$0: invalid device '$origin'"; exit 1; }
 		verify_valid_device $snapstore || { echo "$0: invalid device '$snapstore'"; exit 1; }
 		[ -z $meta ] || verify_valid_device $metadev || { echo "$0: invalid device '$meta'"; exit 1; }
 
 		if [[ $noinit = "noinit" ]]; then
-			read -p "noinit: you must have initialized the device manually, continue? [y/N] " -t 30 \
-				|| { echo "timeout."; exit 1; }
-
-			[[ $REPLY = "y" ]] || { echo "aborted."; exit 1; }
-			
 			define_volume $vol $origin $snapstore $metadev || { echo "$0: define volume '$vol' failed"; exit 1; }
 		else
 			init_define_volume $vol $origin $snapstore $metadev || { echo "$0: init volume '$vol' failed"; exit 1; }
 
 			echo "Successfully created and initialized volume '$vol'."
-
-			if [[ $noinit = "nosnap" ]]; then
-				echo "nosnap: no initial snapshot taken!"
-				echo "This volume should only be used as a replication target, not source"
-				exit 0
-			fi
-
-			create_snapshot $vol 0 || { echo "$0: error with initial snapshot"; exit 1; }
-			echo 0 > $VOLUMES/$vol/zero
-
 			echo "You can now create a filesystem on /dev/mapper/$vol"
 		fi
 
