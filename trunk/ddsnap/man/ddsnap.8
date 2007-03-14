@@ -8,7 +8,7 @@ ddsnap \- block level snapshot and replication
 [\-V|--version] [-?|--help] [--usage] \fIsubcommand\fP [option\.\.\.] [operand...]
 .br
 .B ddsnap initialize
-[\-y|--yes] [-j|--journal_size \fIjournal_size\fP] [-b|--block_size \fIblock_size\fP] \fIsnapshot_device\fP \fIorigin_device\fP [\fImeta_device\fP]
+[\-y|--yes] [-j|--journalsize \fIjournalsize\fP] [-b|--blocksize \fIblocksize\fP] \fIsnapshot_device\fP \fIorigin_device\fP [\fImeta_device\fP]
 .br
 .B ddsnap agent 
 [\-f|--foreground] [-l|--logfile \fIfile_name\fP] [-p|--pidfile \fIfile_name\fP] \fIagent_socket\fP
@@ -65,12 +65,12 @@ ddsnap \- block level snapshot and replication
 .IP \fB\-y|--yes
 .br
 Answers yes to all prompts.
-.IP \fB\-j\ \fIjournal_size\fB|--journal_size=\fIjournal_size
+.IP \fB\-j\ \fIjournalsize\fB|--journalsize=\fIjournalsize
 .br
 Specifies the journal size, i.e. 200k. Defaults to 400k.
-.IP \fB\-b\ \fIblock_size\fB|--block_size=\fIblock_size
+.IP \fB\-b\ \fIblocksize\fB|--blocksize=\fIblocksize
 .br
-Specifies the block size. Input has to be a power of two, i.e. 8k. Defaults to chunk_size.
+Specifies the block size. Input has to be a power of two, i.e. 8k. Defaults to chunksize.
 .IP \fB-f|--foreground
 .br
 Sets the server to run in the foreground. The default is to run daemonized.
@@ -108,7 +108,7 @@ prints a short usage message and exits.
 
 .SH COMMANDS
 .IP \fBinitialize\fP 
-[\-y|--yes] [-j|--journal_size \fIjournal_size\fP] [-b|--block_size \fIblock_size\fP] 
+[\-y|--yes] [-j|--journalsize \fIjournalsize\fP] [-b|--blocksize \fIblocksize\fP] 
 .I snapshot_device origin_device 
 [\fImeta_device\fP]
 .br
