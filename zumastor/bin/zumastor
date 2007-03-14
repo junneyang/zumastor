@@ -390,7 +390,7 @@ function init_define_volume {
 	mkdir $path/targets || return 1
 
 	log "initializing volume '$vol', origindev '$odev', snapdev '$sdev'" $log
-	ddsnap initialize $sdev $odev $mdev 2>>$log || { echo init failed ;  return 1 ; }
+	ddsnap initialize $sdev $odev $mdev -b16384 2>>$log || { echo init failed ;  return 1 ; }
 
 	start_volume $vol || { echo start failed ;return 1; }
 
