@@ -13,7 +13,7 @@
 #define buftrace trace_off
 
 /*
- * Kernel-like buffer api
+ * Kernel-like buffer api test
  */
 
 /*
