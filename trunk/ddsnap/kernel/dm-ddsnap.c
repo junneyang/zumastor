@@ -12,6 +12,7 @@
 #include <asm/uaccess.h>
 #include <asm/bug.h>
 #include <linux/bio.h>
+#include <linux/proc_fs.h>
 #include "dm.h"
 #include "dm-ddsnap.h"
 
@@ -1039,10 +1040,113 @@ static int shutdown_socket(struct file *socket)
 	return sock->ops->shutdown(sock, RCV_SHUTDOWN);
 }
 
+/* Jiaying: add proc entries to pass stat info to user space.
+ * edit ddsnap_seq_show to add more passed infomation in the snapshot files *
+ * use ddsnap_add_proc to add a new file in /proc/fs/ddsnap dir */
+
+/* ddsnap_pending_queries does the same show_pending includes */
+static int ddsnap_pending_queries(struct devinfo *info)
+{
+	unsigned i, total = 0;
+	struct list_head *list;
+
+	spin_lock(&info->pending_lock);
+	for (i = 0; i < NUM_BUCKETS; i++) {
+		list_for_each(list, info->pending + i)
+			total++;
+	}
+	spin_unlock(&info->pending_lock);
+	return total;
+}
+
+static int ddsnap_queries_queries(struct devinfo *info)
+{
+	unsigned total = 0;
+	struct list_head *list;
+
+	spin_lock(&info->pending_lock);
+	list_for_each(list, &info->queries)
+		total++;
+	spin_unlock(&info->pending_lock);
+	return total;
+}
+
+static int ddsnap_releases_queries(struct devinfo *info)
+{
+	unsigned total = 0;
+	struct list_head *list;
+	unsigned long irqflags;
+
+	spin_lock_irqsave(&info->end_io_lock, irqflags);
+	list_for_each(list, &info->releases)
+		total++;
+	spin_unlock_irqrestore(&info->end_io_lock, irqflags);
+	return total;
+}
+
+
+static int ddsnap_locked_queries(struct devinfo *info)
+{
+	unsigned total = 0;
+	struct list_head *list;
+	unsigned long irqflags;
+
+	spin_lock_irqsave(&info->end_io_lock, irqflags);
+	list_for_each(list, &info->locked)
+		total++;
+	spin_unlock_irqrestore(&info->end_io_lock, irqflags);
+	return total;
+}
+
+static int ddsnap_seq_show(struct seq_file *seq, void *offset)
+{
+	struct dm_target *target = (struct dm_target *) seq->private;
+	struct devinfo *info;
+
+	BUG_ON(!target);
+	info = (struct devinfo *) target->private;
+	BUG_ON(!info);
+	seq_printf(seq, "ddsnap pending requests: %u, query requests %u, release requests %u, locked requests %u\n", ddsnap_pending_queries(info), ddsnap_queries_queries(info), ddsnap_releases_queries(info), ddsnap_locked_queries(info));
+	return 0;
+}
+
+static int ddsnap_seq_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, ddsnap_seq_show, PDE(inode)->data);
+}
+
+static struct file_operations ddsnap_proc_fops = {
+	.open = ddsnap_seq_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = single_release,
+};
+
+static struct proc_dir_entry *ddsnap_proc_root=NULL; // initialized in dm_ddsnap_init
+
+static void ddsnap_add_proc(const char *name, struct dm_target *target)
+{
+	struct proc_dir_entry *info;
+	BUG_ON(!ddsnap_proc_root);
+	info = create_proc_entry(name, 0, ddsnap_proc_root);
+	BUG_ON(!info);
+	info->owner = THIS_MODULE;
+	info->data = target;
+	info->proc_fops = &ddsnap_proc_fops;
+}
+
+static void ddsnap_remove_proc(const char *name)
+{
+	remove_proc_entry(name, ddsnap_proc_root);
+}
+
+/* Jiaying: end of proc functions */
+
 static void ddsnap_destroy(struct dm_target *target)
 {
 	struct devinfo *info = target->private;
 	int err; /* I have no mouth but I must scream */
+	char proc_name[8];
 	trace(warn("%p", target);)
 	if (!info)
 		return;
@@ -1083,6 +1187,8 @@ static void ddsnap_destroy(struct dm_target *target)
 		dm_put_device(target, info->snapdev);
 	if (info->orgdev)
 		dm_put_device(target, info->orgdev);
+	snprintf(proc_name, 8, "%d", info->snap); 
+	ddsnap_remove_proc(proc_name);
 	kfree(info);
 }
 
@@ -1197,6 +1303,7 @@ static int ddsnap_create(struct dm_target *target, unsigned argc, char **argv)
 	if ((err = kernel_thread((void *)control, target, 0)) < 0)
 		goto eek;
 	warn("Created snapshot device snapstore=%s origin=%s socket=%s snapshot=%i", argv[0], argv[1], argv[2], snap);
+	ddsnap_add_proc(argv[3], target); // use snapshot number as file name
 	return 0;
 
 eek:	warn("Virtual device create error %i: %s!", err, error);
@@ -1260,6 +1367,17 @@ int __init dm_ddsnap_init(void)
 	if (!(snapshot_super = alloc_super()))
 		goto bad4;
 #endif
+	/* Jiaying: register /proc/fs/ddsnap */
+	ddsnap_proc_root = proc_mkdir("ddsnap", proc_root_fs);
+	if (!ddsnap_proc_root) {
+		printk("cannot create /proc/ddsnap entry\n");
+#ifdef CACHE
+		goto bad4;
+#endif
+		goto bad3;
+	}
+	ddsnap_proc_root->owner = THIS_MODULE;
+
 	return 0;
 
 #ifdef CACHE
@@ -1285,6 +1403,7 @@ void dm_ddsnap_exit(void)
 	if (end_io_cache)
 		kmem_cache_destroy(end_io_cache);
 	kfree(snapshot_super);
+	remove_proc_entry("ddsnap", proc_root_fs); //Jiaying: remove /proc/fs/ddsnap
 }
 
 module_init(dm_ddsnap_init);
