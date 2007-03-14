@@ -1,12 +1,22 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <unistd.h> /* for ddnsap.h */
+#include <sys/ioctl.h>
+#include <linux/fs.h> // BLKGETSIZE
 #include "ddsnap.h"
 #include "ddsnap.common.h"
 
-
 #define CHUNK_ARRAY_INIT 1024
 
+int fd_size(fd_t fd, u64 *bytes)
+{
+	unsigned long sectors;
+
+	if (ioctl(fd, BLKGETSIZE, &sectors))
+		return -errno;
+	*bytes = ((u64)sectors) << 9;
+	return 0;
+}
 
 struct change_list *init_change_list(u32 chunksize_bits, u32 src_snap, u32 tgt_snap)
 {

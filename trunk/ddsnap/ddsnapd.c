@@ -22,10 +22,8 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/un.h>
-#include <sys/ioctl.h>
 #include <netinet/in.h>
 #include <netdb.h> // gethostbyname2_r
-#include <linux/fs.h> // BLKGETSIZE
 #include <popt.h>
 #include <sys/prctl.h>
 #include "buffer.h"
@@ -130,26 +128,12 @@ Cluster integration
 */
 
 /*
- * Miscellaneous Primitives
- */
-
-typedef int fd_t;
-
-/*
  * Ripped from libiddev.  It's not quite ugly enough to convince me to
  * add a new dependency on a library that nobody has yet, but it's close.
  *
  * Heavily modified so it would work with ramdisk devices.
  */
-static int fd_size(fd_t fd, u64 *bytes)
-{
-	unsigned long sectors;
 
-	if (ioctl(fd, BLKGETSIZE, &sectors))
-		return -errno;
-	*bytes = ((u64)sectors) << 9;
-	return 0;
-}
 
 static void hexdump(void const *data, unsigned length)
 {
