@@ -14,6 +14,7 @@ set -u # let make sure we use initialized variable
 #ORIG_DEV= origin device volume
 #SNAP_DEV= snap device volume
 #META_DEV= meta device
+#SCRIPT_HOME= the directory path that hold the scripts
 
 
 VOLUME_NAME=vol
