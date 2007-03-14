@@ -1833,6 +1833,42 @@ static u64 get_origin_sectors(int serv_fd)
 	return body.count;
 }
 
+static u32 get_state(int serv_fd, unsigned int snaptag)
+{
+	int err;
+
+	if ((err = outbead(serv_fd, REQUEST_SNAPSHOT_STATE, struct status_request, snaptag))) {
+		warn("unable to send state request: %s", strerror(-err));
+		return 9;
+	}
+
+	struct head head;
+
+	if ((err = readpipe(serv_fd, &head, sizeof(head))) < 0) {
+		warn("received incomplete packet header: %s", strerror(-err));
+		return 9;
+	}
+
+	if (head.code != SNAPSHOT_STATE) {
+		unknown_message_handler(serv_fd, &head);
+		return 9;
+	}
+
+	if (head.length != sizeof(struct state_message)) {
+		warn("state length mismatch: expected >=%u, actual %u", sizeof(struct state_message), head.length);
+		return 9;
+	}
+
+	struct state_message reply;
+
+	if ((err = readpipe(serv_fd, &reply, head.length)) < 0) {
+		warn("received incomplete state message: %s", strerror(-err));
+		return 9;
+	}
+
+	return reply.state;
+}
+
 static struct status *get_snap_status(struct status_message *message, unsigned int snaptag)
 {
 	struct status *status;
@@ -1902,6 +1938,11 @@ static int ddsnap_get_status(int serv_fd, u32 snaptag, int verbose)
 			ctime_str[strlen(ctime_str)-1] = '\0';
 		printf(" %24s", ctime_str);
 
+		if (snap_status->chunk_count[0] == -1) {
+			printf(" %8s %8s %8s\n", "!", "!", "!");
+			continue;
+		}
+
 		total_chunks = 0;
 		for (col = 0; col < reply->num_columns; col++)
 			total_chunks += snap_status->chunk_count[col];
@@ -1938,7 +1979,8 @@ static int ddsnap_get_status(int serv_fd, u32 snaptag, int verbose)
 			column_totals[col] = 0;
 			for (row = 0; row < reply->status_count; row++) {
 				snap_status = get_snap_status(reply, row);
-
+				if (snap_status->chunk_count[0] == -1)
+					continue;
 				column_totals[col] += snap_status->chunk_count[col];
 			}
 			column_totals[col] /= col+1;
@@ -2114,11 +2156,14 @@ int main(int argc, char *argv[])
 	int last = FALSE;
 	int list = FALSE;
 	int size = FALSE;
+	int state = FALSE;
 	int verb = FALSE;
 	struct poptOption stOptions[] = {
 		{ "last", '\0', POPT_ARG_NONE, &last, 0, "List the newest snapshot", NULL},
 		{ "list", 'l', POPT_ARG_NONE, &list, 0, "List all active snapshots", NULL},
 		{ "size", 's', POPT_ARG_NONE, &size, 0, "Print the size of the origin device", NULL},
+		{ "state", 'S', POPT_ARG_NONE, &state, 0, 
+			"Return the state of snapshot after exit. Output: 0: normal; 1: not exist; 2: squashed; 9: other error", NULL},
 		{ "verbose", 'v', POPT_ARG_NONE, &verb, 0, "Verbose sharing information", NULL},
 		POPT_TABLEEND
 	};
@@ -2684,7 +2729,7 @@ int main(int argc, char *argv[])
 			return 1;
 		}
 
-		if (last+list+size+verb > 1) {
+		if (last+list+size+state+verb > 1) {
 			fprintf(stderr, "%s %s: Incompatible status options specified\n", argv[0], argv[1]);
 			poptPrintUsage(cdCon, stderr, 0);
 			poptFreeContext(cdCon);
@@ -2745,7 +2790,35 @@ int main(int argc, char *argv[])
 			close(sock);
 
 			return 0;
-		} else {
+		} else if (state) {
+			char const *sockname, *snaptagstr;
+
+			sockname = poptGetArg(cdCon);
+			snaptagstr = poptGetArg(cdCon);
+
+			if (sockname == NULL)
+				cdUsage(cdCon, 9, argv[0], "Must specify socket name to state\n");
+			if (snaptagstr == NULL)
+				cdUsage(cdCon, 9, argv[0], "Must specify snapshot id to state\n");
+			if (poptPeekArg(cdCon) != NULL)
+				cdUsage(cdCon, 9, argv[0], "Too many arguments to state\n");
+
+			poptFreeContext(cdCon);
+
+			u32 snaptag;
+
+			if (parse_snaptag(snaptagstr, &snaptag) < 0) {
+				fprintf(stderr, "%s: invalid snapshot %s\n", argv[0], snaptagstr);
+				return 1;
+			}
+
+			int sock = create_socket(sockname);
+
+			int ret = get_state(sock, snaptag);
+			close(sock);
+
+			return ret;
+		} else{
 			char const *sockname, *snaptagstr;
 
 			sockname   = poptGetArg(cdCon);

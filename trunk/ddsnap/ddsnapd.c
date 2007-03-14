@@ -894,23 +894,34 @@ static chunk_t alloc_chunk_range(struct superblock *sb, struct allocspace *as, c
 static int delete_snapshot(struct superblock *sb, unsigned tag);
 // !!! possible/practical to topsort away this forward ref?
 
-static const struct snapshot *find_snapshot_to_delete(const struct snapshot * snaplist, u32 snapshots)
+static int is_squashed(const struct snapshot * snap)
 {
-	const struct snapshot * snap_cand = NULL;
-	int i, min_priority = 128; /* that's max prio plus one */
+	return snap->bit == SNAPSHOT_SQUASHED;
+}
 
-	for (i = snapshots - 1; i >= 0; i--)
-		if (!snaplist[i].usecnt && snaplist[i].prio <= min_priority) {
-			min_priority = snaplist[i].prio;
-			snap_cand = &(snaplist[i]);
-		}
-	return snap_cand;
+/* find the snapshot with 0 usecnt and lowest priority.
+ * if no such snapshot exists, find the snapshot with lowest priority */
+static struct snapshot *find_snapshot_to_delete(struct snapshot * snaplist, u32 snapshots)
+{
+	assert(snapshots);
+	struct snapshot *snap, *best = snaplist;
+
+	for (snap = snaplist + 1; snap < snaplist + snapshots; snap++) {
+		if (is_squashed(snap))
+			continue;
+		if (snap->usecnt && !best->usecnt)
+			continue;
+		if (!snap->usecnt == !best->usecnt && snap->prio >= best->prio)
+			continue;
+		best = snap;
+	}
+	return best;
+
 }
 
 static chunk_t alloc_chunk(struct superblock *sb, struct allocspace *as)
 {
 	chunk_t last = as->asi->last_alloc, total = as->asi->chunks, found;
-	const char *err_msg;
 	do {
 		if ((found = alloc_chunk_range(sb, as, last, total - last)) != -1 ||
 		    (found = alloc_chunk_range(sb, as, 0, last)) != -1) {
@@ -918,19 +929,16 @@ static chunk_t alloc_chunk(struct superblock *sb, struct allocspace *as)
 			set_sb_dirty(sb); // !!! optimize this away
 			return (found);
 		}
-		const struct snapshot *cand_delete = find_snapshot_to_delete(sb->image.snaplist, sb->image.snapshots);
-		err_msg = "unable to find a snapshot candidate to remove. Failing I/O.";
-		if (!cand_delete)
-			goto unable_to_delete; /* no snapshot to delete */
-		warn("snapshot store full, releasing snapshot %u", cand_delete->tag);
-		err_msg = "unable to release snapshot";
-		if (delete_snapshot(sb, cand_delete->tag))
-			goto unable_to_delete;
+		const struct snapshot *victim = find_snapshot_to_delete(sb->image.snaplist, sb->image.snapshots);
+		if (!victim) // we end up with all left squashed snapshots
+			return -1;
+		warn("snapshot store full, releasing snapshot %u", victim->tag);
+		if (delete_snapshot(sb, victim->tag)) {
+			warn("unable to release snapshot");
+			return -1;
+		}
 	} while (sb->image.snapshots);
-
- unable_to_delete:
-	warn("%s", err_msg);
-	return -1;
+	return -1;  // we delete all the unused snapshots
 }
 
 /* Snapshot Store Allocation */
@@ -1373,6 +1381,16 @@ static chunk_t make_unique(struct superblock *sb, chunk_t chunk, int snapnum)
 	}
 	u64 newex = alloc_exception(sb);
 	if (newex == -1) {
+		/* possibly all of the snapshots are deleted or squashed,
+		 * in that case, snapmask should have been cleared */
+		if (snapnum == -1?
+			origin_chunk_unique(buffer2leaf(leafbuf), chunk, sb->snapmask):
+			snapshot_chunk_unique(buffer2leaf(leafbuf), chunk, snapnum, &exception))
+		{
+			exception = 0;
+			brelse(leafbuf);
+			goto out;
+		}
 		exception = newex;
 		brelse(leafbuf); // !!! maybe add_exception_to_tree should not do this
 		goto out;
@@ -1753,7 +1771,10 @@ delete:
 	snapshot = sb->image.snaplist + i;
 	bit = snapshot->bit;
 	trace_on(warn("Delete snaptag %u (snapnum %i)", tag, bit););
-	memmove(snapshot, snapshot + 1, (char *)(sb->image.snaplist + --sb->image.snapshots) - (char *)snapshot);
+	if (snapshot->usecnt)
+		snapshot->bit = SNAPSHOT_SQUASHED;
+	else
+		memmove(snapshot, snapshot + 1, (char *)(sb->image.snaplist + --sb->image.snapshots) - (char *)snapshot);
 	sb->snapmask &= ~(1ULL << bit);
 	if ((error = delete_tree_range(sb, 1ULL << bit, 0)) < 0)
 		warn("unable to delete snapshot %u: %s", tag, strerror(-error));
@@ -2528,8 +2549,7 @@ static int incoming(struct superblock *sb, struct client *client)
 					if (exception == -1) {
 						warn("ERROR: unable to perform copyout during origin write.");
 						message.head.code = ORIGIN_WRITE_ERROR;
-					}
-					if (exception)
+					} else if (exception)
 						waitfor_chunk(sb, chunk, &pending);
 				}
 			finish_copyout(sb);
@@ -2554,7 +2574,12 @@ static int incoming(struct superblock *sb, struct client *client)
 		for (i = 0; i < body->count; i++)
 			for (j = 0; j < body->ranges[i].chunks; j++) {
 				chunk_t chunk = body->ranges[i].chunk + j;
-				chunk_t exception = make_unique(sb, chunk, client->snap);
+				chunk_t exception;
+				if (is_squashed(&sb->image.snaplist[client->snap])) {
+					warn("trying to write squashed snapshot, id = %u", body->id);
+					exception =  -1;
+				} else
+					exception = make_unique(sb, chunk, client->snap);
 				if (exception == -1) {
 					warn("ERROR: unable to perform copyout during snapshot write.");
 					ret_msgcode = SNAPSHOT_WRITE_ERROR;
@@ -2593,7 +2618,12 @@ static int incoming(struct superblock *sb, struct client *client)
 					readlock_chunk(sb, chunk, client);
 				}
 			}
-		//!!! when can these reads fail?
+		if (is_squashed(&sb->image.snaplist[client->snap])) {
+			warn("trying to read squashed snapshot");
+			finish_reply(client->sock, &snap, SNAPSHOT_READ_ERROR, body->id);
+			finish_reply(client->sock, &org, SNAPSHOT_READ_ORIGIN_ERROR, body->id);
+			break;
+		}
 		finish_reply(client->sock, &org, SNAPSHOT_READ_ORIGIN_OK, body->id);
 		finish_reply(client->sock, &snap, SNAPSHOT_READ_OK, body->id);
 		break;
@@ -3025,8 +3055,11 @@ static int incoming(struct superblock *sb, struct client *client)
 			snap_status->ctime = snaplist[snapslot].ctime;
 			snap_status->snap = snaplist[snapslot].tag;
 
-			for (col = 0; col < num_columns; col++)
-				snap_status->chunk_count[col] = share_table[snaplist[snapslot].bit][col];
+			if (is_squashed(&snaplist[snapslot]))
+				snap_status->chunk_count[0] = -1;
+			else
+				for (col = 0; col < num_columns; col++)
+					snap_status->chunk_count[col] = share_table[snaplist[snapslot].bit][col];
 
 			row++;
 		}
@@ -3047,6 +3080,43 @@ static int incoming(struct superblock *sb, struct client *client)
 	status_error:
 		warn("%s", err_msg);
 		
+		int err;
+		if ((err = outhead(sock, STATUS_ERROR, strlen(err_msg)+1)) < 0 ||
+				(err = writepipe(sock, err_msg, strlen(err_msg)+1)) < 0)
+			warn("unable to send error for status message: %s", strerror(-err));
+		break;
+	}
+	case REQUEST_SNAPSHOT_STATE:
+	{
+		struct status_request request;
+		char const *err_msg;
+
+		if (message.head.length != sizeof(request)) {
+			err_msg = "state_request has wrong length";
+			goto state_error;
+		}
+		memcpy(&request, message.body, sizeof(request));
+
+		struct snapshot const *snaplist = sb->image.snaplist;
+		struct state_message reply;
+		unsigned int i;
+
+		reply.snap = request.snap;
+		reply.state = 1;
+		for (i = 0; i < sb->image.snapshots; i++)
+			if (snaplist[i].tag == request.snap) {
+				reply.state = is_squashed(&snaplist[i]) ? 2 : 0;
+				break;
+			}
+
+		//if (outhead(sock, SNAPSHOT_STATE, sizeof(reply)) < 0 ||
+		//	writepipe(sock, &reply, sizeof(reply)) < 0)
+		if (outbead(sock, SNAPSHOT_STATE, struct state_message, reply.snap, reply.state) < 0)
+			warn("unable to send state message");
+		break;
+
+	state_error:
+		warn("%s", err_msg);
 		int err;
 		if ((err = outhead(sock, STATUS_ERROR, strlen(err_msg)+1)) < 0 ||
 				(err = writepipe(sock, err_msg, strlen(err_msg)+1)) < 0)

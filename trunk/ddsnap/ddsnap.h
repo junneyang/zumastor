@@ -63,6 +63,7 @@ struct server { struct server_head { u8 type; u8 length; } header; char *address
 #endif
 
 #define MAX_SNAPSHOTS 64
+#define SNAPSHOT_SQUASHED MAX_SNAPSHOTS
 
 #endif // __DDSNAP_H
 
