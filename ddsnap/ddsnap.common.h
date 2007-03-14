@@ -3,6 +3,12 @@
 
 #define MAX_ERRMSG_SIZE 128
 
+/*
+ * Miscellaneous Primitives
+ */
+
+typedef int fd_t;
+
 struct change_list
 {
 	u64 count;
@@ -13,7 +19,7 @@ struct change_list
 	u64 *chunks;
 };
 
-
+extern int fd_size(fd_t fd, u64 *bytes);
 extern struct change_list *init_change_list(u32 chunksize_bits, u32 src_snap, u32 tgt_snap);
 extern int append_change_list(struct change_list *cl, u64 chunkaddr);
 extern void free_change_list(struct change_list *cl);
