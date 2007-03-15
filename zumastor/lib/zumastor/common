@@ -218,7 +218,7 @@ function mount_device {
 
 	# to support mounting arbitrary snapshots to the unqualified volume mountpoint
 	[[ $3 == "unqualified" ]] && mount=${MOUNTS}/$vol
-	[[ $3 == "rw" ]] && options="rw,errors=remount-ro"
+	[[ $3 == "rw" ]] && options="rw,errors=remount-ro,usrquota,grpquota"
 
 	test -d $mount || mkdir $mount || return 1
 	mount -o $options /dev/mapper/$name $mount || { echo "unable to mount /dev/mapper/$name on $mount"; return 1; }
