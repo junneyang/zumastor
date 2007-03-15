@@ -371,7 +371,9 @@ function init_define_volume {
 	local -r vol=$1
 	local -r odev=$2
 	local -r sdev=$3
-	local -r mdev=$4
+	local -r blocksize=$4
+	local -r chunksize=$5
+	local -r mdev=$6
 	local -r path=$VOLUMES/$vol
 	local -r sock=${SERVERS}/$vol
 	local -r log=$LOGS/$vol/init.log
@@ -385,7 +387,7 @@ function init_define_volume {
 	mkdir $path/targets || return 1
 
 	log "initializing volume '$vol', origindev '$odev', snapdev '$sdev'" $log
-	ddsnap initialize $sdev $odev $mdev -b4k -c16k 2>>$log || { echo init failed ;  return 1 ; }
+	ddsnap initialize $sdev $odev $mdev -b$blocksize -c$chunksize 2>>$log || { echo init failed ;  return 1 ; }
 
 	start_volume $vol || { echo start failed ;return 1; }
 
@@ -746,10 +748,14 @@ case $1 in
 define)
 	case $2 in
 	volume)
-		declare args arg i
+		declare args
 		declare metadev=""
 		declare noinit="noinit"
 		declare name="$0 $1 $2"
+
+		# these are the defaults
+		declare blocksize=4k
+		declare chunksize=16k
 
 		shift 2
 		args=`getopt -om:hi -l help,metadev:,initialize -n"$name" -- "$@"` || \
@@ -764,10 +770,14 @@ define)
 				echo "Options"
 				echo "  -h, --help              show this help"
 				echo "  -i, --initialize        initialize the volume with zeros (will destroy data)"
-				echo "  -m, --metadev <metadev> sets the metadata device (default is snapstore)"
+				echo "  -m, --metadev <device>  sets the metadata device (default is snapstore)"
+				echo "  -b, --blocksize <size>  user-specified block size (default is $blocksize)"
+				echo "  -c, --chunksize <size>  user-specified chunk size (default is $chunksize)"
 				exit;;
 			-i|--initialize) noinit="";;
 			-m|--metadev) metadev=$2; shift 1;;
+			-b|--blocksize) blocksize=$2; shift 1;;
+			-c|--chunksize) chunksize=$2; shift 1;;
 			*) echo whoops; exit 9;;
 			esac
 			shift 1
@@ -788,7 +798,8 @@ define)
 		if [[ $noinit = "noinit" ]]; then
 			define_volume $vol $origin $snapstore $metadev || { echo "$0: define volume '$vol' failed"; exit 1; }
 		else
-			init_define_volume $vol $origin $snapstore $metadev || { echo "$0: init volume '$vol' failed"; exit 1; }
+			init_define_volume $vol $origin $snapstore $blocksize $chunksize $metadev \
+				|| { echo "$0: init volume '$vol' failed"; exit 1; }
 
 			echo "Successfully created and initialized volume '$vol'."
 			echo "You can now create a filesystem on /dev/mapper/$vol"
