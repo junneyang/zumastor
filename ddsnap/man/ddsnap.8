@@ -39,14 +39,14 @@ ddsnap \- block level snapshot and replication
 .I socket_name changelist_name snapshot1 snapshot2
 .br
 .B ddsnap delta create
-[-o|--overwrite] [-d|--difference] [-b|--best] [-g|--gzip \fIcompression_level\fP] 
+[-o|--overwrite] [-d|--difference] [-b|--best] [-z|--zip \fIcompression_level\fP] 
 .I changelist deltafile_name snapshot_device_stem
 .br
 .B ddsnap delta apply 
 .I deltafile_name snapshot_device_stem
 .br
 .B ddsnap delta send
-[-o|--overwrite] [-d|--difference] [-b|--best] [-g|--gzip \fIcompression_level\fP] 
+[-o|--overwrite] [-d|--difference] [-b|--best] [-z|--zip \fIcompression_level\fP] 
 .I socket_name snapshot1 snapshot2 snapshot_device_stem remote_snapshot
 \fIhost\fP[\fI:port\fP]
 .br
@@ -88,14 +88,14 @@ Gives lots of information about what's happening.
 The delta file contains the literal contents of each destination snapshot chunk from the difference list.  Generating a delta this way only requires reading one snapshot volume and applying it to the destination volume does not require any reading at all, so this method is very fast.  However, the delta file can be quite large.
 .IP \fB\-d|--difference
 .br
-Generates a delta file containing only binary differenced extents. The chunk level delta is compressed by taking a binary difference between source and destination chunks and compressing the result via the xdelta algorithm.
+Generates a delta file using xdelta binary differencing. The chunk level delta is compressed by taking a binary difference between source and destination chunks and compressing the result via the xdelta algorithm.
 .IP \fB\-b|--best
 .br
 Generates a delta file by trying both binary differencing and straight compression methods, choosing the best method for each extent of the output delta.  Uses more CPU and disk bandwidth in return for slightly smaller delta files.
 This option overrides the \-o and \-d options.
-.IP \fB\-g\ \fIcompression_level\fB|--gzip=\fIcompression_level
+.IP \fB\-z\ \fIcompression_level\fB|--zip=\fIcompression_level
 .br
-Generates a delta file with user specified mode and then further compress the delta file with gzip at the user specified gzip compression level (an int between 0 to 9). Level 0 indicates no compression and level 9 indicates maximum compression. Defaults at level 6.
+Specifies a zlib or xdelta compression level from 0 to 9, where level 0 is no compression and level 9 is maximum compression. If unspecified, compression level defaults to 6.
 .IP \fB\-V|--version
 .br
 Shows version.
@@ -154,7 +154,7 @@ Reports snapshot usage statistics.
 .br
 Creates a changelist from snapshot1 and snapshot2 with the given changelist_name.
 .IP \fBdelta\ \fBcreate\fP 
-[-o|--overwrite] [-d|--difference] [-b|--best] [-g|--gzip \fIcompression_level\fP] 
+[-o|--overwrite] [-d|--difference] [-b|--best] [-z|--zip \fIcompression_level\fP] 
 .I changelist_name deltafile_name snapshot_device_stem
 .br
 Creates a deltafile from the given \fIchangelist\fP and snapshot device stem with the given deltafile_name. Defaults to optimal mode if no option was selected.
@@ -163,7 +163,7 @@ Creates a deltafile from the given \fIchangelist\fP and snapshot device stem wit
 .br
 Applies the deltafile to the given device.
 .IP \fBdelta\ \fBsend\fP 
-[-o|--overwrite] [-d|--difference] [-b|--best] [-g|--gzip \fIcompression_level\fP] 
+[-o|--overwrite] [-d|--difference] [-b|--best] [-z|--zip \fIcompression_level\fP] 
 .I socket_name snapshot1 snapshot2 snapshot_device_stem remote_snapshot
 \fIhost\fP[\fI:port\fP]
 .br
