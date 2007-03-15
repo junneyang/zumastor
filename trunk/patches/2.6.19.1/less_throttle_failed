@@ -6,7 +6,7 @@ diff -rup linux-2.6.19.1/mm/backing-dev.c linux-2.6.19.1.shapor/mm/backing-dev.c
  	wait_queue_head_t *wqh = &congestion_wqh[rw];
  
 +	if ((current->flags & PF_LESS_THROTTLE) && printk_ratelimit()) {
-+		printk(KERN_WARNING, "PF_LESS_THROTTLE process %s[%i] entered congestion_wait!\n", current->comm, current->pid);
++		printk(KERN_WARNING "PF_LESS_THROTTLE process %s[%i] entered congestion_wait!\n", current->comm, current->pid);
 +		dump_stack();
 +	}
  	prepare_to_wait(wqh, &wait, TASK_UNINTERRUPTIBLE);
