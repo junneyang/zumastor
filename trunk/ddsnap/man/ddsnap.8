@@ -8,7 +8,7 @@ ddsnap \- block level snapshot and replication
 [\-V|--version] [-?|--help] [--usage] \fIsubcommand\fP [option\.\.\.] [operand...]
 .br
 .B ddsnap initialize
-[\-y|--yes] [-j|--journalsize \fIjournalsize\fP] [-b|--blocksize \fIblocksize\fP] \fIsnapshot_device\fP \fIorigin_device\fP [\fImeta_device\fP]
+[\-y|--yes] [-j|--journalsize \fIjournalsize\fP] [-b|--blocksize \fIblocksize\fP] [-c|--chunksize \fIchunksize\fP] \fIsnapshot_device\fP \fIorigin_device\fP [\fImeta_device\fP]
 .br
 .B ddsnap agent 
 [\-f|--foreground] [-l|--logfile \fIfile_name\fP] [-p|--pidfile \fIfile_name\fP] \fIagent_socket\fP
@@ -108,7 +108,7 @@ prints a short usage message and exits.
 
 .SH COMMANDS
 .IP \fBinitialize\fP 
-[\-y|--yes] [-j|--journalsize \fIjournalsize\fP] [-b|--blocksize \fIblocksize\fP] 
+[\-y|--yes] [-j|--journalsize \fIjournalsize\fP] [-b|--blocksize \fIblocksize\fP] [-c|--chunksize \fIchunksize\fP] 
 .I snapshot_device origin_device 
 [\fImeta_device\fP]
 .br
