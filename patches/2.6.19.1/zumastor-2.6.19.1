@@ -1,6 +1,6 @@
-diff -rup linux-2.6.19.1.clean/drivers/md/Kconfig linux-2.6.19.1/drivers/md/Kconfig
---- linux-2.6.19.1.clean/drivers/md/Kconfig	2006-12-18 11:09:41.000000000 -0800
-+++ linux-2.6.19.1/drivers/md/Kconfig	2006-12-18 11:12:16.000000000 -0800
+diff -purN linux-2.6.19.1/drivers/md/Kconfig linux-2.6.19.1-zuma/drivers/md/Kconfig
+--- linux-2.6.19.1/drivers/md/Kconfig	2006-12-11 11:32:53.000000000 -0800
++++ linux-2.6.19.1-zuma/drivers/md/Kconfig	2007-03-15 17:44:44.000000000 -0700
 @@ -261,6 +261,22 @@ config DM_MULTIPATH_EMC
  	---help---
  	  Multipath support for EMC CX/AX series hardware.
@@ -24,9 +24,9 @@ diff -rup linux-2.6.19.1.clean/drivers/md/Kconfig linux-2.6.19.1/drivers/md/Kcon
  endmenu
  
  endif
-diff -rup linux-2.6.19.1.clean/drivers/md/Makefile linux-2.6.19.1/drivers/md/Makefile
---- linux-2.6.19.1.clean/drivers/md/Makefile	2006-12-18 11:09:41.000000000 -0800
-+++ linux-2.6.19.1/drivers/md/Makefile	2006-12-18 11:12:16.000000000 -0800
+diff -purN linux-2.6.19.1/drivers/md/Makefile linux-2.6.19.1-zuma/drivers/md/Makefile
+--- linux-2.6.19.1/drivers/md/Makefile	2006-12-11 11:32:53.000000000 -0800
++++ linux-2.6.19.1-zuma/drivers/md/Makefile	2007-03-15 17:44:44.000000000 -0700
 @@ -36,6 +36,8 @@ obj-$(CONFIG_DM_MULTIPATH_EMC)	+= dm-emc
  obj-$(CONFIG_DM_SNAPSHOT)	+= dm-snapshot.o
  obj-$(CONFIG_DM_MIRROR)		+= dm-mirror.o
@@ -36,9 +36,9 @@ diff -rup linux-2.6.19.1.clean/drivers/md/Makefile linux-2.6.19.1/drivers/md/Mak
  
  quiet_cmd_unroll = UNROLL  $@
        cmd_unroll = $(PERL) $(srctree)/$(src)/unroll.pl $(UNROLL) \
-diff -rup linux-2.6.19.1.clean/drivers/md/dm-ddraid.c linux-2.6.19.1/drivers/md/dm-ddraid.c
---- linux-2.6.19.1.clean/drivers/md/dm-ddraid.c	2007-01-03 12:29:57.000000000 -0800
-+++ linux-2.6.19.1/drivers/md/dm-ddraid.c	2006-12-18 11:12:43.000000000 -0800
+diff -purN linux-2.6.19.1/drivers/md/dm-ddraid.c linux-2.6.19.1-zuma/drivers/md/dm-ddraid.c
+--- linux-2.6.19.1/drivers/md/dm-ddraid.c	1969-12-31 16:00:00.000000000 -0800
++++ linux-2.6.19.1-zuma/drivers/md/dm-ddraid.c	2007-03-15 17:44:44.000000000 -0700
 @@ -0,0 +1,1621 @@
 +#include <linux/fs.h>
 +#include <linux/slab.h>
@@ -1661,9 +1661,9 @@ diff -rup linux-2.6.19.1.clean/drivers/md/dm-ddraid.c linux-2.6.19.1/drivers/md/
 +
 +module_init(dm_ddraid_init);
 +module_exit(dm_ddraid_exit);
-diff -rup linux-2.6.19.1.clean/drivers/md/dm-ddraid.h linux-2.6.19.1/drivers/md/dm-ddraid.h
---- linux-2.6.19.1.clean/drivers/md/dm-ddraid.h	2007-01-03 12:29:58.000000000 -0800
-+++ linux-2.6.19.1/drivers/md/dm-ddraid.h	2006-12-18 11:12:43.000000000 -0800
+diff -purN linux-2.6.19.1/drivers/md/dm-ddraid.h linux-2.6.19.1-zuma/drivers/md/dm-ddraid.h
+--- linux-2.6.19.1/drivers/md/dm-ddraid.h	1969-12-31 16:00:00.000000000 -0800
++++ linux-2.6.19.1-zuma/drivers/md/dm-ddraid.h	2007-03-15 17:44:44.000000000 -0700
 @@ -0,0 +1,47 @@
 +#define PACKED __attribute__ ((packed))
 +
@@ -1712,10 +1712,10 @@ diff -rup linux-2.6.19.1.clean/drivers/md/dm-ddraid.h linux-2.6.19.1/drivers/md/
 +
 +// bios submitted before server arrives must be split conservatively (see "bogus")
 +#define MIN_REGION_BITS 12
-diff -rup linux-2.6.19.1.clean/drivers/md/dm-ddsnap.c linux-2.6.19.1/drivers/md/dm-ddsnap.c
---- linux-2.6.19.1.clean/drivers/md/dm-ddsnap.c	2007-01-03 12:29:53.000000000 -0800
-+++ linux-2.6.19.1/drivers/md/dm-ddsnap.c	2007-02-22 13:06:27.000000000 -0800
-@@ -0,0 +1,1281 @@
+diff -purN linux-2.6.19.1/drivers/md/dm-ddsnap.c linux-2.6.19.1-zuma/drivers/md/dm-ddsnap.c
+--- linux-2.6.19.1/drivers/md/dm-ddsnap.c	1969-12-31 16:00:00.000000000 -0800
++++ linux-2.6.19.1-zuma/drivers/md/dm-ddsnap.c	2007-03-15 17:45:02.000000000 -0700
+@@ -0,0 +1,1438 @@
 +#include <linux/version.h>
 +#include <linux/fs.h>
 +#include <linux/slab.h>
@@ -1730,6 +1730,7 @@ diff -rup linux-2.6.19.1.clean/drivers/md/dm-ddsnap.c linux-2.6.19.1/drivers/md/
 +#include <asm/uaccess.h>
 +#include <asm/bug.h>
 +#include <linux/bio.h>
++#include <linux/proc_fs.h>
 +#include "dm.h"
 +#include "dm-ddsnap.h"
 +
@@ -1758,8 +1759,13 @@ diff -rup linux-2.6.19.1.clean/drivers/md/dm-ddsnap.c linux-2.6.19.1/drivers/md/
 +
 +/* Useful gizmos */
 +
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,19)
 +static int rwpipe(struct file *file, const void *buffer, unsigned int count,
 +        ssize_t (*op)(struct kiocb *, const struct iovec *, unsigned long, loff_t), int mode)
++#else
++static int rwpipe(struct file *file, const void *buffer, unsigned int count,
++                        ssize_t (*op)(struct kiocb *, const char *, size_t, loff_t), int mode)
++#endif
 +{
 +        struct kiocb iocb;
 +        mm_segment_t oldseg;
@@ -1771,13 +1777,19 @@ diff -rup linux-2.6.19.1.clean/drivers/md/dm-ddsnap.c linux-2.6.19.1/drivers/md/
 +                return -EINVAL;
 +        init_sync_kiocb(&iocb, file); // new in 2.5 (hmm)
 +        iocb.ki_pos = file->f_pos;
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,19)
 +        iocb.ki_left = count;
++#endif
 +
 +        oldseg = get_fs();
 +        set_fs(get_ds());
 +        while (count) {
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,19)
 +                int chunk = (*op)(&iocb, &(struct iovec){ .iov_base = buffer, .iov_len = count },
 +                                        1, iocb.ki_pos);
++#else
++                int chunk = (*op)(&iocb, buffer, count, iocb.ki_pos);
++#endif
 +                if (chunk <= 0) {
 +                        err = chunk? chunk: -EPIPE;
 +                        break;
@@ -1868,6 +1880,7 @@ diff -rup linux-2.6.19.1.clean/drivers/md/dm-ddsnap.c linux-2.6.19.1/drivers/md/
 +#define READY_FLAG (1 << 4)
 +#define NUM_BUCKETS 64
 +#define MASK_BUCKETS (NUM_BUCKETS - 1)
++#define MAX_INFLIGHT_PAGES 1000
 +
 +struct devinfo {
 +	u64 id;
@@ -1896,6 +1909,9 @@ diff -rup linux-2.6.19.1.clean/drivers/md/dm-ddsnap.c linux-2.6.19.1/drivers/md/
 +	spinlock_t pending_lock;
 +	spinlock_t end_io_lock;
 +	int dont_switch_lists;
++	atomic_t inflight;
++	unsigned capacity; // reporting only
++	struct semaphore throttle_sem; // does the real throttling
 +};
 +
 +static inline int is_snapshot(struct devinfo *info)
@@ -1921,6 +1937,24 @@ diff -rup linux-2.6.19.1.clean/drivers/md/dm-ddsnap.c linux-2.6.19.1/drivers/md/
 +	while (down_interruptible(&info->recover_sem))
 +		;
 +	info->flags |= RECOVER_FLAG;
++}
++
++static void throttle(struct devinfo *info, struct bio *bio)
++{
++	unsigned consume = bio->bi_vcnt;
++
++	atomic_add(consume, &info->inflight);
++	while (consume--)
++		down(&info->throttle_sem);
++}
++
++static void unthrottle(struct devinfo *info, struct bio *bio)
++{
++	unsigned consumed = bio->bi_vcnt;
++
++	atomic_sub(consumed, &info->inflight);
++	while (consumed--)
++		up(&info->throttle_sem);
 +}
 +
 +/* Static caches, shared by all ddsnap instances */
@@ -2082,12 +2116,14 @@ diff -rup linux-2.6.19.1.clean/drivers/md/dm-ddsnap.c linux-2.6.19.1/drivers/md/
 +
 +		bio = pending->bio;
 +		trace(warn("Handle pending IO sector %Lx", (long long)bio->bi_sector);)
++		unthrottle(info, bio);
 +
 +		if(failed_io) {
 +			warn("Unable to handle pending IO server %Lx", (long long)bio->bi_sector);
 +			kmem_cache_free(pending_cache, pending);
 +			bio_io_error(bio, bio->bi_size);
-+			return -1;
++			/* we need to call bio_io_error to release the bio buffer for all bio requests */
++			continue;
 +		}
 +
 +		if (chunks != pending->chunks) {
@@ -2454,7 +2490,7 @@ diff -rup linux-2.6.19.1.clean/drivers/md/dm-ddsnap.c linux-2.6.19.1/drivers/md/
 +	int err;
 +
 +	daemonize_properly("ddsnap-wrkr", info->snap);
-+	current->flags |= PF_LESS_THROTTLE; /* less IO throttling */
++	current->flags |= PF_LESS_THROTTLE; /* 
 +	trace_on(warn("Worker thread started, pid=%i for snapshot %d", current->pid, info->snap);)
 +	while (down_interruptible(&info->exit1_sem))
 +		;
@@ -2712,6 +2748,7 @@ diff -rup linux-2.6.19.1.clean/drivers/md/dm-ddsnap.c linux-2.6.19.1/drivers/md/
 +	}
 +#endif
 +
++	throttle(info, bio);
 +	/* rob: check to see if the socket is connected, otherwise failed and don't place request on the queue */
 +	id = info->nextid;
 +	info->nextid = (id + 1) & ~(-1 << ID_BITS);
@@ -2745,10 +2782,113 @@ diff -rup linux-2.6.19.1.clean/drivers/md/dm-ddsnap.c linux-2.6.19.1/drivers/md/
 +	return sock->ops->shutdown(sock, RCV_SHUTDOWN);
 +}
 +
++/* Jiaying: add proc entries to pass stat info to user space.
++ * edit ddsnap_seq_show to add more passed infomation in the snapshot files *
++ * use ddsnap_add_proc to add a new file in /proc/fs/ddsnap dir */
++
++/* ddsnap_pending_queries does the same show_pending includes */
++static int ddsnap_pending_queries(struct devinfo *info)
++{
++	unsigned i, total = 0;
++	struct list_head *list;
++
++	spin_lock(&info->pending_lock);
++	for (i = 0; i < NUM_BUCKETS; i++) {
++		list_for_each(list, info->pending + i)
++			total++;
++	}
++	spin_unlock(&info->pending_lock);
++	return total;
++}
++
++static int ddsnap_queries_queries(struct devinfo *info)
++{
++	unsigned total = 0;
++	struct list_head *list;
++
++	spin_lock(&info->pending_lock);
++	list_for_each(list, &info->queries)
++		total++;
++	spin_unlock(&info->pending_lock);
++	return total;
++}
++
++static int ddsnap_releases_queries(struct devinfo *info)
++{
++	unsigned total = 0;
++	struct list_head *list;
++	unsigned long irqflags;
++
++	spin_lock_irqsave(&info->end_io_lock, irqflags);
++	list_for_each(list, &info->releases)
++		total++;
++	spin_unlock_irqrestore(&info->end_io_lock, irqflags);
++	return total;
++}
++
++
++static int ddsnap_locked_queries(struct devinfo *info)
++{
++	unsigned total = 0;
++	struct list_head *list;
++	unsigned long irqflags;
++
++	spin_lock_irqsave(&info->end_io_lock, irqflags);
++	list_for_each(list, &info->locked)
++		total++;
++	spin_unlock_irqrestore(&info->end_io_lock, irqflags);
++	return total;
++}
++
++static int ddsnap_seq_show(struct seq_file *seq, void *offset)
++{
++	struct dm_target *target = (struct dm_target *) seq->private;
++	struct devinfo *info;
++
++	BUG_ON(!target);
++	info = (struct devinfo *) target->private;
++	BUG_ON(!info);
++	seq_printf(seq, "ddsnap inflight bio vecs %u, pending requests: %u, query requests %u, release requests %u, locked requests %u\n", atomic_read(&info->inflight), ddsnap_pending_queries(info), ddsnap_queries_queries(info), ddsnap_releases_queries(info), ddsnap_locked_queries(info));
++	return 0;
++}
++
++static int ddsnap_seq_open(struct inode *inode, struct file *file)
++{
++	return single_open(file, ddsnap_seq_show, PDE(inode)->data);
++}
++
++static struct file_operations ddsnap_proc_fops = {
++	.open = ddsnap_seq_open,
++	.read = seq_read,
++	.llseek = seq_lseek,
++	.release = single_release,
++};
++
++static struct proc_dir_entry *ddsnap_proc_root=NULL; // initialized in dm_ddsnap_init
++
++static void ddsnap_add_proc(const char *name, struct dm_target *target)
++{
++	struct proc_dir_entry *info;
++	BUG_ON(!ddsnap_proc_root);
++	info = create_proc_entry(name, 0, ddsnap_proc_root);
++	BUG_ON(!info);
++	info->owner = THIS_MODULE;
++	info->data = target;
++	info->proc_fops = &ddsnap_proc_fops;
++}
++
++static void ddsnap_remove_proc(const char *name)
++{
++	remove_proc_entry(name, ddsnap_proc_root);
++}
++
++/* Jiaying: end of proc functions */
++
 +static void ddsnap_destroy(struct dm_target *target)
 +{
 +	struct devinfo *info = target->private;
 +	int err; /* I have no mouth but I must scream */
++	char proc_name[8];
 +	trace(warn("%p", target);)
 +	if (!info)
 +		return;
@@ -2789,6 +2929,8 @@ diff -rup linux-2.6.19.1.clean/drivers/md/dm-ddsnap.c linux-2.6.19.1/drivers/md/
 +		dm_put_device(target, info->snapdev);
 +	if (info->orgdev)
 +		dm_put_device(target, info->orgdev);
++	snprintf(proc_name, 8, "%d", info->snap); 
++	ddsnap_remove_proc(proc_name);
 +	kfree(info);
 +}
 +
@@ -2854,7 +2996,8 @@ diff -rup linux-2.6.19.1.clean/drivers/md/dm-ddsnap.c linux-2.6.19.1/drivers/md/
 +	*info = (struct devinfo){ 
 +		.flags = flags, .snap = snap,
 +		.chunksize_bits = chunksize_bits,
-+		.chunkshift = chunksize_bits - SECTOR_SHIFT};
++		.chunkshift = chunksize_bits - SECTOR_SHIFT,
++		.capacity = MAX_INFLIGHT_PAGES};
 +	target->private = info;
 +	sema_init(&info->server_in_sem, 0);
 +	sema_init(&info->server_out_sem, 0);
@@ -2870,6 +3013,7 @@ diff -rup linux-2.6.19.1.clean/drivers/md/dm-ddsnap.c linux-2.6.19.1/drivers/md/
 +	INIT_LIST_HEAD(&info->locked);
 +	for (i = 0; i < NUM_BUCKETS; i++)
 +		INIT_LIST_HEAD(&info->pending[i]);
++	sema_init(&info->throttle_sem, info->capacity);
 +
 +	error = "Can't get snapshot device";
 +	if ((err = dm_get_device(target, argv[0], 0, 0, dm_table_get_mode(target->table), &info->snapdev)))
@@ -2903,6 +3047,7 @@ diff -rup linux-2.6.19.1.clean/drivers/md/dm-ddsnap.c linux-2.6.19.1/drivers/md/
 +	if ((err = kernel_thread((void *)control, target, 0)) < 0)
 +		goto eek;
 +	warn("Created snapshot device snapstore=%s origin=%s socket=%s snapshot=%i", argv[0], argv[1], argv[2], snap);
++	ddsnap_add_proc(argv[3], target); // use snapshot number as file name
 +	return 0;
 +
 +eek:	warn("Virtual device create error %i: %s!", err, error);
@@ -2966,6 +3111,17 @@ diff -rup linux-2.6.19.1.clean/drivers/md/dm-ddsnap.c linux-2.6.19.1/drivers/md/
 +	if (!(snapshot_super = alloc_super()))
 +		goto bad4;
 +#endif
++	/* Jiaying: register /proc/fs/ddsnap */
++	ddsnap_proc_root = proc_mkdir("ddsnap", proc_root_fs);
++	if (!ddsnap_proc_root) {
++		printk("cannot create /proc/ddsnap entry\n");
++#ifdef CACHE
++		goto bad4;
++#endif
++		goto bad3;
++	}
++	ddsnap_proc_root->owner = THIS_MODULE;
++
 +	return 0;
 +
 +#ifdef CACHE
@@ -2991,16 +3147,17 @@ diff -rup linux-2.6.19.1.clean/drivers/md/dm-ddsnap.c linux-2.6.19.1/drivers/md/
 +	if (end_io_cache)
 +		kmem_cache_destroy(end_io_cache);
 +	kfree(snapshot_super);
++	remove_proc_entry("ddsnap", proc_root_fs); //Jiaying: remove /proc/fs/ddsnap
 +}
 +
 +module_init(dm_ddsnap_init);
 +module_exit(dm_ddsnap_exit);
 +
 +MODULE_LICENSE("GPL");
-diff -rup linux-2.6.19.1.clean/drivers/md/dm-ddsnap.h linux-2.6.19.1/drivers/md/dm-ddsnap.h
---- linux-2.6.19.1.clean/drivers/md/dm-ddsnap.h	2007-01-03 12:29:54.000000000 -0800
-+++ linux-2.6.19.1/drivers/md/dm-ddsnap.h	2006-12-18 11:12:43.000000000 -0800
-@@ -0,0 +1,133 @@
+diff -purN linux-2.6.19.1/drivers/md/dm-ddsnap.h linux-2.6.19.1-zuma/drivers/md/dm-ddsnap.h
+--- linux-2.6.19.1/drivers/md/dm-ddsnap.h	1969-12-31 16:00:00.000000000 -0800
++++ linux-2.6.19.1-zuma/drivers/md/dm-ddsnap.h	2007-03-15 17:45:02.000000000 -0700
+@@ -0,0 +1,136 @@
 +#define PACKED __attribute__ ((packed))
 +#define MAGIC  0xadbe
 +
@@ -3064,6 +3221,8 @@ diff -rup linux-2.6.19.1.clean/drivers/md/dm-ddsnap.h linux-2.6.19.1/drivers/md/
 +	STATUS,
 +	STATUS_OK,
 +	STATUS_ERROR,
++	REQUEST_SNAPSHOT_STATE,
++	SNAPSHOT_STATE,
 +	REQUEST_ORIGIN_SECTORS,
 +	ORIGIN_SECTORS,
 +};
@@ -3106,6 +3265,7 @@ diff -rup linux-2.6.19.1.clean/drivers/md/dm-ddsnap.h linux-2.6.19.1/drivers/md/
 +struct overall_status { uint32_t chunksize_bits; uint64_t used; uint64_t free; } PACKED;
 +struct status { uint64_t ctime; uint32_t snap; uint64_t chunk_count[]; } PACKED;
 +struct status_message { uint64_t ctime; struct overall_status meta; struct overall_status store; uint32_t write_density; uint32_t status_count; uint32_t num_columns; char status_data[]; } PACKED;
++struct state_message {uint32_t snap; uint32_t state; } PACKED;
 +struct origin_sectors { uint64_t count; } PACKED;
 +
 +typedef uint16_t shortcount; /* !!! what is this all about */
@@ -3134,9 +3294,9 @@ diff -rup linux-2.6.19.1.clean/drivers/md/dm-ddsnap.h linux-2.6.19.1/drivers/md/
 +struct rwmessage { struct head head; struct rw_request body; };
 +struct messagebuf { struct head head; char body[maxbody]; };
 +/* ...decruft me */
-diff -rup linux-2.6.19.1.clean/include/linux/prctl.h linux-2.6.19.1/include/linux/prctl.h
---- linux-2.6.19.1.clean/include/linux/prctl.h	2006-12-18 11:09:42.000000000 -0800
-+++ linux-2.6.19.1/include/linux/prctl.h	2007-02-22 13:21:24.000000000 -0800
+diff -purN linux-2.6.19.1/include/linux/prctl.h linux-2.6.19.1-zuma/include/linux/prctl.h
+--- linux-2.6.19.1/include/linux/prctl.h	2006-12-11 11:32:53.000000000 -0800
++++ linux-2.6.19.1-zuma/include/linux/prctl.h	2007-03-15 17:44:44.000000000 -0700
 @@ -59,4 +59,7 @@
  # define PR_ENDIAN_LITTLE	1	/* True little endian mode */
  # define PR_ENDIAN_PPC_LITTLE	2	/* "PowerPC" pseudo little endian */
@@ -3145,9 +3305,9 @@ diff -rup linux-2.6.19.1.clean/include/linux/prctl.h linux-2.6.19.1/include/linu
 +#define PR_SET_LESS_THROTTLE           21
 +
  #endif /* _LINUX_PRCTL_H */
-diff -rup linux-2.6.19.1.clean/kernel/sys.c linux-2.6.19.1/kernel/sys.c
---- linux-2.6.19.1.clean/kernel/sys.c	2006-12-18 11:09:42.000000000 -0800
-+++ linux-2.6.19.1/kernel/sys.c	2007-02-22 13:21:03.000000000 -0800
+diff -purN linux-2.6.19.1/kernel/sys.c linux-2.6.19.1-zuma/kernel/sys.c
+--- linux-2.6.19.1/kernel/sys.c	2006-12-11 11:32:53.000000000 -0800
++++ linux-2.6.19.1-zuma/kernel/sys.c	2007-03-15 17:44:44.000000000 -0700
 @@ -2158,7 +2158,11 @@ asmlinkage long sys_prctl(int option, un
  		case PR_SET_ENDIAN:
  			error = SET_ENDIAN(current, arg2);
@@ -3161,9 +3321,9 @@ diff -rup linux-2.6.19.1.clean/kernel/sys.c linux-2.6.19.1/kernel/sys.c
  		default:
  			error = -EINVAL;
  			break;
-diff -rup linux-2.6.19.1.clean/net/socket.c linux-2.6.19.1/net/socket.c
---- linux-2.6.19.1.clean/net/socket.c	2006-12-18 11:09:43.000000000 -0800
-+++ linux-2.6.19.1/net/socket.c	2006-12-18 11:12:16.000000000 -0800
+diff -purN linux-2.6.19.1/net/socket.c linux-2.6.19.1-zuma/net/socket.c
+--- linux-2.6.19.1/net/socket.c	2006-12-11 11:32:53.000000000 -0800
++++ linux-2.6.19.1-zuma/net/socket.c	2007-03-15 17:44:44.000000000 -0700
 @@ -2252,6 +2252,12 @@ int kernel_sock_ioctl(struct socket *soc
  	return err;
  }
