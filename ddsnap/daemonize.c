@@ -79,8 +79,8 @@ pid_t daemonize(char const *logfile, char const *pidfile)
 		setvbuf(stdout, buffer_stdout, _IOLBF, BUFSIZE);
 		setvbuf(stderr, buffer_stderr, _IOLBF, BUFSIZE);
 
-		if (set_flags(fileno(stdout), O_DIRECT)
-				|| set_flags(fileno(stderr), O_DIRECT))
+		if (set_flags(fileno(stdout), O_SYNC)
+				|| set_flags(fileno(stderr), O_SYNC))
 			error("unable to set stdout and stderr flags to O_DIRECT: %s"
 					, strerror(errno));
 
