@@ -1,3 +1,9 @@
+ddsnap (0.4.rc7) unstable; urgency=low
+
+  * r296
+
+ -- Shapor Naghibzadeh <shapor@zst0.smo.corp.google.com.smo.corp.google.com>  Fri, 16 Mar 2007 13:36:58 -0700
+
 ddsnap (0.4.rc4) unstable; urgency=low
 
   * Added O_SYNC to logging; seems to fix kernel deadlock  
