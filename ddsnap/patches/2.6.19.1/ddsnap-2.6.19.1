@@ -2490,7 +2490,7 @@ diff -purN linux-2.6.19.1/drivers/md/dm-ddsnap.c linux-2.6.19.1-zuma/drivers/md/
 +	int err;
 +
 +	daemonize_properly("ddsnap-wrkr", info->snap);
-+	current->flags |= PF_LESS_THROTTLE; /* 
++	current->flags |= PF_LESS_THROTTLE;
 +	trace_on(warn("Worker thread started, pid=%i for snapshot %d", current->pid, info->snap);)
 +	while (down_interruptible(&info->exit1_sem))
 +		;

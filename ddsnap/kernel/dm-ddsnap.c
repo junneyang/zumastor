@@ -772,7 +772,7 @@ static int worker(struct dm_target *target)
 	int err;
 
 	daemonize_properly("ddsnap-wrkr", info->snap);
-	current->flags |= PF_LESS_THROTTLE; /* 
+	current->flags |= PF_LESS_THROTTLE;
 	trace_on(warn("Worker thread started, pid=%i for snapshot %d", current->pid, info->snap);)
 	while (down_interruptible(&info->exit1_sem))
 		;
