@@ -295,16 +295,10 @@ static void commit_transaction(struct superblock *sb)
 	struct commit_block *commit = buf2block(commit_buffer);
 	*commit = (struct commit_block){ .magic = JMAGIC, .sequence = sb->image.sequence++ };
 
-	while (!list_empty(&dirty_buffers)) {
-		struct list_head *entry = dirty_buffers.next;
-		struct buffer *buffer = list_entry(entry, struct buffer, dirty_list);
-		jtrace(warn("write data sector = %Lx", buffer->sector););
-		assert(buffer_dirty(buffer));
+	list_for_each(list, &dirty_buffers) {
+		struct buffer *buffer = list_entry(list, struct buffer, dirty_list);
 		assert(commit->entries < sb->max_commit_blocks);
 		commit->sector[commit->entries++] = buffer->sector;
-		if (write_buffer(buffer)) // deletes it from dirty (fixme: fragile)
-			jtrace(warn("unable to write commit block to journal"););
-		// we hope the order we just listed these is the same as committed above
 	}
 
 	jtrace(warn("commit journal block [%u]", pos););
@@ -315,6 +309,16 @@ static void commit_transaction(struct superblock *sb)
 	if (write_buffer_to(commit_buffer, journal_sector(sb, pos)))
 		jtrace(warn("unable to write checksum fro commit block"););
 	brelse(commit_buffer);
+
+	while (!list_empty(&dirty_buffers)) {
+		struct list_head *entry = dirty_buffers.next;
+		struct buffer *buffer = list_entry(entry, struct buffer, dirty_list);
+		jtrace(warn("write data sector = %Lx", buffer->sector););
+		assert(buffer_dirty(buffer));
+		if (write_buffer(buffer)) // deletes it from dirty (fixme: fragile)
+			jtrace(warn("unable to write commit block to journal"););
+		// we hope the order we just listed these is the same as committed above
+	}
 }
 
 static int recover_journal(struct superblock *sb)
