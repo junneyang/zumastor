@@ -674,8 +674,11 @@ function replication_cycle {
 
 	log "replication cycle beginning - snapshot ($hold, $next)..." $log
 
-	log "creating device..." $log
+	log "creating snapshot..." $log
 	create_snapshot $vol $next >> $log 2>&1
+
+	log "setting snapshot unquashable..." $log
+	set_priority $vol $next 127 >> $log 2>&1
 
 	log "setting holdfile to $next" $log
 	echo $next > $holdfile
