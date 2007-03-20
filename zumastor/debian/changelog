@@ -1,3 +1,9 @@
+zumastor (0.4.pre7) unstable; urgency=low
+
+  * r296 
+
+ -- Shapor Naghibzadeh <shapor@google.com>  Fri, 16 Mar 2007 13:34:48 -0700
+
 zumastor (0.4.rc6) unstable; urgency=low
 
   * fixed init script to work properly via dh_installinit
