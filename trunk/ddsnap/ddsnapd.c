@@ -942,13 +942,26 @@ static chunk_t alloc_chunk(struct superblock *sb, struct allocspace *as)
 		}
 		const struct snapshot *victim = find_snapshot_to_delete(sb->image.snaplist, sb->image.snapshots);
 		if (!victim) // we end up with all left squashed snapshots
-			return -1;
+			break;
 		warn("snapshot store full, releasing snapshot %u", victim->tag);
 		if (delete_snapshot(sb, victim->tag)) {
 			warn("unable to release snapshot");
 			return -1;
 		}
 	} while (sb->image.snapshots);
+
+	if (sb->image.snap_chunks_used != 0)
+		warn("non zero used data chunks %llu after all snapshots are deleted", sb->image.snap_chunks_used);
+	unsigned meta_bitmap_base_chunk = (SB_SECTOR + 2*sb->metadata.sectors_per_alloc - 1) >> sb->metadata.sectors_per_alloc_bits;
+	/* reserved meta data + bitmap_blocks + super_block */
+	unsigned res = meta_bitmap_base_chunk + sb->metadata.asi->bitmap_blocks + sb->image.journal_size;
+	res += sb->metadata.asi->bitmap_blocks + 1;
+	if (sb->metadata.asi != sb->snapdata.asi)
+		res += 2*sb->snapdata.asi->bitmap_blocks;
+	if (sb->image.meta_chunks_used != res)
+		warn("used metadata chunks %llu are larger than reserved after all snapshots are deleted %u", sb->image.meta_chunks_used, res);
+	sb->image.snap_chunks_used = 0;
+	sb->image.meta_chunks_used = res;
 	return -1;  // we delete all the unused snapshots
 }
 
