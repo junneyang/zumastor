@@ -367,7 +367,7 @@ function stop_target {
 }
 
 function init_define_volume {
-	[ $# -eq 3 ] || [ $# -eq 4 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
+	[[ $# -eq 5 ]] || [[ $# -eq 6 ]] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
 	local -r vol=$1
 	local -r odev=$2
 	local -r sdev=$3
@@ -387,7 +387,8 @@ function init_define_volume {
 	mkdir $path/targets || return 1
 
 	log "initializing volume '$vol', origindev '$odev', snapdev '$sdev'" $log
-	ddsnap initialize $sdev $odev $mdev -b$blocksize -c$chunksize 2>>$log || { echo init failed ;  return 1 ; }
+	# FIXME TODO -b $blocksize is not passed because it requires metadev
+	ddsnap initialize -c $chunksize $sdev $odev $mdev 2>>$log || { echo init failed; return 1; }
 
 	start_volume $vol || { echo start failed ;return 1; }
 
