@@ -212,6 +212,8 @@ struct commit_block
 	u32 checksum;
 	s32 sequence;
 	u32 entries;
+	u64 snap_used;
+	u64 meta_used;
 	u64 sector[];
 } PACKED;
 
@@ -308,6 +310,8 @@ static void commit_transaction(struct superblock *sb)
 	jtrace(warn("commit journal block [%u]", pos););
 	commit->checksum = 0;
 	commit->checksum = -checksum_block(sb, (void *)commit);
+	commit->snap_used =  sb->image.snap_chunks_used;
+	commit->meta_used = sb->image.meta_chunks_used;
 	if (write_buffer_to(commit_buffer, journal_sector(sb, pos)))
 		jtrace(warn("unable to write checksum fro commit block"););
 	brelse(commit_buffer);
@@ -415,6 +419,8 @@ static int recover_journal(struct superblock *sb)
 	}
 	sb->image.journal_next = (newest_block + 1 + size) % size;
 	sb->image.sequence = commit->sequence + 1;
+	sb->image.snap_chunks_used = commit->snap_used;
+	sb->image.meta_chunks_used = commit->meta_used;
 	brelse(buffer);
 	return 0;
 
@@ -3031,12 +3037,16 @@ static int incoming(struct superblock *sb, struct client *client)
 		reply->ctime = sb->image.create_time;
 
 		reply->meta.chunksize_bits = sb->metadata.asi->allocsize_bits;
-		reply->meta.used = sb->image.meta_chunks_used; 
-		reply->meta.free = sb->metadata.asi->freechunks;
+		reply->meta.used = sb->image.meta_chunks_used;
+		reply->meta.free = sb->metadata.asi->chunks - sb->image.meta_chunks_used;
+		if (sb->metadata.asi == sb->snapdata.asi)
+			reply->meta.free -= sb->image.snap_chunks_used;
 	
 		reply->store.chunksize_bits = sb->snapdata.asi->allocsize_bits;
-		reply->store.used = sb->image.snap_chunks_used; 
-		reply->store.free = sb->snapdata.asi->freechunks;
+		reply->store.used = sb->image.snap_chunks_used;
+		reply->store.free = sb->snapdata.asi->chunks - sb->image.snap_chunks_used;
+		if (sb->metadata.asi == sb->snapdata.asi)
+			reply->store.free -= sb->image.meta_chunks_used;
 
 		reply->write_density = 0;
 
