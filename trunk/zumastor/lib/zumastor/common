@@ -268,3 +268,26 @@ function get_managed_snapshots {
 
 	echo 
 }
+
+# set_priority <vol> <id> <priority>
+# sets the provided <priority> on snapshot <id> on volume <vol>
+# If id -1 is provided, or an invalid priority or snapshot, return error
+function set_priority {
+	[ $# -eq 3 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
+	local -r vol=$1
+	local -r id=$2
+	local -r priority=$3
+	local -r server=${SERVERS}/$vol
+
+	if [[ $id -lt 0 -o $id -gt 64 ]]; then
+		echo "invalid snapshot id '$id' for set priority"
+		return 1;
+	fi
+
+	if [[ $priority -lt -128 -o $priority -gt 127 ]]; then
+		echo "refusing to set invalid priority '$priority' for '$vol($id)'"
+		return 1
+	fi
+
+	ddsnap priority $server $id $priority || return 1
+}

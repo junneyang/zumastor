@@ -909,14 +909,15 @@ static struct snapshot *find_snapshot_to_delete(struct snapshot * snaplist, u32 
 	for (snap = snaplist + 1; snap < snaplist + snapshots; snap++) {
 		if (is_squashed(snap))
 			continue;
-		if (snap->usecnt && !best->usecnt)
+		if (!is_squashed(best) && (snap->usecnt && !best->usecnt))
 			continue;
-		if (!snap->usecnt == !best->usecnt && snap->prio >= best->prio)
+		if (!is_squashed(best) && (!snap->usecnt == !best->usecnt) && (snap->prio >= best->prio))
 			continue;
 		best = snap;
 	}
+	if (is_squashed(best) || best->prio == 127)
+		return 0;
 	return best;
-
 }
 
 static chunk_t alloc_chunk(struct superblock *sb, struct allocspace *as)
