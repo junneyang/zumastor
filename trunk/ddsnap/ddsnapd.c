@@ -1501,7 +1501,7 @@ static int create_snapshot(struct superblock *sb, unsigned snaptag)
 
 	/* Find available snapshot bit */
 	for (i = 0; i < MAX_SNAPSHOTS; i++)
-		if (!(sb->snapmask & (1ULL << i)))
+		if (!(sb->snapmask & (1ULL << i)) && !is_squashed(&sb->image.snaplist[i]))
 			goto create;
 	return -EFULL;
 
