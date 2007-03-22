@@ -227,7 +227,7 @@ static void throttle(struct devinfo *info, struct bio *bio)
 	unsigned consume = bio->bi_vcnt;
 
 	atomic_add(consume, &info->inflight);
-	if ((current->flags & PF_MEMALLOC) && !(current->flags & PF_LESS_THROTTLE)) {
+	if (current->flags & PF_MEMALLOC) {
 		atomic_add(consume, &info->bypass);
 		return;
 	}
