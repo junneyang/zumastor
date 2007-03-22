@@ -1,7 +1,5 @@
-Index: kernel/dm-ddsnap.c
-===================================================================
---- kernel/dm-ddsnap.c	(revision 308)
-+++ kernel/dm-ddsnap.c	(working copy)
+--- linux-2.6.19.1/drivers/md/dm-ddsnap.c
++++ linux-2.6.19.1-zuma/drivers/md/dm-ddsnap.c
 @@ -192,6 +192,7 @@
  	spinlock_t end_io_lock;
  	int dont_switch_lists;
