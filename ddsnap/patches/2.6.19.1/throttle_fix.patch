@@ -1,0 +1,38 @@
+Index: kernel/dm-ddsnap.c
+===================================================================
+--- kernel/dm-ddsnap.c	(revision 308)
++++ kernel/dm-ddsnap.c	(working copy)
+@@ -192,6 +192,7 @@
+ 	spinlock_t end_io_lock;
+ 	int dont_switch_lists;
+ 	atomic_t inflight;
++	atomic_t bypass;
+ 	unsigned capacity; // reporting only
+ 	struct semaphore throttle_sem; // does the real throttling
+ };
+@@ -226,6 +227,10 @@
+ 	unsigned consume = bio->bi_vcnt;
+ 
+ 	atomic_add(consume, &info->inflight);
++	if (current->flags & PF_MEMALLOC) {
++		atomic_add(consume, &info->bypass);
++		return;
++	}
+ 	while (consume--)
+ 		down(&info->throttle_sem);
+ }
+@@ -235,8 +240,12 @@
+ 	unsigned consumed = bio->bi_vcnt;
+ 
+ 	atomic_sub(consumed, &info->inflight);
+-	while (consumed--)
+-		up(&info->throttle_sem);
++	while (consumed--) {
++		if (atomic_read(&info->bypass))
++			atomic_dec(&info->bypass);
++		else
++			up(&info->throttle_sem);
++	}
+ }
+ 
+ /* Static caches, shared by all ddsnap instances */
