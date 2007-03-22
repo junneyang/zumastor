@@ -2625,6 +2625,19 @@ static int incoming(struct superblock *sb, struct client *client)
 		trace(printf("snapshot read request, %u ranges\n", body->count););
 		struct addto snap = { .nextchunk = -1 }, org = { .nextchunk = -1 };
 
+		if (client->snap >= MAX_SNAPSHOTS || is_squashed(&sb->image.snaplist[client->snap])) {
+			warn("trying to read squashed snapshot %u", client->snap);
+			for (i = 0; i < body->count; i++)
+				for (j = 0; j < body->ranges[i].chunks; j++) {
+					chunk_t chunk = body->ranges[i].chunk + j;
+					addto_response(&snap, chunk);
+					check_response_full(&snap, sizeof(chunk_t));
+					*(snap.top)++ = 0;
+				}
+			finish_reply(client->sock, &snap, SNAPSHOT_READ_ERROR, body->id);
+			break;
+		}
+
 		for (i = 0; i < body->count; i++)
 			for (j = 0; j < body->ranges[i].chunks; j++) {
 				chunk_t chunk = body->ranges[i].chunk + j, exception = 0;
@@ -2642,12 +2655,6 @@ static int incoming(struct superblock *sb, struct client *client)
 					readlock_chunk(sb, chunk, client);
 				}
 			}
-		if (is_squashed(&sb->image.snaplist[client->snap])) {
-			warn("trying to read squashed snapshot");
-			finish_reply(client->sock, &snap, SNAPSHOT_READ_ERROR, body->id);
-			finish_reply(client->sock, &org, SNAPSHOT_READ_ORIGIN_ERROR, body->id);
-			break;
-		}
 		finish_reply(client->sock, &org, SNAPSHOT_READ_ORIGIN_OK, body->id);
 		finish_reply(client->sock, &snap, SNAPSHOT_READ_OK, body->id);
 		break;
@@ -2687,10 +2694,10 @@ static int incoming(struct superblock *sb, struct client *client)
 		trace(fprintf(stderr, "got identify request, setting id="U64FMT" snap=%i (tag=%u), sending chunksize_bits=%u\n", client->id, client->snap, tag, sb->snapdata.asi->allocsize_bits););
 		warn("client id %llu, snaptag %u (snapnum %i)", client->id, tag, client->snap);
 
-		if (client->snap != -1) {
+		if (tag != (u32)~0UL) {
 			struct snapshot *snap_info;
 
-			if (!(snap_info = valid_snaptag(sb, tag))) {
+			if (!(snap_info = valid_snaptag(sb, tag)) || is_squashed(snap_info)) {
 				warn("Snapshot tag %u is not valid", tag);
 				snprintf(err_msg, MAX_ERRMSG_SIZE, "Snapshot tag %u is not valid", tag);
 				err_msg[MAX_ERRMSG_SIZE-1] = '\0'; // make sure it's null terminated
