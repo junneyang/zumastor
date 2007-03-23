@@ -199,7 +199,6 @@ function create_snapshot {
 	# only create snapshot for non-origin
 	[[ $id -eq -1 ]] && echo should not be creating device for origin && return 1
 
-	sync
 	ddsnap create $server $id || return 1
 
 	# always create the device
@@ -221,6 +220,7 @@ function mount_device {
 	[[ $3 == "rw" ]] && options="rw,errors=remount-ro,usrquota,grpquota"
 
 	test -d $mount || mkdir $mount || return 1
+	fsck /dev/mapper/$name || { sleep 3; fsck /dev/mapper/$name; }
 	mount -o $options /dev/mapper/$name $mount || { echo "unable to mount /dev/mapper/$name on $mount"; return 1; }
 }
 
