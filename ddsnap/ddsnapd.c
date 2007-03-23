@@ -2599,7 +2599,7 @@ static int incoming(struct superblock *sb, struct client *client)
 			for (j = 0; j < body->ranges[i].chunks; j++) {
 				chunk_t chunk = body->ranges[i].chunk + j;
 				chunk_t exception;
-				if (is_squashed(&sb->image.snaplist[client->snap])) {
+				if (client->snap >= MAX_SNAPSHOTS || is_squashed(&sb->image.snaplist[client->snap])) {
 					warn("trying to write squashed snapshot, id = %u", body->id);
 					exception =  -1;
 				} else
