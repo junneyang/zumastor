@@ -2599,7 +2599,7 @@ static int incoming(struct superblock *sb, struct client *client)
 			for (j = 0; j < body->ranges[i].chunks; j++) {
 				chunk_t chunk = body->ranges[i].chunk + j;
 				chunk_t exception;
-				if (client->snap >= MAX_SNAPSHOTS || is_squashed(&sb->image.snaplist[client->snap])) {
+				if (client->snap >= MAX_SNAPSHOTS || is_squashed(valid_snapnum(sb, client->snap))) {
 					warn("trying to write squashed snapshot, id = %u", body->id);
 					exception =  -1;
 				} else
@@ -2625,7 +2625,7 @@ static int incoming(struct superblock *sb, struct client *client)
 		trace(printf("snapshot read request, %u ranges\n", body->count););
 		struct addto snap = { .nextchunk = -1 }, org = { .nextchunk = -1 };
 
-		if (client->snap >= MAX_SNAPSHOTS || is_squashed(&sb->image.snaplist[client->snap])) {
+		if (client->snap >= MAX_SNAPSHOTS || is_squashed(valid_snapnum(sb, client->snap))) {
 			warn("trying to read squashed snapshot %u", client->snap);
 			for (i = 0; i < body->count; i++)
 				for (j = 0; j < body->ranges[i].chunks; j++) {
