@@ -1,3 +1,9 @@
+zumastor (0.4.pre8) unstable; urgency=low
+
+  * fixed init bug
+
+ -- Shapor Naghibzadeh <shapor@zst0.smo.corp.google.com.smo.corp.google.com>  Tue, 20 Mar 2007 15:48:01 -0700
+
 zumastor (0.4.pre7) unstable; urgency=low
 
   * r296 
