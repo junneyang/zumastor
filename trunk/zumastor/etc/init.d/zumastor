@@ -13,6 +13,7 @@ function start_zumastor {
 	local vol
 	local id
 	local host
+	local log
 
 	# setup directory structure
 	if ! [ -d $RUNPATH ]; then
@@ -25,19 +26,29 @@ function start_zumastor {
 	touch $RUNFILE
 
 	for vol in $(ls $VOLUMES); do
-		start_volume $vol || return 1
-
+		log=$LOGS/$vol/start.log
+		log "starting volume '$vol'" $log
+		echo "Starting volume '$vol'"
+		start_volume $vol >> $log || return 1
 		create_device $vol -1 || return 1
-		local -r list=$(get_managed_snapshots $vol) || return 1
+		local list=$(get_managed_snapshots $vol) || return 1
 		for id in $list; do
-			create_device $vol $id || return 1
+			create_device $vol $id >> $log 2>&1
+		done
+
+		list=$(cat $VOLUMES/$vol/master/snapshots/*) || return 1
+		for id in $list; do
+			echo "Mounting snapshot '$vol($id)'"
+			mount_device $vol $id >> $log 2>&1
 		done
 
 		if [ -x $VOLUMES/$vol/master ]; then
+			echo "Starting master"
 			zumastor start master $vol || return 1
 		else
 			# start the nag daemon
 			if [ -x $VOLUMES/$vol/source ]; then
+				echo "Starting source"
 				zumastor start source $vol
 			else
 				echo "info: orphan volume '$vol' is neither master nor slave"
@@ -45,6 +56,7 @@ function start_zumastor {
 		fi
 
 		for host in $(ls $VOLUMES/$vol/targets); do
+			echo "Starting target for '$vol' on '$host'"
 			zumastor start target $vol $host
 		done
 
@@ -70,7 +82,7 @@ function stop_zumastor {
 			remove_device $vol $id
 		done
 		umount_device $vol -1 2>/dev/null
-		remove_device $vol -1
+		remove_device $vol -1 || { echo remove $vol -1 failed ; return 1; }
 
 		stop_volume $vol
 	done

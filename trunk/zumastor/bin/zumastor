@@ -21,18 +21,6 @@ function read_and_inc {
 	return 0
 }
 
-# log <filename> <message>
-# uses global variable pid, sets it if its not set
-# allows setting pid when daemonized
-function log {
-	local msg=$1 file=$2
-
-	[[ $pid == "" ]] && pid=$$
-	[[ $file == "" ]]  && file=/dev/stdout
-
-	echo "`date` $0[$pid]: $msg" >> $file
-}
-
 # new_snapshot <volume name> <kind>
 #  Create a new snapshot for <volume>'s interval <kind> and rotate out old
 #  snapshots as necessary.  Called from the zumastor master when triggered with
