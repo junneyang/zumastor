@@ -2599,7 +2599,10 @@ static int incoming(struct superblock *sb, struct client *client)
 			for (j = 0; j < body->ranges[i].chunks; j++) {
 				chunk_t chunk = body->ranges[i].chunk + j;
 				chunk_t exception;
-				if (client->snap >= MAX_SNAPSHOTS || is_squashed(valid_snapnum(sb, client->snap))) {
+				struct snapshot *snap_info;
+
+				/* see comment below in QUERY_SNAPSHOT_READ, same applies here */
+				if (client->snap >= MAX_SNAPSHOTS || !(snap_info = valid_snapnum(sb, client->snap)) || is_squashed(snap_info)) {
 					warn("trying to write squashed snapshot, id = %u", body->id);
 					exception =  -1;
 				} else
@@ -2624,8 +2627,13 @@ static int incoming(struct superblock *sb, struct client *client)
 			goto message_too_short;
 		trace(printf("snapshot read request, %u ranges\n", body->count););
 		struct addto snap = { .nextchunk = -1 }, org = { .nextchunk = -1 };
+		struct snapshot *snap_info;
 
-		if (client->snap >= MAX_SNAPSHOTS || is_squashed(valid_snapnum(sb, client->snap))) {
+		/* It is more expensive than we'd like to find the snap_info.
+		 * Ideally, the snaplist would be indexed byt he snapnum, but
+		 * the delete function would have to not memmove, among other
+		 * changes - FIXME TODO */
+		if (client->snap >= MAX_SNAPSHOTS || !(snap_info = valid_snapnum(sb, client->snap)) || is_squashed(snap_info)) {
 			warn("trying to read squashed snapshot %u", client->snap);
 			for (i = 0; i < body->count; i++)
 				for (j = 0; j < body->ranges[i].chunks; j++) {
