@@ -134,7 +134,7 @@ function run_remote  {
 }
 
 function usecount_increment {
-	[ $# -eq 2 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
+	[[ $# -eq 2 ]] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
 	local -r vol=$1
 	local -r snap=$2
 	local -r server=$SERVERS/$vol
@@ -144,7 +144,7 @@ function usecount_increment {
 }
 
 function usecount_decrement {
-	[ $# -eq 2 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
+	[[ $# -eq 2 ]] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
 	local -r vol=$1
 	local -r snap=$2
 	local -r server=$SERVERS/$vol
@@ -682,7 +682,7 @@ function replication_cycle {
 		# NFS suspend
 		echo "foo" > /proc/fs/nfsd/suspend 2>/dev/null
 		log "umounting snapshot $hold " $log
-		umount_device $vol $hold >> $log 2>&1
+		umount_device $vol $hold -l >> $log 2>&1
 	fi
 
 	log "mounting $vol($next)" $log
