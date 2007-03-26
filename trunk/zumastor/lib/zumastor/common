@@ -237,13 +237,14 @@ function mount_device {
 }
 
 function umount_device {
-	[ $# -eq 2 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
+	[[ $# -eq 2 ]] || [[ $# -eq 3 ]] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
 	local -r vol=$1
 	local -r id=$2
+	local -r option=$3
 	local -r name=$(volume_name $vol $id)
 	local -r mount=${MOUNTS}/$name
 
-	umount -l /dev/mapper/$name
+	umount $option /dev/mapper/$name
 
 	rmdir $mount 2> /dev/null
 }
