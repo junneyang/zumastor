@@ -1905,8 +1905,8 @@ static int ddsnap_get_status(int serv_fd, u32 snaptag, int verbose)
 	printf("Origin size: %llu\n", get_origin_sectors(serv_fd) << SECTOR_BITS);
 	printf("Write density: %g\n", (double)reply->write_density/(double)0xffffffff);
 
-	time_t time = (time_t)reply->ctime;
-	char *ctime_str = ctime(&time);
+	time_t snaptime = (time_t)reply->ctime;
+	char *ctime_str = ctime(&snaptime);
 	if (ctime_str[strlen(ctime_str)-1] == '\n')
 		ctime_str[strlen(ctime_str)-1] = '\0';
 	printf("Creation time: %s\n", ctime_str);
@@ -1932,8 +1932,8 @@ static int ddsnap_get_status(int serv_fd, u32 snaptag, int verbose)
 
 		printf("%6u", snap_status->snap);
 
-		time = (time_t)snap_status->ctime;
-		ctime_str = ctime(&time);
+		snaptime = (time_t)snap_status->ctime;
+		ctime_str = ctime(&snaptime);
 		if (ctime_str[strlen(ctime_str)-1] == '\n')
 			ctime_str[strlen(ctime_str)-1] = '\0';
 		printf(" %24s", ctime_str);
