@@ -1682,6 +1682,16 @@ static void brelse_free(struct superblock *sb, struct buffer *buffer)
 	evict_buffer(buffer);
 }
 
+static void set_buffer_dirty_check(struct buffer *buffer, struct superblock *sb)
+{
+	set_buffer_dirty(buffer);
+	if (dirty_buffer_count >= sb->image.journal_size - 1) {
+		if (dirty_buffer_count > sb->image.journal_size)
+			warn("number of dirty buffers %d is too large for journal %u", dirty_buffer_count, sb->image.journal_size);
+		commit_transaction(sb);
+	}
+}
+
 static int delete_tree_range(struct superblock *sb, u64 snapmask, chunk_t resume)
 {
 	int levels = sb->image.etree_levels, level = levels - 1;
@@ -1698,7 +1708,7 @@ static int delete_tree_range(struct superblock *sb, u64 snapmask, chunk_t resume
 	while (1) { /* in-order leaf walk */
 		trace_off(show_leaf(buffer2leaf(leafbuf)););
 		if (delete_snapshots_from_leaf(sb, buffer2leaf(leafbuf), snapmask))
-			set_buffer_dirty(leafbuf);
+			set_buffer_dirty_check(leafbuf, sb);
 
 		if (prevleaf) { /* try to merge this leaf with prev */
 			struct eleaf *this = buffer2leaf(leafbuf);
@@ -1709,7 +1719,7 @@ static int delete_tree_range(struct superblock *sb, u64 snapmask, chunk_t resume
 				trace_off(warn(">>> can merge leaf %p into leaf %p", leafbuf, prevleaf););
 				merge_leaves(prev, this);
 				remove_index(path, level);
-				set_buffer_dirty(prevleaf);
+				set_buffer_dirty_check(prevleaf, sb);
 				brelse_free(sb, leafbuf);
 				goto keep_prev_leaf;
 			}
@@ -1729,7 +1739,7 @@ keep_prev_leaf:
 						trace(warn(">>> can merge node %p into node %p", this, prev););
 						merge_nodes(prev, this);
 						remove_index(path, level - 1);
-						set_buffer_dirty(hold[level].buffer);
+						set_buffer_dirty_check(hold[level].buffer, sb);
 						brelse_free(sb, path[level].buffer);
 						goto keep_prev_node;
 					}
@@ -1748,6 +1758,8 @@ keep_prev_node:
 					}
 					brelse(prevleaf);
 					brelse_path(hold, levels);
+					if (dirty_buffer_count)
+						commit_transaction(sb);
 					return 0;
 				}
 
