@@ -232,8 +232,12 @@ function mount_device {
 	[[ $3 == "rw" ]] && options="rw,errors=remount-ro,usrquota,grpquota"
 
 	test -d $mount || mkdir $mount || return 1
-	fsck /dev/mapper/$name || { sleep 3; fsck /dev/mapper/$name; }
-	mount -o $options /dev/mapper/$name $mount || { echo "unable to mount /dev/mapper/$name on $mount"; return 1; }
+
+	# mount ro, umount, and re-mount to work around free blocks bug in ext3
+	mount -o ro /dev/mapper/$name $mount || { sleep 3; mount -o ro /dev/mapper/$name $mount || return 1; }
+	umount /dev/mapper/$name && \
+	mount -o $options /dev/mapper/$name $mount || \
+		{ echo "unable to mount /dev/mapper/$name on $mount"; return 1; }
 }
 
 function umount_device {
