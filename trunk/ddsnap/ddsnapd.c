@@ -901,17 +901,40 @@ static chunk_t alloc_chunk_range(struct superblock *sb, struct allocspace *as, c
 	}
 }
 
-static int delete_snapshot(struct superblock *sb, unsigned tag);
-// !!! possible/practical to topsort away this forward ref?
-
-static int is_squashed(const struct snapshot * snap)
+static int is_squashed(const struct snapshot *snap)
 {
 	return snap->bit == SNAPSHOT_SQUASHED;
 }
 
-/* find the snapshot with 0 usecnt and lowest priority.
- * if no such snapshot exists, find the snapshot with lowest priority */
-static struct snapshot *find_snapshot_to_delete(struct snapshot * snaplist, u32 snapshots)
+static int delete_tree_range(struct superblock *sb, u64 snapmask, chunk_t resume);
+
+static int delete_snap(struct superblock *sb, struct snapshot *snap)
+{
+	trace_on(warn("Delete snaptag %u (snapnum %i)", snap->tag, snap->bit););
+	int mask = is_squashed(snap) ? 0 : (1ULL << snap->bit);
+	memmove(snap, snap + 1, (char *)(sb->image.snaplist + --sb->image.snapshots) - (char *)snap);
+	set_sb_dirty(sb);
+	if (!mask)
+		return 0;
+	sb->snapmask &= ~mask;
+	return delete_tree_range(sb, mask, 0);
+}
+
+static struct snapshot *find_snap(struct superblock *sb, u32 tag)
+{
+	struct snapshot *snap = sb->image.snaplist;
+	struct snapshot *end = snap + sb->image.snapshots;
+
+	for (; snap < end; snap++)
+		if (snap->tag == tag)
+			return snap;
+	return NULL;
+}
+
+/* find the oldest snapshot with 0 usecnt and lowest priority.
+ * if no such snapshot exists, find the snapshot with lowest priority
+ */
+static struct snapshot *find_victim(struct snapshot *snaplist, u32 snapshots)
 {
 	assert(snapshots);
 	struct snapshot *snap, *best = snaplist;
@@ -925,8 +948,6 @@ static struct snapshot *find_snapshot_to_delete(struct snapshot * snaplist, u32 
 			continue;
 		best = snap;
 	}
-	if (is_squashed(best) || best->prio == 127)
-		return 0;
 	return best;
 }
 
@@ -937,17 +958,20 @@ static chunk_t alloc_chunk(struct superblock *sb, struct allocspace *as)
 		if ((found = alloc_chunk_range(sb, as, last, total - last)) != -1 ||
 		    (found = alloc_chunk_range(sb, as, 0, last)) != -1) {
 			as->asi->last_alloc = found;
-			set_sb_dirty(sb); // !!! optimize this away
+			set_sb_dirty(sb);
 			return (found);
 		}
-		const struct snapshot *victim = find_snapshot_to_delete(sb->image.snaplist, sb->image.snapshots);
-		if (!victim) // we end up with all left squashed snapshots
+		struct snapshot *victim = find_victim(sb->image.snaplist, sb->image.snapshots);
+		if (is_squashed(victim) || victim->prio == 127)
 			break;
 		warn("snapshot store full, releasing snapshot %u", victim->tag);
-		if (delete_snapshot(sb, victim->tag)) {
-			warn("unable to release snapshot");
-			return -1;
-		}
+		if (victim->usecnt) {
+			victim->bit = SNAPSHOT_SQUASHED;
+			if (delete_tree_range(sb, 1ULL << victim->bit, 0))
+				goto fail_delete;
+		} else
+			if (delete_snap(sb, victim))
+				goto fail_delete;
 	} while (sb->image.snapshots);
 
 	if (sb->image.snap_chunks_used != 0)
@@ -962,7 +986,10 @@ static chunk_t alloc_chunk(struct superblock *sb, struct allocspace *as)
 		warn("used metadata chunks %llu are larger than reserved after all snapshots are deleted %u", sb->image.meta_chunks_used, res);
 	sb->image.snap_chunks_used = 0;
 	sb->image.meta_chunks_used = res;
-	return -1;  // we delete all the unused snapshots
+	return -1; // we deleted all possible snapshots
+fail_delete:
+	warn("failed to delete snapshot");
+	return -1;
 }
 
 /* Snapshot Store Allocation */
@@ -1467,14 +1494,8 @@ static u64 calc_snapmask(struct superblock *sb)
 
 static int tag_snapnum(struct superblock *sb, unsigned tag)
 {
-	unsigned int i, n = sb->image.snapshots;
-	struct snapshot const *snap = sb->image.snaplist;
-
-	for (i = 0; i < n; i++)
-		if (snap[i].tag == tag)
-			return snap[i].bit;
-
-	return -1;
+	struct snapshot *snap = find_snap(sb, tag);
+	return snap ? snap->bit : -1;
 }
 
 static unsigned int snapnum_tag(struct superblock *sb, unsigned bit)
@@ -1790,32 +1811,6 @@ keep_prev_node:
 			return -ENOMEM;		
 		}
 	}
-}
-
-static int delete_snapshot(struct superblock *sb, unsigned tag)
-{
-	struct snapshot *snapshot;
-	unsigned i, bit;
-	int error;
-
-	for (i = 0; i < sb->image.snapshots; i++)
-		if (sb->image.snaplist[i].tag == tag)
-			goto delete;
-	return -1;
-
-delete:
-	snapshot = sb->image.snaplist + i;
-	bit = snapshot->bit;
-	trace_on(warn("Delete snaptag %u (snapnum %i)", tag, bit););
-	if (snapshot->usecnt)
-		snapshot->bit = SNAPSHOT_SQUASHED;
-	else
-		memmove(snapshot, snapshot + 1, (char *)(sb->image.snaplist + --sb->image.snapshots) - (char *)snapshot);
-	sb->snapmask &= ~(1ULL << bit);
-	if ((error = delete_tree_range(sb, 1ULL << bit, 0)) < 0)
-		warn("unable to delete snapshot %u: %s", tag, strerror(-error));
-	set_sb_dirty(sb);
-	return 0;
 }
 
 #if 0
@@ -2443,18 +2438,6 @@ next:
 
 #endif
 
-static struct snapshot *valid_snaptag(struct superblock *sb, u32 tag)
-{
-	int i, n = sb->image.snapshots;
-	struct snapshot *snap = sb->image.snaplist;
-
-	for (i = 0; i < n; i++)
-		if (snap[i].tag == tag)
-			return &snap[i];
-
-	return NULL;
-}
-
 static struct snapshot *valid_snapnum(struct superblock *sb, int snapnum)
 {
 	unsigned int i, n = sb->image.snapshots;
@@ -2717,7 +2700,7 @@ static int incoming(struct superblock *sb, struct client *client)
 		if (tag != (u32)~0UL) {
 			struct snapshot *snap_info;
 
-			if (!(snap_info = valid_snaptag(sb, tag)) || is_squashed(snap_info)) {
+			if (!(snap_info = find_snap(sb, tag)) || is_squashed(snap_info)) {
 				warn("Snapshot tag %u is not valid", tag);
 				snprintf(err_msg, MAX_ERRMSG_SIZE, "Snapshot tag %u is not valid", tag);
 				err_msg[MAX_ERRMSG_SIZE-1] = '\0'; // make sure it's null terminated
@@ -2789,7 +2772,8 @@ static int incoming(struct superblock *sb, struct client *client)
 #ifdef DEBUG_ERROR
 		goto delete_error;
 #endif
-		if (delete_snapshot(sb, ((struct create_snapshot *)message.body)->snap) < 0)
+		struct snapshot *snap = find_snap(sb, ((struct create_snapshot *)message.body)->snap);
+		if (!snap || delete_snap(sb, snap))
 			goto delete_error;
 		save_state(sb);
 		if (outbead(sock, DELETE_SNAPSHOT_OK, struct { }) < 0)
@@ -2868,7 +2852,7 @@ static int incoming(struct superblock *sb, struct client *client)
 			err = ERROR_INVALID_SNAPSHOT;
 			goto prio_error;
 		}
-		if (!(snap_info = valid_snaptag(sb, tag))) {
+		if (!(snap_info = find_snap(sb, tag))) {
 			warn("Snapshot tag %u is not valid", tag);
 			snprintf(err_msg, MAX_ERRMSG_SIZE, "Snapshot tag %u is not valid", tag);
 			err_msg[MAX_ERRMSG_SIZE-1] = '\0';
@@ -2910,7 +2894,7 @@ static int incoming(struct superblock *sb, struct client *client)
 			goto usecnt_error; /* not really an error though */
 		}
 
-		if (!(snap_info = valid_snaptag(sb, tag))) {
+		if (!(snap_info = find_snap(sb, tag))) {
 			warn("Snapshot tag %u is not valid", tag);
 			snprintf(err_msg, MAX_ERRMSG_SIZE, "Snapshot tag %u is not valid", tag);
 			err_msg[MAX_ERRMSG_SIZE-1] = '\0';
@@ -2959,8 +2943,10 @@ static int incoming(struct superblock *sb, struct client *client)
 		/* check that each snapshot is a valid tag */
 		struct snapshot *snapshot1, *snapshot2;
 		err_msg = "invalid snapshot tag";
-		if (!(snapshot1 = valid_snaptag(sb, tag1))
-		    || !(snapshot2 = valid_snaptag(sb, tag2)))
+		/* Danger, Danger!!!  This is going to turn into a bug when tree walks go
+		   incremental because pointers to the snapshot list are short lived.  Need
+		   to pass the tags instead.  Next round of cleanups. */
+		if (!(snapshot1 = find_snap(sb, tag1)) || !(snapshot2 = find_snap(sb, tag2)))
 			goto stream_error;
 
 		struct change_list *cl;

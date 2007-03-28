@@ -126,7 +126,7 @@ struct rw_request1
 {
 	uint32_t id;
 	shortcount count;
-	struct chunk_range PACKED ranges[1];
+	struct chunk_range ranges[1];
 } PACKED;
 
 /* decruft me... !!! */
