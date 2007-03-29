@@ -31,6 +31,75 @@
 #include "trace.h"
 #include "build.h"
 
+/* Utilities */
+
+u32 strtobytes(char const *string)
+{
+	long bytes = 0;
+	char *letter = NULL;
+
+	bytes = strtol(string, &letter, 10);
+
+	if (bytes <= 0)
+		return INPUT_ERROR;
+
+	if (letter[0] == '\0')
+		return bytes;
+
+	if (letter[1] != '\0')
+		return INPUT_ERROR;
+
+	switch (letter[0]) {
+	case 'k': case 'K':
+		return bytes * (1 << 10);
+	case 'm': case 'M':
+		return bytes * (1 << 20);
+	case 'g': case 'G':
+		return bytes * (1 << 30);
+	default:
+		return INPUT_ERROR;
+	}
+}
+
+u32 strtobits(char const *string)
+{
+	long amount = 0;
+	u32 bits = 0;
+	char* letter = NULL;
+
+	amount = strtol(string, &letter, 10);
+
+	if ((amount <= 0) || (amount & (amount - 1)))
+		return INPUT_ERROR;
+
+	while (amount > 1) {
+		bits += 1;
+		amount >>= 1;
+	}
+
+	switch (letter[0]) {
+	case '\0':
+		break;
+	case 'k': case 'K':
+		bits += 10;
+		break;
+	case 'm': case 'M':
+		bits += 20;
+		break;
+	case 'g': case 'G':
+		bits += 30;
+		break;
+	default:
+		return INPUT_ERROR;
+		break;
+	}
+
+	if (letter[1] != '\0')
+		return INPUT_ERROR;
+
+	return bits;
+}
+
 /* changelist and delta file header info */
 #define MAGIC_SIZE 8
 #define CHANGELIST_MAGIC_ID "rln"
