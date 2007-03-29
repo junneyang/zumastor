@@ -43,6 +43,8 @@
  */
 #define PR_SET_LESS_THROTTLE    21  
 
+#define MAX_NEW_METACHUNKS	10
+
 #define trace trace_off
 #define jtrace trace_off
 //#define BUSHY
@@ -713,13 +715,23 @@ static void init_leaf(struct eleaf *leaf, int block_size)
 #endif
 }
 
-/*
- * Chunk allocation via bitmaps
- */
 static void set_sb_dirty(struct superblock *sb)
 {
 	sb->flags |= SB_DIRTY;
 }
+
+static void save_sb(struct superblock *sb)
+{
+	if (sb->flags & SB_DIRTY) {
+		if (diskwrite(sb->metadev, &sb->image, SB_SIZE , SB_SECTOR << SECTOR_BITS) < 0)
+			warn("Unable to write superblock to disk: %s", strerror(errno));
+		sb->flags &= ~SB_DIRTY;
+	}
+}
+
+/*
+ * Chunk allocation via bitmaps
+ */
 
 static inline int get_bitmap_bit(unsigned char *bitmap, unsigned bit)
 {
@@ -911,12 +923,13 @@ static int delete_tree_range(struct superblock *sb, u64 snapmask, chunk_t resume
 static int delete_snap(struct superblock *sb, struct snapshot *snap)
 {
 	trace_on(warn("Delete snaptag %u (snapnum %i)", snap->tag, snap->bit););
-	int mask = is_squashed(snap) ? 0 : (1ULL << snap->bit);
+	u64 mask = is_squashed(snap) ? 0 : (1ULL << snap->bit);
 	memmove(snap, snap + 1, (char *)(sb->image.snaplist + --sb->image.snapshots) - (char *)snap);
 	set_sb_dirty(sb);
-	if (!mask)
+	if (!mask) {
+		trace_on(warn("snapshot squashed, skipping tree delete"););
 		return 0;
-	sb->snapmask &= ~mask;
+	}
 	return delete_tree_range(sb, mask, 0);
 }
 
@@ -954,41 +967,14 @@ static struct snapshot *find_victim(struct snapshot *snaplist, u32 snapshots)
 static chunk_t alloc_chunk(struct superblock *sb, struct allocspace *as)
 {
 	chunk_t last = as->asi->last_alloc, total = as->asi->chunks, found;
-	do {
-		if ((found = alloc_chunk_range(sb, as, last, total - last)) != -1 ||
-		    (found = alloc_chunk_range(sb, as, 0, last)) != -1) {
-			as->asi->last_alloc = found;
-			set_sb_dirty(sb);
-			return (found);
-		}
-		struct snapshot *victim = find_victim(sb->image.snaplist, sb->image.snapshots);
-		if (is_squashed(victim) || victim->prio == 127)
-			break;
-		warn("snapshot store full, releasing snapshot %u", victim->tag);
-		if (victim->usecnt) {
-			victim->bit = SNAPSHOT_SQUASHED;
-			if (delete_tree_range(sb, 1ULL << victim->bit, 0))
-				goto fail_delete;
-		} else
-			if (delete_snap(sb, victim))
-				goto fail_delete;
-	} while (sb->image.snapshots);
 
-	if (sb->image.snap_chunks_used != 0)
-		warn("non zero used data chunks %llu after all snapshots are deleted", sb->image.snap_chunks_used);
-	unsigned meta_bitmap_base_chunk = (SB_SECTOR + 2*sb->metadata.sectors_per_alloc - 1) >> sb->metadata.sectors_per_alloc_bits;
-	/* reserved meta data + bitmap_blocks + super_block */
-	unsigned res = meta_bitmap_base_chunk + sb->metadata.asi->bitmap_blocks + sb->image.journal_size;
-	res += sb->metadata.asi->bitmap_blocks + 1;
-	if (sb->metadata.asi != sb->snapdata.asi)
-		res += 2*sb->snapdata.asi->bitmap_blocks;
-	if (sb->image.meta_chunks_used != res)
-		warn("used metadata chunks %llu are larger than reserved after all snapshots are deleted %u", sb->image.meta_chunks_used, res);
-	sb->image.snap_chunks_used = 0;
-	sb->image.meta_chunks_used = res;
-	return -1; // we deleted all possible snapshots
-fail_delete:
-	warn("failed to delete snapshot");
+	if ((found = alloc_chunk_range(sb, as, last, total - last)) != -1 ||
+	    (found = alloc_chunk_range(sb, as, 0, last)) != -1) {
+		as->asi->last_alloc = found;
+		set_sb_dirty(sb);
+		return (found);
+	}
+	warn("failed to allocate chunk");
 	return -1;
 }
 
@@ -1403,6 +1389,46 @@ static int copyout(struct superblock *sb, chunk_t chunk, chunk_t exception)
 	return 0;
 }
 
+static int ensure_free_chunks(struct superblock *sb, struct allocspace *as, int chunks)
+{
+	do {
+		if (as->asi->freechunks >= chunks)
+			return 0;
+
+		struct snapshot *victim = find_victim(sb->image.snaplist, sb->image.snapshots);
+		if (is_squashed(victim) || victim->prio == 127)
+			break;
+		warn("snapshot store full, releasing snapshot %u", victim->tag);
+		if (victim->usecnt) {
+			if (delete_tree_range(sb, 1ULL << victim->bit, 0)) {
+				victim->bit = SNAPSHOT_SQUASHED;
+				goto fail_delete;
+			}
+			victim->bit = SNAPSHOT_SQUASHED;
+		} else
+			if (delete_snap(sb, victim))
+				goto fail_delete;
+	} while (sb->image.snapshots);
+
+	if (sb->image.snap_chunks_used != 0)
+		warn("non zero used data chunks %llu (freechunks %llu) after all snapshots are deleted", sb->image.snap_chunks_used, sb->snapdata.asi->freechunks);
+	unsigned meta_bitmap_base_chunk = (SB_SECTOR + 2*sb->metadata.sectors_per_alloc - 1) >> sb->metadata.sectors_per_alloc_bits;
+	/* reserved meta data + bitmap_blocks + super_block */
+	unsigned res = meta_bitmap_base_chunk + sb->metadata.asi->bitmap_blocks + sb->image.journal_size;
+	res += sb->metadata.asi->bitmap_blocks + 1;
+	if (sb->metadata.asi != sb->snapdata.asi)
+		res += 2*sb->snapdata.asi->bitmap_blocks;
+	if (sb->image.meta_chunks_used != res)
+		warn("used metadata chunks %llu (freechunks %llu) are larger than reserved (%u) after all snapshots are deleted", sb->image.meta_chunks_used, sb->metadata.asi->freechunks, res);
+	sb->image.snap_chunks_used = 0;
+	sb->image.meta_chunks_used = res;
+	return -1; // we deleted all possible snapshots
+
+fail_delete:
+	warn("failed to delete snapshot");
+	return -1;
+}
+
 /*
  * This is the bit that does all the work.  It's rather arbitrarily
  * factored into a probe and test part, then an exception add part,
@@ -1418,6 +1444,17 @@ static chunk_t make_unique(struct superblock *sb, chunk_t chunk, int snapnum)
 	chunk_t exception = 0;
 	int error;
 	trace(warn("chunk %Lx, snapnum %i", chunk, snapnum););
+
+	/* first we check if we will have enough freespace */
+	if (sb->snapdata.asi == sb->metadata.asi) { /* combined metadata/snapshore */
+		if (ensure_free_chunks(sb, &sb->metadata, MAX_NEW_METACHUNKS + 1))
+			return -1;
+	} else { /* separate */
+		if (ensure_free_chunks(sb, &sb->metadata, MAX_NEW_METACHUNKS))
+			return -1;
+		if (ensure_free_chunks(sb, &sb->snapdata, 1))
+			return -1;
+	}
 
 	if (!leafbuf) 
 		return -1;
@@ -1781,6 +1818,9 @@ keep_prev_node:
 					brelse_path(hold, levels);
 					if (dirty_buffer_count)
 						commit_transaction(sb);
+					sb->snapmask &= ~snapmask;
+					set_sb_dirty(sb);
+					save_sb(sb); /* we don't call save_state after a squash */
 					return 0;
 				}
 
@@ -2182,15 +2222,6 @@ static void load_sb(struct superblock *sb)
 	setup_sb(sb, METADATA_ALLOC(sb).allocsize_bits, SNAPDATA_ALLOC(sb).allocsize_bits);
 	sb->snapmask = calc_snapmask(sb);
 	trace(printf("Active snapshot mask: %016llx\n", sb->snapmask););
-}
-
-static void save_sb(struct superblock *sb)
-{
-	if (sb->flags & SB_DIRTY) {
-		if (diskwrite(sb->metadev, &sb->image, SB_SIZE , SB_SECTOR << SECTOR_BITS) < 0)
-			warn("Unable to write superblock to disk: %s", strerror(errno));
-		sb->flags &= ~SB_DIRTY;
-	}
 }
 
 static void save_state(struct superblock *sb)
