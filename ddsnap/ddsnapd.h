@@ -1,4 +1,4 @@
-#ifndef __DDSNAP_DAEMON_H
+#ifndef __DDSNAPDAEMON_H
 #define __DDSNAP_DAEMON_H
 
 #include "buffer.h"
@@ -12,6 +12,7 @@
 #define DEFAULT_JOURNAL_SIZE (100 * CHUNK_SIZE)
 #define INPUT_ERROR 0
 
+#define SB_BUSY 2
 #define SB_DIRTY 1
 #define SB_SECTOR 8
 #define SB_SIZE 4096
@@ -57,7 +58,7 @@ struct superblock
 			chunk_t  last_alloc;
 			u64      bitmap_blocks;
 			u32      allocsize_bits;
-		} alloc[2]; 
+		} alloc[2];
 	} image;
 
 	/* Derived, not saved to disk */
@@ -74,18 +75,14 @@ struct superblock
 	unsigned max_commit_blocks;
 	struct allocspace {
 		struct allocspace_img *asi;
-		u32 allocsize;  
+		u32 allocsize;
 		u32 sectors_per_alloc_bits, sectors_per_alloc;
-		u32 alloc_per_node;  /* only for metadata */
+		u32 alloc_per_node; /* only for metadata */
 	} metadata, snapdata;
 };
 
 int snap_server_setup(const char *agent_sockname, const char *server_sockname, int *listenfd, int *getsigfd, int *agentfd);
 int snap_server(struct superblock *sb, int listenfd, int getsigfd, int agentfd);
-
 int init_snapstore(struct superblock *sb, u32 js_bytes, u32 bs_bits, u32 cs_bits);
-
-u32 strtobytes(char const *string);
-u32 strtobits(char const *string);
 
 #endif // __DDSNAP_DAEMON_H
