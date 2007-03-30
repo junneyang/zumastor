@@ -254,6 +254,44 @@ static struct buffer *jread(struct superblock *sb, unsigned i)
 	return bread(sb->metadev, journal_sector(sb, i), sb->metadata.allocsize);
 }
 
+/* counting free space for debugging purpose */
+static struct buffer *snapread(struct superblock const *sb, sector_t sector)
+{
+	return bread(sb->metadev, sector, sb->metadata.allocsize);
+}
+
+static int bytebits(unsigned char c)
+{
+	unsigned count = 0;
+	for (; c; c >>= 1)
+		count += c & 1;
+	return count;
+}
+
+static chunk_t count_free(struct superblock *sb, struct allocspace *alloc)
+{
+	unsigned blocksize = sb->metadata.allocsize;
+	unsigned char zeroes[256];
+	unsigned i;
+	for (i = 0; i < 256; i++)
+		zeroes[i] = bytebits(~i);
+	chunk_t count = 0, block = 0, bytes = (alloc->asi->chunks + 7) >> 3;
+	while (bytes) {
+		struct buffer *buffer = snapread(sb, alloc->asi->bitmap_base + (block << sb->metadata.sectors_per_alloc_bits));
+		if (!buffer)
+			return -1;
+		unsigned char *p = buffer->data;
+		unsigned n = blocksize < bytes ? blocksize : bytes;
+		trace_off(printf("count %u bytes of bitmap %Lx\n", n, block););
+		bytes -= n;
+		while (n--)
+			count += zeroes[*p++];
+		brelse(buffer);
+		block++;
+	}
+	return count;
+}
+
 /*
  * For now there is only ever one open transaction in the journal, the newest
  * one, so we don't have to check for journal wrap, but just ensure that each
@@ -311,6 +349,13 @@ static void commit_transaction(struct superblock *sb)
 			jtrace(warn("unable to write commit block to journal"););
 		// we hope the order we just listed these is the same as committed above
 	}
+	/* checking free chunks for debugging purpose only,, return before this to skip the checking */
+	chunk_t counted = count_free(sb, &sb->metadata);
+	if (counted != sb->metadata.asi->freechunks)
+		warn("metadata free chunks count wrong: counted %llu, freechunks %llu", counted, sb->metadata.asi->freechunks);
+	counted = count_free(sb, &sb->snapdata);
+	if (counted != sb->snapdata.asi->freechunks)
+		warn("snapdata free chunks count wrong: counted %llu, freechunks %llu", counted, sb->snapdata.asi->freechunks);
 }
 
 static int recover_journal(struct superblock *sb)
@@ -496,11 +541,6 @@ static void _show_journal(struct superblock *sb)
  *   - binsearch for leaf, index lookup
  *   - enforce 32 bit address range within leaf
  */
-
-static struct buffer *snapread(struct superblock const *sb, sector_t sector)
-{
-	return bread(sb->metadev, sector, sb->metadata.allocsize);
-}
 
 static unsigned leaf_freespace(struct eleaf *leaf);
 static unsigned leaf_payload(struct eleaf *leaf);
