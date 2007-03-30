@@ -350,7 +350,7 @@ void dump_buffer(struct buffer *buffer, unsigned offset, unsigned length)
 
 int allocate_buffers(unsigned bufsize) {
 	struct buffer *buffers = (struct buffer *)malloc(max_buffers*sizeof(struct buffer));
-	char *data_pool = NULL;
+	unsigned char *data_pool = NULL;
 	int i, error = -ENOMEM; /* if malloc fails */
 
 	buftrace(warn("Pre-allocating buffers..."););
