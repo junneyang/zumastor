@@ -65,4 +65,5 @@ static inline void *malloc_aligned(size_t size, unsigned binalign)
 	return (void *)(p + (-p & (binalign - 1)));
 }
 
+int count_buffer(void);
 #endif // __DDSNAP_BUFFER_H

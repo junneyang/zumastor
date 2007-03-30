@@ -1320,6 +1320,7 @@ static int delete_tree_range(struct superblock *sb, u64 snapmask, chunk_t resume
 	if (!(leafbuf = probe(sb, resume, path)))
 		return -ENOMEM;
 
+	commit_transaction(sb);
 	while (1) { /* in-order leaf walk */
 		trace_off(show_leaf(buffer2leaf(leafbuf)););
 		if (delete_snapshots_from_leaf(sb, buffer2leaf(leafbuf), snapmask))
@@ -1776,7 +1777,6 @@ static chunk_t make_unique(struct superblock *sb, chunk_t chunk, int snapnum)
 {
 	unsigned levels = sb->image.etree_levels;
 	struct etree_path path[levels + 1];
-	struct buffer *leafbuf = probe(sb, chunk, path);
 	chunk_t exception = 0;
 	int error;
 	trace(warn("chunk %Lx, snapnum %i", chunk, snapnum););
@@ -1792,6 +1792,7 @@ static chunk_t make_unique(struct superblock *sb, chunk_t chunk, int snapnum)
 			return -1;
 	}
 
+	struct buffer *leafbuf = probe(sb, chunk, path);
 	if (!leafbuf) 
 		return -1;
 
