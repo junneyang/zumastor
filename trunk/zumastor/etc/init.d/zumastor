@@ -36,7 +36,7 @@ function start_zumastor {
 			create_device $vol $id >> $log 2>&1
 		done
 
-		list=$(cat $VOLUMES/$vol/master/snapshots/*) || return 1
+		list=$(cat $VOLUMES/$vol/master/snapshots/* 2>/dev/null) || return 1
 		for id in $list; do
 			echo "Mounting snapshot '$vol($id)'"
 			mount_device $vol $id >> $log 2>&1

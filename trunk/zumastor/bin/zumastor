@@ -72,7 +72,7 @@ function new_snapshot {
 		unset snapshots[0]
 	fi
 	echo ${snapshots[@]} >$listfile
-	log "'$kind' snapshot list is now: ${snapshots[@]}"
+	log "'$kind' snapshot list is now: ${snapshots[*]}"
 }
 
 function send_to_fifo {
