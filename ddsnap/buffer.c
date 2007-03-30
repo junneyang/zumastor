@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <stddef.h>
 #include <unistd.h>
-#include <errno.h> 
+#include <errno.h>
 #include "list.h"
 #include "diskio.h"
 #include "buffer.h"
@@ -43,7 +43,7 @@ unsigned buffer_count;
 LIST_HEAD(free_buffers);
 
 static unsigned max_buffers = 10000;
-static unsigned max_free_buffers = 1000; /* free 10 percent of the buffers */ 
+static unsigned max_free_buffers = 1000; /* free 10 percent of the buffers */
 
 void set_buffer_dirty(struct buffer *buffer)
 {
@@ -52,7 +52,7 @@ void set_buffer_dirty(struct buffer *buffer)
 		list_add_tail(&buffer->dirty_list, &dirty_buffers);
 		dirty_buffer_count++;
 	}
-	buffer->flags = BUFFER_STATE_DIRTY; 
+	buffer->flags = BUFFER_STATE_DIRTY;
 }
 
 void set_buffer_uptodate(struct buffer *buffer)
@@ -61,7 +61,7 @@ void set_buffer_uptodate(struct buffer *buffer)
 		list_del(&buffer->dirty_list);
 		dirty_buffer_count--;
 	}
-	buffer->flags = BUFFER_STATE_CLEAN; 
+	buffer->flags = BUFFER_STATE_CLEAN;
 }
 
 void brelse(struct buffer *buffer)
@@ -108,25 +108,25 @@ unsigned buffer_hash(sector_t sector)
 	return (((sector >> 32) ^ (sector_t)sector) * 978317583) % BUFFER_BUCKETS;
 }
 
-static void add_buffer_lru(struct buffer *buffer) 
-{	
+static void add_buffer_lru(struct buffer *buffer)
+{
 	buffer_count++;
 	list_add_tail(&buffer->list, &lru_buffers);
 }
 
-static void remove_buffer_lru(struct buffer *buffer) 
+static void remove_buffer_lru(struct buffer *buffer)
 {
 	buffer_count--;
 	list_del(&buffer->list);
 }
 
-static struct buffer *remove_buffer_hash(struct buffer *buffer) 
+static struct buffer *remove_buffer_hash(struct buffer *buffer)
 {
 	struct buffer **pbuffer = &buffer_table[buffer_hash(buffer->sector)], **prev = pbuffer;
-       	
+
 	assert(*pbuffer != NULL);
 
-       	if (*pbuffer == buffer) { /* head of list */
+	if (*pbuffer == buffer) { /* head of list */
 		buftrace(printf("buffer is head of list\n"););
 		*pbuffer = buffer->hashlist;
 		goto buffer_removed;
@@ -136,7 +136,7 @@ static struct buffer *remove_buffer_hash(struct buffer *buffer)
 		if (*pbuffer == buffer) {
 			(*prev)->hashlist = buffer->hashlist;
 			goto buffer_removed;
-		}	
+		}
 		prev = pbuffer;
 	}
 	return (struct buffer *)NULL;
@@ -146,12 +146,12 @@ static struct buffer *remove_buffer_hash(struct buffer *buffer)
 	return buffer;
 }
 
-static void add_buffer_free(struct buffer *buffer) 
+static void add_buffer_free(struct buffer *buffer)
 {
 	list_add_tail(&buffer->list, &free_buffers);
 }
 
-static struct buffer *remove_buffer_free(void) 
+static struct buffer *remove_buffer_free(void)
 {
 	struct buffer *buffer = NULL;
 	if (!list_empty(&free_buffers)) {
@@ -175,7 +175,7 @@ struct buffer *new_buffer(sector_t sector, unsigned size)
         int count = 0;
 
         list_for_each_safe(list, safe, &lru_buffers) {
-                struct buffer *buffer_evict = list_entry(list, struct buffer, list);	
+                struct buffer *buffer_evict = list_entry(list, struct buffer, list);
                 if (buffer_evict->count == 0 && !buffer_dirty(buffer_evict)) {
                         remove_buffer_lru(buffer_evict);
 			remove_buffer_hash(buffer_evict); /* remove from hashlist */
@@ -185,8 +185,8 @@ struct buffer *new_buffer(sector_t sector, unsigned size)
                 }
         }
 	buffer = remove_buffer_free();
-		
-alloc_buffer:	
+
+alloc_buffer:
 	if (!buffer) {
 		buftrace(warn("allocating a new buffer"););
 		if (buffer_count == max_buffers) {
@@ -203,9 +203,9 @@ alloc_buffer:
 			return NULL;
 		}
 	}
- 	
+
 	buffer->count = 1;
-	buffer->flags = 0; 
+	buffer->flags = 0;
 	buffer->size = size;
 	buffer->sector = sector;
 	/* insert into LRU list */
@@ -221,9 +221,9 @@ struct buffer *getblk(unsigned fd, sector_t sector, unsigned size)
 	for (buffer = *bucket; buffer; buffer = buffer->hashlist)
 		if (buffer->sector == sector) {
 			buftrace(printf("Found buffer for %llx\n", sector););
- 			buffer->count++;
+			buffer->count++;
 			list_del(&buffer->list);
-			list_add_tail(&buffer->list, &lru_buffers);	
+			list_add_tail(&buffer->list, &lru_buffers);
 			return buffer;
 		}
 	if (!(buffer = new_buffer(sector, size)))
@@ -237,9 +237,9 @@ struct buffer *getblk(unsigned fd, sector_t sector, unsigned size)
 struct buffer *bread(unsigned fd, sector_t sector, unsigned size)
 {
 	int err = 0;
-	struct buffer *buffer; 
-       
-	if (!(buffer = getblk(fd, sector, size))) 
+	struct buffer *buffer;
+
+	if (!(buffer = getblk(fd, sector, size)))
 		return NULL;
 	if (buffer_uptodate(buffer) || buffer_dirty(buffer))
 		return buffer;
@@ -259,13 +259,13 @@ struct buffer *bread(unsigned fd, sector_t sector, unsigned size)
 void evict_buffer(struct buffer *buffer)
 {
 	remove_buffer_lru(buffer);
-        if (!remove_buffer_hash(buffer)) 
+        if (!remove_buffer_hash(buffer))
 		warn("buffer not found in hashlist");
 	buftrace(printf("Evicted buffer for %llx\n", buffer->sector););
 	add_buffer_free(buffer);
 }
 
-void evict_buffers(void) 
+void evict_buffers(void)
 {
 	unsigned i;
 	for (i = 0; i < BUFFER_BUCKETS; i++)
@@ -293,8 +293,8 @@ void flush_buffers(void) // !!! should use lru list
 
 void show_buffer(struct buffer *buffer)
 {
-	printf("%s%llx/%i ", 
-		buffer_dirty(buffer)? "+": buffer_uptodate(buffer)? "": "?", 
+	printf("%s%llx/%i ",
+		buffer_dirty(buffer)? "+": buffer_uptodate(buffer)? "": "?",
 		buffer->sector, buffer->count);
 }
 
@@ -359,7 +359,7 @@ int allocate_buffers(unsigned bufsize) {
 	buftrace(warn("Pre-allocating data for buffers..."););
 	if ((error = posix_memalign((void **)&data_pool, (1 << SECTOR_BITS), max_buffers*bufsize)))
 		goto data_allocation_failure;
-		
+
 	/* let's clear out the buffer array and data */
 	memset(buffers, 0, max_buffers*sizeof(struct buffer));
 	memset(data_pool, 0, max_buffers*bufsize);
@@ -370,19 +370,19 @@ int allocate_buffers(unsigned bufsize) {
 	}
 
 	return 0; /* sucess on pre-allocation of buffers */
-	
+
 data_allocation_failure:
 	/* go back to on demand allocation */
 	warn("Error: %s unable to allocate space for buffer data", strerror(error));
 	free(buffers);
 buffers_allocation_failure:
 	warn("Unable to pre-allocate buffers. Using on demand allocation for buffers");
-	return error;	
+	return error;
 }
 
 /* mem_pool_size defines "roughly" the amount of memory allocated for
- * buffers. I use the term "roughly" since it doesn't take into 
- * consideration the size of the buffer struct and the overhead for 
+ * buffers. I use the term "roughly" since it doesn't take into
+ * consideration the size of the buffer struct and the overhead for
  * posix_memalign(). From empirical tests, the additional memory
  * is negligible.
  */
@@ -398,9 +398,9 @@ void init_buffers(unsigned bufsize, unsigned mem_pool_size)
 	INIT_LIST_HEAD(&free_buffers);
 
 	/* calculate number of max buffers to a fixed size, independent of chunk size */
-	max_buffers = mem_pool_size / bufsize;	
-	max_free_buffers = max_buffers / 10;		
-	
+	max_buffers = mem_pool_size / bufsize;
+	max_free_buffers = max_buffers / 10;
+
 #ifdef _PRE_ALLOCATE_BUFFERS
 	allocate_buffers(bufsize);
 #endif
