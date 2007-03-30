@@ -214,6 +214,20 @@ alloc_buffer:
 	return buffer;
 }
 
+int count_buffer(void)
+{
+        struct list_head *list, *safe;
+        int count = 0;
+        list_for_each_safe(list, safe, &lru_buffers) {
+                struct buffer *buffer = list_entry(list, struct buffer, list);	
+		if (!buffer->count)
+			continue;
+		trace_off(warn("buffer %Lx has non-zero count %d", (long long)buffer->sector, buffer->count););
+		count++;
+	}
+	return count;
+}
+
 struct buffer *getblk(unsigned fd, sector_t sector, unsigned size)
 {
 	struct buffer **bucket = &buffer_table[buffer_hash(sector)], *buffer;
