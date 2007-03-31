@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <stdio.h>
-#include <unistd.h> /* for ddnsap.h */
+#include <unistd.h>
+#include <sys/stat.h>
 #include <sys/ioctl.h>
 #include <linux/fs.h> // BLKGETSIZE
 #include "ddsnap.h"
@@ -10,8 +11,14 @@
 
 int fd_size(fd_t fd, u64 *bytes)
 {
-	unsigned long sectors;
-
+	struct stat stat;
+	if (fstat(fd, &stat) == -1)
+		return -errno;
+	if (S_ISREG(stat.st_mode)) {
+		*bytes = stat.st_size;
+		return 0;
+	}
+	unsigned long sectors; // !!! will puke at 2 TB
 	if (ioctl(fd, BLKGETSIZE, &sectors))
 		return -errno;
 	*bytes = ((u64)sectors) << 9;
