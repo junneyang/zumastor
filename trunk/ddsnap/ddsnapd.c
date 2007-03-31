@@ -34,7 +34,6 @@
 #include "buffer.h"
 #include "daemonize.h"
 #include "ddsnap.h"
-#include "ddsnap.common.h"
 #include "ddsnapd.h"
 #include "diskio.h"
 #include "dm-ddsnap.h"
@@ -1932,7 +1931,7 @@ static void show_snapshots(struct superblock *sb)
 
 /* Lock snapshot reads against origin writes */
 
-static void reply(fd_t sock, struct messagebuf *message)
+static void reply(int sock, struct messagebuf *message)
 {
 	trace(warn("%x/%u", message->head.code, message->head.length););
 	writepipe(sock, &message->head, message->head.length + sizeof(message->head));
@@ -1942,7 +1941,7 @@ static void reply(fd_t sock, struct messagebuf *message)
 struct client
 {
 	u64 id;
-	fd_t sock;
+	int sock;
 	int snap; /* snapnum/snapbit for snapshots, -1 for origin */
 	u32 flags; 
 };
@@ -2293,12 +2292,13 @@ static void save_state(struct superblock *sb)
 	save_sb(sb);
 }
 
+int fd_size(int fd, u64 *bytes); // bogus, do the size checks in ddsnap.c
+
 /*
  * I'll leave all the testing hooks lying around in the main routine for now,
  * since the low level components still tend to break every now and then and
  * require further unit testing.
  */
-
 int init_snapstore(struct superblock *sb, u32 js_bytes, u32 bs_bits, u32 cs_bits)
 {
 	int i, error;
@@ -2877,9 +2877,11 @@ static int incoming(struct superblock *sb, struct client *client)
 	case INITIALIZE_SNAPSTORE:
 	{
 		/* FIXME: init_snapstore takes more arguments now */
+#if 0 // this is a stupid feature
 		warn("Improper initialization.");
 		init_snapstore(sb, DEFAULT_JOURNAL_SIZE, 
 			       SECTOR_BITS + SECTORS_PER_BLOCK, SECTOR_BITS + SECTORS_PER_BLOCK);
+#endif
 		break;
 	}
 	case DUMP_TREE: // !!! use show_tree_range here, add start, count fields to message.

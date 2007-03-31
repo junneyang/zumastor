@@ -28,9 +28,6 @@ xdelta/xdelta3.o:
 delta.o: delta.c
 	cc delta.c -c $(flags)
 
-ddsnap.common.o: ddsnap.common.c $(deps)
-	cc ddsnap.common.c -c $(flags)
-
 ddsnap.agent.o: ddsnap.agent.c $(ddsnap_agent_deps)
 	cc ddsnap.agent.c -I$(includes) -c $(flags)
 
@@ -55,8 +52,8 @@ ddraidd: ddraid.c diskio.o buffer.o $(ddraid_deps)
 ddraid-agent: ddraid.agent.c $(ddraid_deps)
 	cc ddraid.agent.c $(flags) -I$(includes) -lpthread -o ddraid-agent -lpopt
 
-ddsnap: ddsnap.c buffer.o ddsnapd.o ddsnap.agent.o ddsnap.common.o xdelta/xdelta3.o delta.o diskio.o daemonize.o $(ddsnap_deps) build.h
-	cc ddsnap.c $(flags) -I$(includes) buffer.o ddsnapd.o ddsnap.agent.o ddsnap.common.o xdelta/xdelta3.o delta.o diskio.o daemonize.o -o ddsnap -lpopt -lz
+ddsnap: ddsnap.c buffer.o ddsnapd.o ddsnap.agent.o xdelta/xdelta3.o delta.o diskio.o daemonize.o $(ddsnap_deps) build.h
+	cc ddsnap.c $(flags) -I$(includes) buffer.o ddsnapd.o ddsnap.agent.o xdelta/xdelta3.o delta.o diskio.o daemonize.o -o ddsnap -lpopt -lz
 
 devspam: tests/devspam.c trace.h
 	cd tests && cc devspam.c $(flags) -I$(includes) -o ../devspam

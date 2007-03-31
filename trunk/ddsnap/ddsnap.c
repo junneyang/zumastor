@@ -12,16 +12,17 @@
 #include <netinet/in.h>
 #include <popt.h>
 #include <time.h>
+#include <zlib.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/socket.h>
+#include <sys/ioctl.h>
 #include <sys/un.h>
-#include <zlib.h>
+#include <linux/fs.h> // BLKGETSIZE
 #include "buffer.h"
 #include "daemonize.h"
 #include "ddsnap.h"
 #include "ddsnap.agent.h"
-#include "ddsnap.common.h"
 #include "ddsnapd.h"
 #include "delta.h"
 #include "diskio.h"
@@ -32,6 +33,58 @@
 #include "build.h"
 
 /* Utilities */
+
+int fd_size(int fd, u64 *bytes)
+{
+	struct stat stat;
+	if (fstat(fd, &stat) == -1)
+		return -errno;
+	if (S_ISREG(stat.st_mode)) {
+		*bytes = stat.st_size;
+		return 0;
+	}
+	unsigned long sectors; // !!! will puke at 2 TB
+	if (ioctl(fd, BLKGETSIZE, &sectors))
+		return -errno;
+	*bytes = ((u64)sectors) << 9;
+	return 0;
+}
+
+int is_same_device(char const *dev1,char const *dev2) {
+	struct stat stat1, stat2;
+
+	if (stat(dev1, &stat1) < 0) { 
+		warn("could not stat %s", dev1);
+		return -1;
+	}
+
+	if (stat(dev2, &stat2) < 0) {
+		warn("could not stat %s", dev2);				
+		return -1;
+	}
+
+	if (!S_ISBLK(stat1.st_mode) && !S_ISREG(stat1.st_mode)) {
+		fprintf(stderr, "device %s is not a block device\n", dev1);
+		return -1;
+	}
+
+	if (!S_ISBLK(stat2.st_mode) && !S_ISREG(stat2.st_mode)) {
+		fprintf(stderr, "device %s is not a block device\n", dev2);
+		return -1;
+	}
+
+	if (S_ISBLK(stat1.st_mode) != S_ISBLK(stat2.st_mode))
+		return 0;
+
+	if (S_ISREG(stat1.st_mode) && stat1.st_ino != stat2.st_ino)
+		return 0;
+
+	if (stat1.st_rdev != stat2.st_rdev)
+		return 0;
+
+	warn("device %s is the same as %s\n", dev1, dev2);
+	return 1;
+}
 
 u32 strtobytes(char const *string)
 {
@@ -260,6 +313,59 @@ static int parse_snaptag(char const *snapstr, u32 *snaptag)
 
 	*snaptag = num;
 	return 0;
+}
+
+#define CHUNK_ARRAY_INIT 1024
+
+struct change_list *init_change_list(u32 chunksize_bits, u32 src_snap, u32 tgt_snap)
+{
+	struct change_list *cl;
+
+	if ((cl = malloc(sizeof(struct change_list))) == NULL)
+		return NULL;
+
+	cl->count = 0;
+	cl->length = CHUNK_ARRAY_INIT;
+	cl->chunksize_bits = chunksize_bits;
+	cl->src_snap = src_snap;
+	cl->tgt_snap = tgt_snap;
+	cl->chunks = malloc(cl->length * sizeof(u64));
+
+	if (cl->chunks == NULL) {
+		free(cl);
+		return NULL;
+	}
+
+	return cl;
+}
+
+int append_change_list(struct change_list *cl, u64 chunkaddr)
+{
+	if ((cl->count + 1) >= cl->length) {
+		u64 *newchunks;
+
+		/* we could use a different strategy here like incrementing but this
+		 * should work and will avoid having too many
+		 * reallocations
+		 */
+		if ((newchunks = realloc(cl->chunks, cl->length * 2 * sizeof(u64))) == NULL)
+		    return -1;
+
+		cl->length *= 2;
+		cl->chunks = newchunks;
+	}
+
+	cl->chunks[cl->count] = chunkaddr;
+	cl->count++;
+
+	return 0;
+}
+
+void free_change_list(struct change_list *cl)
+{
+	if (cl->chunks)
+		free(cl->chunks);
+	free(cl);
 }
 
 static struct change_list *read_changelist(int cl_fd)
@@ -2144,42 +2250,6 @@ static void cdUsage(poptContext optCon, int exitcode, char const *error, char co
 	poptPrintUsage(optCon, stderr, 0);
 	if (error) fprintf(stderr, "%s: %s", error, addl);
 	exit(exitcode);
-}
-
-int is_same_device(char const *dev1,char const *dev2) {
-	struct stat stat1, stat2;
-
-	if (stat(dev1, &stat1) < 0) { 
-		warn("could not stat %s", dev1);
-		return -1;
-	}
-
-	if (stat(dev2, &stat2) < 0) {
-		warn("could not stat %s", dev2);				
-		return -1;
-	}
-
-	if (!S_ISBLK(stat1.st_mode) && !S_ISREG(stat1.st_mode)) {
-		fprintf(stderr, "device %s is not a block device\n", dev1);
-		return -1;
-	}
-
-	if (!S_ISBLK(stat2.st_mode) && !S_ISREG(stat2.st_mode)) {
-		fprintf(stderr, "device %s is not a block device\n", dev2);
-		return -1;
-	}
-
-	if (S_ISBLK(stat1.st_mode) != S_ISBLK(stat2.st_mode))
-		return 0;
-
-	if (S_ISREG(stat1.st_mode) && stat1.st_ino != stat2.st_ino)
-		return 0;
-
-	if (stat1.st_rdev != stat2.st_rdev)
-		return 0;
-
-	warn("device %s is the same as %s\n", dev1, dev2);
-	return 1;
 }
 
 int main(int argc, char *argv[])

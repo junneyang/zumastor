@@ -2,7 +2,6 @@
 #define __DDSNAP_DAEMON_H
 
 #include "buffer.h"
-#include "ddsnap.common.h"
 #include "list.h"
 #include "sock.h"
 #include "trace.h"
