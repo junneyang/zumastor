@@ -2146,42 +2146,40 @@ static void cdUsage(poptContext optCon, int exitcode, char const *error, char co
 	exit(exitcode);
 }
 
-int same_BLK_device(char const *dev1,char const *dev2) {
-	struct stat dev1buf, dev2buf;
-	
-	if (stat(dev1, &dev1buf) < 0) { 
-		error("stat error on %s", dev1);
+int is_same_device(char const *dev1,char const *dev2) {
+	struct stat stat1, stat2;
+
+	if (stat(dev1, &stat1) < 0) { 
+		warn("could not stat %s", dev1);
 		return -1;
 	}
 
-	if (stat(dev2, &dev2buf) < 0) {
-		error("stat error on %s", dev2);				
-		return -1;
-	}
-	
-	if (!S_ISBLK(dev1buf.st_mode)) {
-		fprintf(stderr, "the device %s must be a block device\n", dev1);
+	if (stat(dev2, &stat2) < 0) {
+		warn("could not stat %s", dev2);				
 		return -1;
 	}
 
-	if (!S_ISBLK(dev2buf.st_mode)) {
-		fprintf(stderr, "the device %s must be a block device\n", dev2);
-		return -1;			
-	}
-	
-	int dev1_rmajor = major(dev1buf.st_rdev);
-	int dev1_rminor = minor(dev1buf.st_rdev);
-	int dev2_rmajor = major(dev2buf.st_rdev);
-	int dev2_rminor = minor(dev2buf.st_rdev);
-	
-	trace_off(printf("dev1_rmajor is %d, dev1_rminor is %d, dev2_rmajor is %d, dev2_rminor is %d.\n", dev1_rmajor, dev1_rminor, dev2_rmajor, dev2_rminor););
-
-	if (dev1_rmajor == dev2_rmajor && dev1_rminor == dev2_rminor) {
-		fprintf(stderr, "the devices cannot be the same: %s, %s\n", dev1, dev2);
-		return -2;
+	if (!S_ISBLK(stat1.st_mode) && !S_ISREG(stat1.st_mode)) {
+		fprintf(stderr, "device %s is not a block device\n", dev1);
+		return -1;
 	}
 
-	return 0;
+	if (!S_ISBLK(stat2.st_mode) && !S_ISREG(stat2.st_mode)) {
+		fprintf(stderr, "device %s is not a block device\n", dev2);
+		return -1;
+	}
+
+	if (S_ISBLK(stat1.st_mode) != S_ISBLK(stat2.st_mode))
+		return 0;
+
+	if (S_ISREG(stat1.st_mode) && stat1.st_ino != stat2.st_ino)
+		return 0;
+
+	if (stat1.st_rdev != stat2.st_rdev)
+		return 0;
+
+	warn("device %s is the same as %s\n", dev1, dev2);
+	return 1;
 }
 
 int main(int argc, char *argv[])
@@ -2368,7 +2366,7 @@ int main(int argc, char *argv[])
 
 		trace_off(printf("snapdev is %s, origdev is %s, metadev is %s.\n", snapdev, origdev, metadev););
 
-		if (same_BLK_device(snapdev, origdev) < 0) {
+		if (is_same_device(snapdev, origdev)) {
 			poptPrintUsage(initCon, stderr, 0);
 			poptFreeContext(initCon);
 			return 1;			
@@ -2383,13 +2381,13 @@ int main(int argc, char *argv[])
 				return 1;
 			}
 
-			if (same_BLK_device(snapdev, metadev) < 0) {
+			if (is_same_device(snapdev, metadev)) {
 				poptPrintUsage(initCon, stderr, 0);
 				poptFreeContext(initCon);
 				return 1;			
 			}			
 
-			if (same_BLK_device(origdev, metadev) < 0) {
+			if (is_same_device(origdev, metadev)) {
 				poptPrintUsage(initCon, stderr, 0);
 				poptFreeContext(initCon);
 				return 1;			
