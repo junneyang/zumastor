@@ -1,5 +1,3 @@
-#include "ddsnap.h"
-
 struct context {
 	struct server active, local;
 	int serv;

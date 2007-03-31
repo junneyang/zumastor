@@ -10,8 +10,8 @@
 //#include <libdlm.h>
 #include <popt.h>
 #include "dm-ddsnap.h" // message codes
-#include "ddsnap.agent.h"
 #include "ddsnap.h" // outbead
+#include "ddsnap.agent.h"
 #include "trace.h"
 #include "sock.h" // send_fd, read/writepipe, connect_socket
 #include "daemonize.h"
