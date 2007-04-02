@@ -1,7 +1,9 @@
 #ifndef __DDSNAP_BUFFER_H
 #define __DDSNAP_BUFFER_H
 
-#define SECTOR_BITS 9
+#define SECTOR_SHIFT 9
+#define SECTOR_BITS SECTOR_SHIFT // lose me
+#define SECTOR_SIZE (1 << SECTOR_SHIFT)
 #define BUFFER_STATE_INVAL 0
 #define BUFFER_STATE_CLEAN 1
 #define BUFFER_STATE_DIRTY 2

@@ -5,8 +5,8 @@ instdir=/usr/bin
 
 deps = Makefile trace.h diskio.h buffer.h list.h sock.h
 ddsnap_agent_deps = $(deps) ddsnap.agent.h $(kernel)/dm-ddsnap.h
-ddsnapd_deps = $(deps) ddsnapd.h $(kernel)/dm-ddsnap.h
-ddsnap_deps = $(deps) ddsnap.h ddsnapd.h ddsnap.agent.h $(kernel)/dm-ddsnap.h
+ddsnapd_deps = $(deps) $(kernel)/dm-ddsnap.h
+ddsnap_deps = $(deps) ddsnap.h ddsnap.agent.h $(kernel)/dm-ddsnap.h
 ddraid_deps = $(deps) ddraid.h $(kernel)/dm-ddraid.h
 
 ddraid_binaries = mkddraid ddraidd ddraid-agent
