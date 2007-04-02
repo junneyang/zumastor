@@ -41,6 +41,24 @@
 #include "sock.h"
 #include "trace.h"
 
+#define SECTORS_PER_BLOCK 7
+#define CHUNK_SIZE 4096
+#define DEFAULT_JOURNAL_SIZE (100 * CHUNK_SIZE)
+#define INPUT_ERROR 0
+
+#define SB_BUSY 2
+#define SB_DIRTY 1
+#define SB_SECTOR 8
+#define SB_SIZE 4096
+#define SB_MAGIC "snapshot"
+
+#define METADATA_ALLOC(SB) ((SB)->image.alloc[0])
+#define SNAPDATA_ALLOC(SB) ((SB)->image.alloc[((SB)->metadev == (SB)->snapdev) ? 0 : 1])
+
+#define DDSNAPD_CLIENT_ERROR -1
+#define DDSNAPD_AGENT_ERROR -2
+#define DDSNAPD_CAUGHT_SIGNAL -3
+
 /* XXX - Hack, this number needs to be the same as the 
  * kernel headers. Make sure that these are same when
  * building with a new kernel. 
@@ -193,8 +211,67 @@ static inline struct exception *emap(struct eleaf *leaf, unsigned i)
 	return	(struct exception *)((char *) leaf + leaf->map[i].offset);
 }
 
+struct superblock
+{
+	/* Persistent, saved to disk */
+	struct disksuper
+	{
+		char magic[8];
+		u64 create_time;
+		sector_t etree_root;
+		sector_t orgoffset, orgsectors;
+		u64 flags;
+		u64 deleting;
+		struct snapshot
+		{
+			u32 ctime; // upper 32 bits are in super create_time
+			u32 tag;   // external name (id) of snapshot
+			u8 bit;    // internal snapshot number, not derived from tag
+			s8 prio;   // 0=normal, 127=highest, -128=lowestdrop
+			u16 usecnt; // use count on snapshot device (just use a bit?)
+			char reserved[7];  // change me to 4 !!!
+		} snaplist[MAX_SNAPSHOTS]; // entries are contiguous, in creation order
+		u32 snapshots;
+		u32 etree_levels;
+		s32 journal_base, journal_next, journal_size;
+		u32 sequence;
+		u64 meta_chunks_used, snap_chunks_used;
+		struct allocspace_img
+		{
+			sector_t bitmap_base;
+			sector_t chunks;
+			sector_t freechunks;
+			chunk_t  last_alloc;
+			u64      bitmap_blocks;
+			u32      allocsize_bits;
+		} alloc[2];
+	} image;
+
+	/* Derived, not saved to disk */
+	u64 snapmask;
+	unsigned flags;
+	unsigned snapdev, metadev, orgdev;
+	unsigned snaplock_hash_bits;
+	struct snaplock **snaplocks;
+	unsigned copybuf_size;
+	char *copybuf;
+	chunk_t source_chunk;
+	chunk_t dest_exception;
+	unsigned copy_chunks;
+	unsigned max_commit_blocks;
+	struct allocspace {
+		struct allocspace_img *asi;
+		u32 allocsize;
+		u32 sectors_per_alloc_bits, sectors_per_alloc;
+		u32 alloc_per_node; /* only for metadata */
+	} metadata, snapdata;
+};
+
+#define METADATA_ALLOC(SB) ((SB)->image.alloc[0]) // do we really need?
+#define SNAPDATA_ALLOC(SB) ((SB)->image.alloc[((SB)->metadev == (SB)->snapdev) ? 0 : 1]) // ditto?
+
 /*
- * Journalling handling
+ * Journalling
  */
 
 #define JMAGIC "MAGICNUM"
@@ -3531,4 +3608,106 @@ done:
 	// in a perfect world we'd close all the connections
 	close(listenfd);
 	return err;
+}
+
+int sniff_snapstore(int metadev)
+{
+	int error;
+	struct superblock *sb;
+	if ((error = posix_memalign((void **)&sb, 1 << SECTOR_BITS, SB_SIZE))) {
+		warn("Error: %s unable to allocate temporary superblock", strerror(error));
+		return -1;
+	}
+	if (diskread(metadev, sb, SB_SIZE, SB_SECTOR << SECTOR_BITS) < 0) {
+		warn("Unable to read superblock: %s", strerror(errno));
+		return -1;
+	}
+	int sniff = !(memcmp(sb->image.magic, SB_MAGIC, sizeof(sb->image.magic)));
+	free(sb);
+	return sniff;
+}
+
+int really_init_snapstore(int orgdev, int snapdev, int metadev, unsigned bs_bits, unsigned cs_bits, unsigned js_bytes)
+{
+	int error;
+	struct superblock *sb;
+	if ((error = posix_memalign((void **)&sb, 1 << SECTOR_BITS, SB_SIZE))) {
+		warn("Error: %s unable to allocate memory for superblock", strerror(error));
+		return -1;
+	}
+	memset(sb, 0, SB_SIZE);
+	sb->orgdev = orgdev;
+	sb->snapdev = snapdev;
+	sb->metadev = metadev;
+
+#ifdef MKDDSNAP_TEST
+	if (init_snapstore(sb, js_bytes, bs_bits, cs_bits) < 0)
+		return 1;
+	create_snapshot(sb, 0);
+	
+	int i;
+	for (i = 0; i < 100; i++) {
+		make_unique(sb, i, 0);
+	}
+	
+	flush_buffers();
+	evict_buffers();
+	warn("delete...");
+	delete_tree_range(sb, 1, 0, 5);
+	show_buffers();
+	warn("dirty buffers = %i", dirty_buffer_count);
+	show_tree(sb);
+	return 0;
+#endif
+	unsigned bufsize = 1 << bs_bits;
+	init_buffers(bufsize, (1 << 25)); /* preallocate 32Mb of buffers */
+	
+	if (init_snapstore(sb, js_bytes, bs_bits, cs_bits) < 0) 
+		warn("Snapshot storage initiailization failed");
+	free(sb);
+	return 0;
+}
+
+int start_server(int orgdev, int snapdev, int metadev, char const *agent_sockname, char const *server_sockname, char const *logfile, char const *pidfile, int nobg)
+{
+	int error = 0;
+	struct superblock *sb;
+	if ((error = posix_memalign((void **)&sb, 1 << SECTOR_BITS, SB_SIZE))) {
+		warn("Error: %s unable to allocate memory for superblock", strerror(error));
+		return -1;
+	}
+	memset(sb, 0, SB_SIZE);
+	sb->orgdev = orgdev;
+	sb->snapdev = snapdev;
+	sb->metadev = metadev;
+
+	if (diskread(sb->metadev, &sb->image, SB_SIZE, SB_SECTOR << SECTOR_BITS) < 0)
+		warn("Unable to read superblock: %s", strerror(errno));
+
+	int listenfd, getsigfd, agentfd, ret;
+	
+	unsigned bufsize = 1 << METADATA_ALLOC(sb).allocsize_bits;	
+	init_buffers(bufsize, (1 << 27)); /* preallocate 128Mb of buffers */
+	
+	if (snap_server_setup(agent_sockname, server_sockname, &listenfd, &getsigfd, &agentfd) < 0)
+		error("Could not setup snapshot server\n");
+	if (!nobg) {
+		pid_t pid;
+		
+		if (!logfile)
+			logfile = "/var/log/ddsnap.server.log";
+		pid = daemonize(logfile, pidfile);
+		if (pid == -1)
+			error("Could not daemonize\n");
+		if (pid != 0) {
+			trace_on(printf("pid = %lu\n", (unsigned long)pid););
+			return 0;
+		}
+	}
+
+	/* should only return on an error */
+	if ((ret = snap_server(sb, listenfd, getsigfd, agentfd)) < 0)
+		warn("server exited with error %i", ret);
+
+	return 0;
 }

@@ -12,6 +12,7 @@
 #include <netinet/in.h>
 #include <popt.h>
 #include <time.h>
+#include <ctype.h>
 #include <zlib.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -86,6 +87,8 @@ int is_same_device(char const *dev1,char const *dev2) {
 	return 1;
 }
 
+#define INPUT_ERROR 0 // really?
+
 u32 strtobytes(char const *string)
 {
 	long bytes = 0;
@@ -118,7 +121,7 @@ u32 strtobits(char const *string)
 {
 	long amount = 0;
 	u32 bits = 0;
-	char* letter = NULL;
+	char *letter = NULL;
 
 	amount = strtol(string, &letter, 10);
 
@@ -173,7 +176,8 @@ u32 strtobits(char const *string)
 
 #define MAX_MEM_BITS 20
 #define MAX_MEM_SIZE (1 << MAX_MEM_BITS)
-#define DEF_CHUNK_SIZE_BITS SECTOR_BITS + SECTORS_PER_BLOCK;
+#define DEFAULT_CHUNK_SIZE_BITS 12
+#define DEFAULT_JOURNAL_SIZE (1000 * SECTOR_SIZE)
 
 struct cl_header
 {
@@ -2390,8 +2394,8 @@ int main(int argc, char *argv[])
 
 	if (strcmp(command, "initialize") == 0) {
 		char const *snapdev, *origdev, *metadev;
-		u32 bs_bits = DEF_CHUNK_SIZE_BITS;
-		u32 cs_bits = DEF_CHUNK_SIZE_BITS;
+		u32 bs_bits = DEFAULT_CHUNK_SIZE_BITS;
+		u32 cs_bits = DEFAULT_CHUNK_SIZE_BITS;
 		u32 js_bytes = DEFAULT_JOURNAL_SIZE;
 
 		struct poptOption options[] = {
@@ -2471,47 +2475,26 @@ int main(int argc, char *argv[])
 			return 1;
 		}
 
-		int error = 0;
-		struct superblock *sb;
-		if ((error = posix_memalign((void **)&sb, 1 << SECTOR_BITS, SB_SIZE))) {
-			warn("Error: %s unable to allocate memory for superblock", strerror(error));
-			return 1;
-		}
-		memset(sb, 0, SB_SIZE);
-		
-		
-		if ((sb->snapdev = open(snapdev, O_RDWR | O_DIRECT)) == -1)
+		int orgdev_, snapdev_, metadev_;
+		if ((snapdev_ = open(snapdev, O_RDWR | O_DIRECT)) == -1)
 			error("Could not open snapshot store %s: %s", snapdev, strerror(errno));
 		
-		if ((sb->orgdev = open(origdev, O_RDONLY | O_DIRECT)) == -1)
+		if ((orgdev_ = open(origdev, O_RDONLY | O_DIRECT)) == -1)
 			error("Could not open origin volume %s: %s", origdev, strerror(errno));
 		
-		sb->metadev = sb->snapdev;
+		metadev_ = snapdev_;
 
-		if (metadev && (sb->metadev = open(metadev, O_RDWR | O_DIRECT)) == -1) 
+		if (metadev && (metadev_ = open(metadev, O_RDWR | O_DIRECT)) == -1) 
 			error("Could not open meta volume %s: %s", metadev, strerror(errno));
-		
-		if (!yes) {
-			struct superblock *temp_sb;
-			if ((error = posix_memalign((void **)&temp_sb, 1 << SECTOR_BITS, SB_SIZE))) {
-				warn("Error: %s unable to allocate temporary superblock", strerror(error));
-				return 1;
-			}
-			if (diskread(sb->metadev, temp_sb, SB_SIZE, SB_SECTOR << SECTOR_BITS) < 0)
-			warn("Unable to read superblock: %s", strerror(errno));
 
-			if (!(memcmp(temp_sb->image.magic, SB_MAGIC, sizeof(temp_sb->image.magic)))) {
-				char input;
-				printf("There exists a valid magic number in sb, are you sure you want to overwrite? (y/N) ");
-				input = getchar();
-				if (input != 'y' && input != 'Y')
-					return 1;
-			}
-			free(temp_sb);
+		if (!yes && sniff_snapstore(metadev_) > 0) {
+			printf("There exists a valid magic number in sb, are you sure you want to overwrite? (y/N) ");
+			if (toupper(getchar()) != 'Y')
+				return 1;
 		}
 
 		poptFreeContext(initCon);
-		
+
 		trace_on(printf("js_bytes was %u, bs_bits was %u and cs_bits was %u\n", js_bytes, bs_bits, cs_bits););
 
 		if (bs_str != NULL) {
@@ -2546,34 +2529,7 @@ int main(int argc, char *argv[])
 		}
 
 		trace_off(printf("js_bytes is %u, bs_bits is %u, and cs_bits is %u\n", js_bytes, bs_bits, cs_bits););
-
-# ifdef MKDDSNAP_TEST
-		if (init_snapstore(sb, js_bytes, bs_bits, cs_bits) < 0)
-			return 1;
-		create_snapshot(sb, 0);
-		
-		int i;
-		for (i = 0; i < 100; i++) {
-			make_unique(sb, i, 0);
-		}
-		
-		flush_buffers();
-		evict_buffers();
-		warn("delete...");
-		delete_tree_range(sb, 1, 0, 5);
-		show_buffers();
-		warn("dirty buffers = %i", dirty_buffer_count);
-		show_tree(sb);
-		return 0;
-# endif /* end of test code */
-		
-		unsigned bufsize = 1 << bs_bits;
-		init_buffers(bufsize, (1 << 25)); /* preallocate 32Mb of buffers */
-		
-		if (init_snapstore(sb, js_bytes, bs_bits, cs_bits) < 0) 
-			warn("Snapshot storage initiailization failed");
-		free(sb);
-		return 0;
+		return really_init_snapstore(orgdev_, snapdev_, metadev_, bs_bits, cs_bits, js_bytes);
 	}
 	if (strcmp(command, "agent") == 0) {
 		char const *sockname;
@@ -2706,56 +2662,21 @@ int main(int argc, char *argv[])
 			poptFreeContext(serverCon);
 			return 1;
 		}
-	
-		int error = 0;	
-		struct superblock *sb;
-		if ((error = posix_memalign((void **)&sb, 1 << SECTOR_BITS, SB_SIZE))) {
-			warn("Error: %s unable to allocate memory for superblock", strerror(error));
-			return 1;
-		}
-		memset(sb, 0, SB_SIZE);
 
-		if ((sb->snapdev = open(snapdev, O_RDWR | O_DIRECT)) == -1)
+		int orgdev_, snapdev_, metadev_;
+		if ((snapdev_ = open(snapdev, O_RDWR | O_DIRECT)) == -1)
 			error("Could not open snapshot store %s: %s", snapdev, strerror(errno));
-		
-		if ((sb->orgdev = open(origdev, O_RDONLY | O_DIRECT)) == -1)
+
+		if ((orgdev_ = open(origdev, O_RDONLY | O_DIRECT)) == -1)
 			error("Could not open origin volume %s: %s", origdev, strerror(errno));
-		
-		sb->metadev = sb->snapdev;
-		if (metadev && (sb->metadev = open(metadev, O_RDWR | O_DIRECT)) == -1) 
+
+		metadev_ = snapdev_;
+		if (metadev && (metadev_ = open(metadev, O_RDWR | O_DIRECT)) == -1) 
 			error("Could not open meta volume %s: %s", metadev, strerror(errno));
 
-		if (diskread(sb->metadev, &sb->image, SB_SIZE, SB_SECTOR << SECTOR_BITS) < 0)
-			warn("Unable to read superblock: %s", strerror(errno));
-
 		poptFreeContext(serverCon);
-		
-		int listenfd, getsigfd, agentfd, ret;
-		
-		unsigned bufsize = 1 << METADATA_ALLOC(sb).allocsize_bits;	
-		init_buffers(bufsize, (1 << 27)); /* preallocate 128Mb of buffers */
-		
-		if (snap_server_setup(agent_sockname, server_sockname, &listenfd, &getsigfd, &agentfd) < 0)
-			error("Could not setup snapshot server\n");
-		if (!nobg) {
-			pid_t pid;
-			
-			if (!logfile)
-				logfile = "/var/log/ddsnap.server.log";
-			pid = daemonize(logfile, pidfile);
-			if (pid == -1)
-				error("Could not daemonize\n");
-			if (pid != 0) {
-				trace_on(printf("pid = %lu\n", (unsigned long)pid););
-				return 0;
-			}
-		}
 
-		/* should only return on an error */
-		if ((ret = snap_server(sb, listenfd, getsigfd, agentfd)) < 0)
-			warn("server exited with error %i", ret);
-	
-		return 0;
+		return start_server(orgdev_, snapdev_, metadev_, agent_sockname, server_sockname, logfile, pidfile, nobg);
 	}
 	if (strcmp(command, "create") == 0) {
 		if (argc != 4) {
