@@ -1936,7 +1936,8 @@ static u64 calc_snapmask(struct superblock *sb)
 	unsigned int i;
 
 	for (i = 0; i < sb->image.snapshots; i++)
-		mask |= 1ULL << sb->image.snaplist[i].bit;
+		if (!is_squashed(&sb->image.snaplist[i]))
+			mask |= 1ULL << sb->image.snaplist[i].bit;
 
 	return mask;
 }
