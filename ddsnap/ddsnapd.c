@@ -34,7 +34,6 @@
 #include "buffer.h"
 #include "daemonize.h"
 #include "ddsnap.h"
-#include "ddsnapd.h"
 #include "diskio.h"
 #include "dm-ddsnap.h"
 #include "list.h"
