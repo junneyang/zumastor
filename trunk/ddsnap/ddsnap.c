@@ -24,7 +24,6 @@
 #include "daemonize.h"
 #include "ddsnap.h"
 #include "ddsnap.agent.h"
-#include "ddsnapd.h"
 #include "delta.h"
 #include "diskio.h"
 #include "dm-ddsnap.h"
