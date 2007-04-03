@@ -36,9 +36,9 @@ function start_zumastor {
 			create_device $vol $id >> $log 2>&1
 		done
 
-		list=$(cat $VOLUMES/$vol/master/snapshots/* 2>/dev/null) || return 1
+		list=$(cat $VOLUMES/$vol/master/snapshots/* 2>/dev/null)
 		for id in $list; do
-			echo "Mounting snapshot '$vol($id)'"
+			log "Mounting snapshot '$vol($id)'" $log
 			mount_device $vol $id >> $log 2>&1
 		done
 
@@ -68,8 +68,11 @@ function stop_zumastor {
 	local vol
 	local id
 	local host
+	local log
 
 	for vol in $(ls $VOLUMES); do
+		log=$LOGS/$vol/stop.log
+		log "stopping volume $vol" $log
 		for host in $(ls $VOLUMES/$vol/targets); do
 			zumastor stop target $vol $host
 		done
@@ -77,12 +80,17 @@ function stop_zumastor {
 			zumastor stop master $vol
 		fi
 
-		for id in $(get_managed_snapshots $vol); do
-			umount_device $vol $id 2>/dev/null
-			remove_device $vol $id
+		list=$(cat $VOLUMES/$vol/master/snapshots/* 2>/dev/null)
+		for id in $list; do
+			log "unmounting snapshot '$vol($id)'" $log
+			umount_device $vol $id >> $log 2>&1
 		done
-		umount_device $vol -1 2>/dev/null
-		remove_device $vol -1 || { echo remove $vol -1 failed ; return 1; }
+
+		for id in $(get_managed_snapshots $vol); do
+			remove_device $vol $id >> $log 2>&1
+		done
+		umount_device $vol -1 >> $log 2>&1
+		remove_device $vol -1 >> $log 2>&1  || { echo remove $vol -1 failed ; return 1; }
 
 		stop_volume $vol
 	done
