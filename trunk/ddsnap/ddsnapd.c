@@ -234,7 +234,6 @@ struct superblock
 		u32 etree_levels;
 		s32 journal_base, journal_next, journal_size;
 		u32 sequence;
-		u64 meta_chunks_used, snap_chunks_used;
 		struct allocspace_img
 		{
 			sector_t bitmap_base;
@@ -263,8 +262,14 @@ struct superblock
 		u32 allocsize;
 		u32 chunk_sectors_bits;
 		u32 alloc_per_node; /* only for metadata */
+		u64 chunks_used;
 	} metadata, snapdata;
 };
+
+static inline chunk_t freechunks(struct superblock *sb, struct allocspace *space)
+{
+	return space->chunks_used;
+}
 
 #define METADATA_ALLOC(SB) ((SB)->image.alloc[0]) // do we really need?
 #define SNAPDATA_ALLOC(SB) ((SB)->image.alloc[((SB)->metadev == (SB)->snapdev) ? 0 : 1]) // ditto?
@@ -414,8 +419,8 @@ static void commit_transaction(struct superblock *sb)
 	jtrace(warn("commit journal block [%u]", pos););
 	commit->checksum = 0;
 	commit->checksum = -checksum_block(sb, (void *)commit);
-	commit->snap_used =  sb->image.snap_chunks_used;
-	commit->meta_used = sb->image.meta_chunks_used;
+	commit->snap_used =  sb->snapdata.chunks_used;
+	commit->meta_used = sb->metadata.chunks_used;
 	if (write_buffer_to(commit_buffer, journal_sector(sb, pos)))
 		jtrace(warn("unable to write checksum fro commit block"););
 	brelse(commit_buffer);
@@ -547,8 +552,8 @@ static int recover_journal(struct superblock *sb)
 	}
 	sb->image.journal_next = (newest_block + 1 + size) % size;
 	sb->image.sequence = commit->sequence + 1;
-	sb->image.snap_chunks_used = commit->snap_used;
-	sb->image.meta_chunks_used = commit->meta_used;
+	sb->snapdata.chunks_used = commit->snap_used;
+	sb->metadata.chunks_used = commit->meta_used;
 	brelse(buffer);
 	return 0;
 
@@ -884,7 +889,7 @@ static int init_allocation(struct superblock *sb)
 	
 	unsigned res = meta_bitmap_base_chunk + sb->metadata.asi->bitmap_blocks + sb->image.journal_size;
         sb->metadata.asi->freechunks = sb->metadata.asi->chunks - res;
-	sb->image.meta_chunks_used += res;
+	sb->metadata.chunks_used += res;
 	
 	if (meta_flag) {
 		u64 snap_bitmap_base_chunk = 
@@ -896,7 +901,7 @@ static int init_allocation(struct superblock *sb)
 
 		/* need to update freechunks in metadata */
 		sb->metadata.asi->freechunks -= sb->snapdata.asi->bitmap_blocks;
-		sb->image.meta_chunks_used += sb->snapdata.asi->bitmap_blocks;
+		sb->metadata.chunks_used += sb->snapdata.asi->bitmap_blocks;
 	}
 
 	sb->image.journal_base = sb->metadata.asi->bitmap_base 
@@ -963,13 +968,13 @@ static int free_chunk(struct superblock *sb, struct allocspace *as, chunk_t chun
 static inline void free_block(struct superblock *sb, sector_t address)
 {
 	if (free_chunk(sb, &sb->metadata, address >> sb->metadata.chunk_sectors_bits))
-		sb->image.meta_chunks_used--; 
+		sb->metadata.chunks_used--; 
 }
 
 static inline void free_exception(struct superblock *sb, chunk_t chunk)
 {
 	if (free_chunk(sb, &sb->snapdata, chunk))
-		sb->image.snap_chunks_used--;
+		sb->snapdata.chunks_used--;
 }
 
 #ifdef INITDEBUG2
@@ -1564,7 +1569,7 @@ static sector_t alloc_block(struct superblock *sb)
 {
 	chunk_t new_block;  
 	if ((new_block = alloc_chunk(sb, &sb->metadata)) != -1)
-		sb->image.meta_chunks_used++;	
+		sb->metadata.chunks_used++;	
 	return  new_block == -1? new_block : new_block << sb->metadata.chunk_sectors_bits;
 }
 
@@ -1572,7 +1577,7 @@ static u64 alloc_exception(struct superblock *sb)
 {
 	chunk_t new_exception;
 	if ((new_exception = alloc_chunk(sb, &sb->snapdata)) != -1)
-		sb->image.snap_chunks_used++;
+		sb->snapdata.chunks_used++;
 	return new_exception;
 }
 
@@ -1828,18 +1833,18 @@ static int ensure_free_chunks(struct superblock *sb, struct allocspace *as, int 
 				goto fail_delete;
 	} while (sb->image.snapshots);
 
-	if (sb->image.snap_chunks_used != 0)
-		warn("non zero used data chunks %llu (freechunks %llu) after all snapshots are deleted", sb->image.snap_chunks_used, sb->snapdata.asi->freechunks);
+	if (sb->snapdata.chunks_used != 0)
+		warn("non zero used data chunks %llu (freechunks %llu) after all snapshots are deleted", sb->snapdata.chunks_used, sb->snapdata.asi->freechunks);
 	unsigned meta_bitmap_base_chunk = (SB_SECTOR + 2*chunk_sectors(&sb->metadata) - 1) >> sb->metadata.chunk_sectors_bits;
 	/* reserved meta data + bitmap_blocks + super_block */
 	unsigned res = meta_bitmap_base_chunk + sb->metadata.asi->bitmap_blocks + sb->image.journal_size;
 	res += sb->metadata.asi->bitmap_blocks + 1;
 	if (sb->metadata.asi != sb->snapdata.asi)
 		res += 2*sb->snapdata.asi->bitmap_blocks;
-	if (sb->image.meta_chunks_used != res)
-		warn("used metadata chunks %llu (freechunks %llu) are larger than reserved (%u) after all snapshots are deleted", sb->image.meta_chunks_used, sb->metadata.asi->freechunks, res);
-	sb->image.snap_chunks_used = 0;
-	sb->image.meta_chunks_used = res;
+	if (sb->metadata.chunks_used != res)
+		warn("used metadata chunks %llu (freechunks %llu) are larger than reserved (%u) after all snapshots are deleted", sb->metadata.chunks_used, sb->metadata.asi->freechunks, res);
+	sb->snapdata.chunks_used = 0;
+	sb->metadata.chunks_used = res;
 	return -1; // we deleted all possible snapshots
 
 fail_delete:
@@ -3200,16 +3205,16 @@ static int incoming(struct superblock *sb, struct client *client)
 		reply->ctime = sb->image.create_time;
 
 		reply->meta.chunksize_bits = sb->metadata.asi->allocsize_bits;
-		reply->meta.used = sb->image.meta_chunks_used;
-		reply->meta.free = sb->metadata.asi->chunks - sb->image.meta_chunks_used;
+		reply->meta.used = sb->metadata.chunks_used;
+		reply->meta.free = sb->metadata.asi->chunks - sb->metadata.chunks_used;
 		if (sb->metadata.asi == sb->snapdata.asi)
-			reply->meta.free -= sb->image.snap_chunks_used;
+			reply->meta.free -= sb->snapdata.chunks_used;
 	
 		reply->store.chunksize_bits = sb->snapdata.asi->allocsize_bits;
-		reply->store.used = sb->image.snap_chunks_used;
-		reply->store.free = sb->snapdata.asi->chunks - sb->image.snap_chunks_used;
+		reply->store.used = sb->snapdata.chunks_used;
+		reply->store.free = sb->snapdata.asi->chunks - sb->snapdata.chunks_used;
 		if (sb->metadata.asi == sb->snapdata.asi)
-			reply->store.free -= sb->image.meta_chunks_used;
+			reply->store.free -= sb->metadata.chunks_used;
 
 		reply->write_density = 0;
 
