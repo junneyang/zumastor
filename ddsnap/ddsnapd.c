@@ -261,13 +261,18 @@ struct superblock
 	struct allocspace {
 		struct allocspace_img *asi;
 		u32 allocsize;
-		u32 sectors_per_alloc_bits, sectors_per_alloc;
+		u32 chunk_sectors_bits;
 		u32 alloc_per_node; /* only for metadata */
 	} metadata, snapdata;
 };
 
 #define METADATA_ALLOC(SB) ((SB)->image.alloc[0]) // do we really need?
 #define SNAPDATA_ALLOC(SB) ((SB)->image.alloc[((SB)->metadev == (SB)->snapdev) ? 0 : 1]) // ditto?
+
+static inline unsigned chunk_sectors(struct allocspace *space)
+{
+	return 1 << space->chunk_sectors_bits;
+}
 
 /*
  * Journalling
@@ -288,7 +293,7 @@ struct commit_block
 
 static sector_t journal_sector(struct superblock *sb, unsigned i)
 {
-	return sb->image.journal_base + (i << sb->metadata.sectors_per_alloc_bits);
+	return sb->image.journal_base + (i << sb->metadata.chunk_sectors_bits);
 }
 
 static inline struct commit_block *buf2block(struct buffer *buf)
@@ -352,7 +357,7 @@ static chunk_t count_free(struct superblock *sb, struct allocspace *alloc)
 		zeroes[i] = bytebits(~i);
 	chunk_t count = 0, block = 0, bytes = (alloc->asi->chunks + 7) >> 3;
 	while (bytes) {
-		struct buffer *buffer = snapread(sb, alloc->asi->bitmap_base + (block << sb->metadata.sectors_per_alloc_bits));
+		struct buffer *buffer = snapread(sb, alloc->asi->bitmap_base + (block << sb->metadata.chunk_sectors_bits));
 		if (!buffer)
 			return -1;
 		unsigned char *p = buffer->data;
@@ -867,12 +872,10 @@ static u64 calc_bitmap_blocks(struct superblock *sb, u64 chunks)
 static int init_allocation(struct superblock *sb)
 {
 	int meta_flag = (sb->metadev != sb->snapdev);
-
-        unsigned meta_bitmap_base_chunk = (SB_SECTOR + 2*sb->metadata.sectors_per_alloc - 1) 
-		>> sb->metadata.sectors_per_alloc_bits;
+	unsigned meta_bitmap_base_chunk = (SB_SECTOR + 2*chunk_sectors(&sb->metadata) - 1) >> sb->metadata.chunk_sectors_bits;
 	
 	sb->metadata.asi->bitmap_blocks = calc_bitmap_blocks(sb, sb->metadata.asi->chunks); 
-        sb->metadata.asi->bitmap_base = meta_bitmap_base_chunk << sb->metadata.sectors_per_alloc_bits;
+        sb->metadata.asi->bitmap_base = meta_bitmap_base_chunk << sb->metadata.chunk_sectors_bits;
         sb->metadata.asi->last_alloc = 0;
 	
 	unsigned res = meta_bitmap_base_chunk + sb->metadata.asi->bitmap_blocks + sb->image.journal_size;
@@ -881,10 +884,10 @@ static int init_allocation(struct superblock *sb)
 	
 	if (meta_flag) {
 		u64 snap_bitmap_base_chunk = 
-			(sb->metadata.asi->bitmap_base >> sb->metadata.sectors_per_alloc_bits) + sb->metadata.asi->bitmap_blocks;
+			(sb->metadata.asi->bitmap_base >> sb->metadata.chunk_sectors_bits) + sb->metadata.asi->bitmap_blocks;
 	
 		sb->snapdata.asi->bitmap_blocks = calc_bitmap_blocks(sb, sb->snapdata.asi->chunks);
-		sb->snapdata.asi->bitmap_base = snap_bitmap_base_chunk << sb->metadata.sectors_per_alloc_bits;
+		sb->snapdata.asi->bitmap_base = snap_bitmap_base_chunk << sb->metadata.chunk_sectors_bits;
 		sb->snapdata.asi->freechunks = sb->snapdata.asi->chunks;
 
 		/* need to update freechunks in metadata */
@@ -895,20 +898,20 @@ static int init_allocation(struct superblock *sb)
 	sb->image.journal_base = sb->metadata.asi->bitmap_base 
 		+ ((sb->metadata.asi->bitmap_blocks + 
 		    (meta_flag ? sb->snapdata.asi->bitmap_blocks : 0)) 
-		   << sb->metadata.sectors_per_alloc_bits);
+		   << sb->metadata.chunk_sectors_bits);
 	
 	u64 chunks  = sb->metadata.asi->chunks  + (meta_flag ? sb->snapdata.asi->chunks  : 0);
 	unsigned bitmaps = sb->metadata.asi->bitmap_blocks + (meta_flag ? sb->snapdata.asi->bitmap_blocks : 0);
 	if (meta_flag)
 		warn("metadata store size: %llu chunks (%llu sectors)", 
-		     sb->metadata.asi->chunks, sb->metadata.asi->chunks << sb->metadata.sectors_per_alloc_bits);
+		     sb->metadata.asi->chunks, sb->metadata.asi->chunks << sb->metadata.chunk_sectors_bits);
 	warn("snapshot store size: %llu chunks (%llu sectors)", 
-	     chunks, chunks << sb->snapdata.sectors_per_alloc_bits);
+	     chunks, chunks << sb->snapdata.chunk_sectors_bits);
 	printf("Initializing %u bitmap blocks... ", bitmaps);
 	
 	unsigned i, reserved = sb->metadata.asi->chunks - sb->metadata.asi->freechunks, 
 		sector = sb->metadata.asi->bitmap_base;
-	for (i = 0; i < bitmaps; i++, sector += sb->metadata.sectors_per_alloc) {
+	for (i = 0; i < bitmaps; i++, sector += chunk_sectors(&sb->metadata)) {
 		struct buffer *buffer = getblk(sb->metadev, sector, sb->metadata.allocsize);
 		printf("%llx ", buffer->sector);
 		memset(buffer->data, 0, sb->metadata.allocsize);
@@ -935,7 +938,7 @@ static int free_chunk(struct superblock *sb, struct allocspace *as, chunk_t chun
 
 	trace(printf("free chunk %Lx\n", chunk););
 	struct buffer *buffer = snapread(sb, as->asi->bitmap_base + 
-			(bitmap_block << sb->metadata.sectors_per_alloc_bits));
+			(bitmap_block << sb->metadata.chunk_sectors_bits));
 	
 	if (!buffer) {
 		warn("unable to free chunk "U64FMT, chunk);
@@ -955,7 +958,7 @@ static int free_chunk(struct superblock *sb, struct allocspace *as, chunk_t chun
 
 static inline void free_block(struct superblock *sb, sector_t address)
 {
-	if (free_chunk(sb, &sb->metadata, address >> sb->metadata.sectors_per_alloc_bits))
+	if (free_chunk(sb, &sb->metadata, address >> sb->metadata.chunk_sectors_bits))
 		sb->image.meta_chunks_used--; 
 }
 
@@ -971,7 +974,7 @@ static void grab_chunk(struct superblock *sb, struct allocspace *as, chunk_t chu
 	unsigned bitmap_shift = sb->metadata.asi->allocsize_bits + 3, bitmap_mask = (1 << bitmap_shift ) - 1;
 	u64 bitmap_block = chunk >> bitmap_shift;
 
-	struct buffer *buffer = snapread(sb, as->asi->bitmap_base + (bitmap_block << sb->metadata.sectors_per_alloc_bits));
+	struct buffer *buffer = snapread(sb, as->asi->bitmap_base + (bitmap_block << sb->metadata.chunk_sectors_bits));
 	assert(!get_bitmap_bit(buffer->data, chunk & bitmap_mask));
 	set_bitmap_bit(buffer->data, chunk & bitmap_mask);
 	brelse_dirty(buffer);
@@ -986,7 +989,7 @@ static chunk_t alloc_chunk_range(struct superblock *sb, struct allocspace *as, c
 	u64 length = (range + bit + 7) >> 3;
 
 	while (1) {
-		struct buffer *buffer = snapread(sb, as->asi->bitmap_base + (blocknum << sb->metadata.sectors_per_alloc_bits));
+		struct buffer *buffer = snapread(sb, as->asi->bitmap_base + (blocknum << sb->metadata.chunk_sectors_bits));
 		if (!buffer)
 			return -1;
 		unsigned char c, *p = buffer->data + offset;
@@ -1558,7 +1561,7 @@ static sector_t alloc_block(struct superblock *sb)
 	chunk_t new_block;  
 	if ((new_block = alloc_chunk(sb, &sb->metadata)) != -1)
 		sb->image.meta_chunks_used++;	
-	return  new_block == -1? new_block : new_block << sb->metadata.sectors_per_alloc_bits;
+	return  new_block == -1? new_block : new_block << sb->metadata.chunk_sectors_bits;
 }
 
 static u64 alloc_exception(struct superblock *sb)
@@ -1823,7 +1826,7 @@ static int ensure_free_chunks(struct superblock *sb, struct allocspace *as, int 
 
 	if (sb->image.snap_chunks_used != 0)
 		warn("non zero used data chunks %llu (freechunks %llu) after all snapshots are deleted", sb->image.snap_chunks_used, sb->snapdata.asi->freechunks);
-	unsigned meta_bitmap_base_chunk = (SB_SECTOR + 2*sb->metadata.sectors_per_alloc - 1) >> sb->metadata.sectors_per_alloc_bits;
+	unsigned meta_bitmap_base_chunk = (SB_SECTOR + 2*chunk_sectors(&sb->metadata) - 1) >> sb->metadata.chunk_sectors_bits;
 	/* reserved meta data + bitmap_blocks + super_block */
 	unsigned res = meta_bitmap_base_chunk + sb->metadata.asi->bitmap_blocks + sb->image.journal_size;
 	res += sb->metadata.asi->bitmap_blocks + 1;
@@ -2322,13 +2325,9 @@ static void setup_alloc_sb(struct superblock *sb, u32 bs_bits, u32 cs_bits)
 	
 	sb->metadata.allocsize = 1 << bs_bits;
 	sb->snapdata.allocsize = 1 << cs_bits;
-	sb->metadata.sectors_per_alloc_bits = bs_bits - SECTOR_BITS;
-	sb->snapdata.sectors_per_alloc_bits = cs_bits - SECTOR_BITS;
-	sb->metadata.sectors_per_alloc = 1 << (bs_bits - SECTOR_BITS);
-	sb->snapdata.sectors_per_alloc = 1 << (cs_bits - SECTOR_BITS);
-
-	sb->metadata.alloc_per_node = 
-		(sb->metadata.allocsize - offsetof(struct enode, entries)) / sizeof(struct index_entry);
+	sb->metadata.chunk_sectors_bits = bs_bits - SECTOR_BITS;
+	sb->snapdata.chunk_sectors_bits = cs_bits - SECTOR_BITS;
+	sb->metadata.alloc_per_node = (sb->metadata.allocsize - offsetof(struct enode, entries)) / sizeof(struct index_entry);
 #ifdef BUSHY
 	sb->metadata.alloc_per_node = 10;
 #endif
