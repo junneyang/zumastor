@@ -3153,19 +3153,8 @@ static int incoming(struct superblock *sb, struct client *client)
 		 * table to be sent because they are always zero.
 		 */
 		unsigned num_rows = max_snapbit(snaplist, sb->image.snapshots) + 1;
-		unsigned num_columns = num_rows, status_count;
+		unsigned num_columns = num_rows, status_count = sb->image.snapshots;
 		unsigned rowsize = (sizeof(struct status) + num_columns * sizeof(chunk_t));
-
-		if (request.snap != (u32)~0UL) { /* meaning "all snapshots" */
-			status_count = 0;
-			for (int snapslot = 0; snapslot < sb->image.snapshots; snapslot++)
-				if (snaplist[snapslot].tag == request.snap) {
-					status_count = 1;
-					break;
-				}
-		} else
-			status_count = sb->image.snapshots;
-
 		unsigned int reply_len = sizeof(struct status_message) + status_count * rowsize;
 		struct status_message *reply = calloc(reply_len, 1);
 
@@ -3225,9 +3214,6 @@ static int incoming(struct superblock *sb, struct client *client)
 		reply->num_columns = num_columns;
 
 		for (int row  = 0; row < sb->image.snapshots; row++) {
-			if (request.snap != (u32)~0UL && snaplist[row].tag != request.snap)
-				continue; // !!! are we attaching special meaning to snapshot 0? what is this about?
-
 			struct status *snap_status = (struct status *)(reply->status_data + row * rowsize );
 
 			snap_status->ctime = snaplist[row].ctime;
@@ -3547,8 +3533,7 @@ int snap_server(struct superblock *sb, int listenfd, int getsigfd, int agentfd)
 							snapshot->usecnt = new_usecnt;
 						}
 					}
-
-				close_client:
+//close_client:
 					save_state(sb); // !!! just for now
 					close(client->sock);
 					free(client);
