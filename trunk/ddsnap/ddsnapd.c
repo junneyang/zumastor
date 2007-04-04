@@ -431,11 +431,15 @@ static void commit_transaction(struct superblock *sb)
 	}
 	/* checking free chunks for debugging purpose only,, return before this to skip the checking */
 	chunk_t counted = count_free(sb, &sb->metadata);
-	if (counted != sb->metadata.asi->freechunks)
+	if (counted != sb->metadata.asi->freechunks) {
 		warn("metadata free chunks count wrong: counted %llu, freechunks %llu", counted, sb->metadata.asi->freechunks);
+		sb->metadata.asi->freechunks = counted;
+	}
 	counted = count_free(sb, &sb->snapdata);
-	if (counted != sb->snapdata.asi->freechunks)
+	if (counted != sb->snapdata.asi->freechunks) {
 		warn("snapdata free chunks count wrong: counted %llu, freechunks %llu", counted, sb->snapdata.asi->freechunks);
+		sb->snapdata.asi->freechunks = counted;
+	}
 }
 
 static int recover_journal(struct superblock *sb)
