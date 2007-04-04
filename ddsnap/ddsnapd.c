@@ -646,9 +646,9 @@ found:
  * exception or has the same exception as another snapshot.  In any case
  * if the chunk has an exception we need to know the exception address.
  */
-static int snapshot_chunk_unique(struct eleaf *leaf, u64 chunk, int snapshot, u64 *exception)
+static int snapshot_chunk_unique(struct eleaf *leaf, u64 chunk, int snapbit, u64 *exception)
 {
-	u64 mask = 1LL << snapshot;
+	u64 mask = 1LL << snapbit;
 	unsigned i, target = chunk - leaf->base_chunk;
 	struct exception const *p;
 
@@ -1488,18 +1488,18 @@ keep_prev_node:
 
 static struct snapshot *find_snap(struct superblock *sb, u32 tag)
 {
-	struct snapshot *snap = sb->image.snaplist;
-	struct snapshot *end = snap + sb->image.snapshots;
+	struct snapshot *snapshot = sb->image.snaplist;
+	struct snapshot *end = snapshot + sb->image.snapshots;
 
-	for (; snap < end; snap++)
-		if (snap->tag == tag)
-			return snap;
+	for (; snapshot < end; snapshot++)
+		if (snapshot->tag == tag)
+			return snapshot;
 	return NULL;
 }
 
-static int is_squashed(const struct snapshot *snap)
+static int is_squashed(const struct snapshot *snapshot)
 {
-	return snap->bit == SNAPSHOT_SQUASHED;
+	return snapshot->bit == SNAPSHOT_SQUASHED;
 }
 
 /* find the oldest snapshot with 0 usecnt and lowest priority.
@@ -1679,9 +1679,9 @@ static void insert_child(struct enode *node, struct index_entry *p, sector_t chi
 }
 
 /* returns 0 on sucess and -errno on failure */
-static int add_exception_to_tree(struct superblock *sb, struct buffer *leafbuf, u64 target, u64 exception, int snapnum, struct etree_path path[], unsigned levels)
+static int add_exception_to_tree(struct superblock *sb, struct buffer *leafbuf, u64 target, u64 exception, int snapbit, struct etree_path path[], unsigned levels)
 {
-	if (!add_exception_to_leaf(buffer2leaf(leafbuf), target, exception, snapnum, sb->snapmask)) {
+	if (!add_exception_to_leaf(buffer2leaf(leafbuf), target, exception, snapbit, sb->snapmask)) {
 		brelse_dirty(leafbuf);
 		return 0;
 	}
@@ -1694,7 +1694,7 @@ static int add_exception_to_tree(struct superblock *sb, struct buffer *leafbuf, 
 	u64 childkey = split_leaf(buffer2leaf(leafbuf), buffer2leaf(childbuf));
 	sector_t childsector = childbuf->sector;
 
-	if (add_exception_to_leaf(target < childkey ? buffer2leaf(leafbuf): buffer2leaf(childbuf), target, exception, snapnum, sb->snapmask)) {
+	if (add_exception_to_leaf(target < childkey ? buffer2leaf(leafbuf): buffer2leaf(childbuf), target, exception, snapbit, sb->snapmask)) {
 		warn("new leaf has no space");
 		return -ENOMEM;
 	}
@@ -1848,13 +1848,13 @@ fail_delete:
  * the code gets more asynchronous and multi-threaded.  This is a hairball
  * and needs a rewrite.
  */
-static chunk_t make_unique(struct superblock *sb, chunk_t chunk, int snapnum)
+static chunk_t make_unique(struct superblock *sb, chunk_t chunk, int snapbit)
 {
 	unsigned levels = sb->image.etree_levels;
 	struct etree_path path[levels + 1];
 	chunk_t exception = 0;
 	int error;
-	trace(warn("chunk %Lx, snapnum %i", chunk, snapnum););
+	trace(warn("chunk %Lx, snapbit %i", chunk, snapbit););
 
 	/* first we check if we will have enough freespace */
 	if (sb->snapdata.asi == sb->metadata.asi) { /* combined metadata/snapshore */
@@ -1871,11 +1871,11 @@ static chunk_t make_unique(struct superblock *sb, chunk_t chunk, int snapnum)
 	if (!leafbuf) 
 		return -1;
 
-	if (snapnum == -1?
+	if (snapbit == -1?
 		origin_chunk_unique(buffer2leaf(leafbuf), chunk, sb->snapmask):
-		snapshot_chunk_unique(buffer2leaf(leafbuf), chunk, snapnum, &exception))
+		snapshot_chunk_unique(buffer2leaf(leafbuf), chunk, snapbit, &exception))
 	{
-		trace_off(warn("chunk %Lx already unique in snapnum %i", chunk, snapnum););
+		trace_off(warn("chunk %Lx already unique in snapnum %i", chunk, snapbit););
 		brelse(leafbuf);
 		goto out;
 	}
@@ -1883,9 +1883,9 @@ static chunk_t make_unique(struct superblock *sb, chunk_t chunk, int snapnum)
 	if (newex == -1) {
 		/* possibly all of the snapshots are deleted or squashed,
 		 * in that case, snapmask should have been cleared */
-		if (snapnum == -1?
+		if (snapbit == -1?
 			origin_chunk_unique(buffer2leaf(leafbuf), chunk, sb->snapmask):
-			snapshot_chunk_unique(buffer2leaf(leafbuf), chunk, snapnum, &exception))
+			snapshot_chunk_unique(buffer2leaf(leafbuf), chunk, snapbit, &exception))
 		{
 			exception = 0;
 			brelse(leafbuf);
@@ -1897,7 +1897,7 @@ static chunk_t make_unique(struct superblock *sb, chunk_t chunk, int snapnum)
 	}
 
 	copyout(sb, exception? (exception | (1ULL << chunk_highbit)): chunk, newex);
-	if ((error = add_exception_to_tree(sb, leafbuf, chunk, newex, snapnum, path, levels)) < 0) {
+	if ((error = add_exception_to_tree(sb, leafbuf, chunk, newex, snapbit, path, levels)) < 0) {
 		free_exception(sb, newex);
 		brelse(leafbuf); /* !!! redundant? */
 		warn("unable to add exception to tree: %s", strerror(-error));
@@ -1910,7 +1910,7 @@ out:
 	return exception;
 }
 
-static int test_unique(struct superblock *sb, chunk_t chunk, int snapnum, chunk_t *exception)
+static int test_unique(struct superblock *sb, chunk_t chunk, int snapbit, chunk_t *exception)
 {
 	unsigned levels = sb->image.etree_levels;
 	struct etree_path path[levels + 1];
@@ -1919,10 +1919,10 @@ static int test_unique(struct superblock *sb, chunk_t chunk, int snapnum, chunk_
 	if (!leafbuf)
 		return -1; /* not sure what to do here */
 	
-	trace(warn("chunk %Lx, snapnum %i", chunk, snapnum););
-	int result = snapnum == -1?
+	trace(warn("chunk %Lx, snapbit %i", chunk, snapbit););
+	int result = snapbit == -1?
 		origin_chunk_unique(buffer2leaf(leafbuf), chunk, sb->snapmask):
-		snapshot_chunk_unique(buffer2leaf(leafbuf), chunk, snapnum, exception);
+		snapshot_chunk_unique(buffer2leaf(leafbuf), chunk, snapbit, exception);
 	brelse(leafbuf);
 	brelse_path(path, levels);
 	return result;
@@ -1942,13 +1942,14 @@ static u64 calc_snapmask(struct superblock *sb)
 	return mask;
 }
 
-static int tag_snapnum(struct superblock *sb, unsigned tag)
+#if 0
+static int tag_snapbit(struct superblock *sb, unsigned tag)
 {
-	struct snapshot *snap = find_snap(sb, tag);
-	return snap ? snap->bit : -1;
+	struct snapshot *snapshot = find_snap(sb, tag);
+	return snapshot ? snapshot->bit : -1;
 }
 
-static unsigned int snapnum_tag(struct superblock *sb, unsigned bit)
+static unsigned int snapbit_tag(struct superblock *sb, unsigned bit)
 {
 	unsigned int i, n = sb->image.snapshots;
 	struct snapshot const *snap = sb->image.snaplist;
@@ -1959,6 +1960,7 @@ static unsigned int snapnum_tag(struct superblock *sb, unsigned bit)
 
 	return (u32)~0UL;
 }
+#endif
 
 static int create_snapshot(struct superblock *sb, unsigned snaptag)
 {
@@ -1970,9 +1972,8 @@ static int create_snapshot(struct superblock *sb, unsigned snaptag)
 		return -EFULL;
 
 	/* check tag not already used */
-	for (i = 0; i < snapshots; i++)
-		if (sb->image.snaplist[i].tag == snaptag)
-			return -1;
+	if (find_snap(sb, snaptag))
+		return -1;
 
 	/* Find available snapshot bit */
 	for (i = 0; i < MAX_SNAPSHOTS; i++)
@@ -1981,7 +1982,7 @@ static int create_snapshot(struct superblock *sb, unsigned snaptag)
 	return -EFULL;
 
 create:
-	trace_on(warn("Create snaptag %u (snapnum %i)", snaptag, i););
+	trace_on(warn("Create snaptag %u (snapbit %i)", snaptag, i););
 	snapshot = sb->image.snaplist + sb->image.snapshots++;
 	*snapshot = (struct snapshot){ .tag = snaptag, .bit = i, .ctime = time(NULL) };
 	sb->snapmask |= (1ULL << i);
@@ -2019,7 +2020,7 @@ struct client
 {
 	u64 id;
 	int sock;
-	int snap; /* snapnum/snapbit for snapshots, -1 for origin */
+	int snaptag;
 	u32 flags; 
 };
 
@@ -2606,18 +2607,6 @@ next:
 
 #endif
 
-static struct snapshot *valid_snapnum(struct superblock *sb, int snapnum)
-{
-	unsigned int i, n = sb->image.snapshots;
-	struct snapshot *snap = sb->image.snaplist;
-
-	for (i = 0; i < n; i++)
-		if (snap[i].bit == snapnum)
-			return &snap[i];
-
-	return NULL;
-}
-
 static unsigned int max_snapbit(struct snapshot const *snaplist, unsigned int snapshots)
 {
 	unsigned int i;
@@ -2664,15 +2653,12 @@ static void calc_sharing(struct superblock *sb, struct eleaf *leaf, void *data)
 		}
 }
 
-static struct status *get_snap_status(struct status_message *message, int snap)
+/* It is more expensive than we'd like to find the struct snapshot, FIXME */
+static struct snapshot *client_snap(struct superblock *sb, struct client *client)
 {
-	struct status *status;
-
-	status = (struct status *)(message->status_data +
-				snap * (sizeof(struct status) +
-				message->num_columns * sizeof(status->chunk_count[0])));
-
-	return status;
+	struct snapshot *snapshot = find_snap(sb, client->snaptag);
+	assert(snapshot);
+	return snapshot;
 }
 
 /*
@@ -2719,7 +2705,7 @@ static int incoming(struct superblock *sb, struct client *client)
 
 	switch (message.head.code) {
 	case QUERY_WRITE:
-		if (client->snap == -1) {
+		if (client->snaptag == -1) {
 			struct pending *pending = NULL;
 			struct rw_request *body = (struct rw_request *)message.body;
 			struct chunk_range *p = body->ranges;
@@ -2757,18 +2743,17 @@ static int incoming(struct superblock *sb, struct client *client)
 		trace(printf("snapshot write request, %u ranges\n", body->count););
 		struct addto snap = { .nextchunk = -1 };
 		u32 ret_msgcode = SNAPSHOT_WRITE_OK;
+		struct snapshot *snapshot = client_snap(sb, client);
 		for (i = 0; i < body->count; i++)
 			for (j = 0; j < body->ranges[i].chunks; j++) {
 				chunk_t chunk = body->ranges[i].chunk + j;
 				chunk_t exception;
-				struct snapshot *snap_info;
 
-				/* see comment below in QUERY_SNAPSHOT_READ, same applies here */
-				if (client->snap >= MAX_SNAPSHOTS || !(snap_info = valid_snapnum(sb, client->snap)) || is_squashed(snap_info)) {
+				if (is_squashed(snapshot)) {
 					warn("trying to write squashed snapshot, id = %u", body->id);
 					exception =  -1;
 				} else
-					exception = make_unique(sb, chunk, client->snap);
+					exception = make_unique(sb, chunk, snapshot->bit);
 				if (exception == -1) {
 					warn("ERROR: unable to perform copyout during snapshot write.");
 					ret_msgcode = SNAPSHOT_WRITE_ERROR;
@@ -2789,14 +2774,10 @@ static int incoming(struct superblock *sb, struct client *client)
 			goto message_too_short;
 		trace(printf("snapshot read request, %u ranges\n", body->count););
 		struct addto snap = { .nextchunk = -1 }, org = { .nextchunk = -1 };
-		struct snapshot *snap_info;
+		struct snapshot *snapshot = client_snap(sb, client);
 
-		/* It is more expensive than we'd like to find the snap_info.
-		 * Ideally, the snaplist would be indexed byt he snapnum, but
-		 * the delete function would have to not memmove, among other
-		 * changes - FIXME TODO */
-		if (client->snap >= MAX_SNAPSHOTS || !(snap_info = valid_snapnum(sb, client->snap)) || is_squashed(snap_info)) {
-			warn("trying to read squashed snapshot %u", client->snap);
+		if (is_squashed(snapshot)) {
+			warn("trying to read squashed snapshot %u", client->snaptag);
 			for (i = 0; i < body->count; i++)
 				for (j = 0; j < body->ranges[i].chunks; j++) {
 					chunk_t chunk = body->ranges[i].chunk + j;
@@ -2812,7 +2793,7 @@ static int incoming(struct superblock *sb, struct client *client)
 			for (j = 0; j < body->ranges[i].chunks; j++) {
 				chunk_t chunk = body->ranges[i].chunk + j, exception = 0;
 				trace(warn("read %Lx", chunk););
-				test_unique(sb, chunk, client->snap, &exception);
+				test_unique(sb, chunk, snapshot->bit, &exception);
 				if (exception) {
 					trace(warn("read exception %Lx", exception););
 					addto_response(&snap, chunk);
@@ -2858,31 +2839,31 @@ static int incoming(struct superblock *sb, struct client *client)
 #endif
 		
 		client->id = ((struct identify *)message.body)->id;
-		client->snap = (tag == (u32)~0UL) ? -1 : tag_snapnum(sb, tag);
+		client->snaptag = tag;
 		client->flags = USING;
 		
 		trace(fprintf(stderr, "got identify request, setting id="U64FMT" snap=%i (tag=%u), sending chunksize_bits=%u\n", client->id, client->snap, tag, sb->snapdata.asi->allocsize_bits););
-		warn("client id %llu, snaptag %u (snapnum %i)", client->id, tag, client->snap);
+		warn("client id %llu, snaptag %u", client->id, tag);
 
 		if (tag != (u32)~0UL) {
-			struct snapshot *snap_info;
+			struct snapshot *snapshot = find_snap(sb, tag);
 
-			if (!(snap_info = find_snap(sb, tag)) || is_squashed(snap_info)) {
+			if (!snapshot || is_squashed(snapshot)) {
 				warn("Snapshot tag %u is not valid", tag);
 				snprintf(err_msg, MAX_ERRMSG_SIZE, "Snapshot tag %u is not valid", tag);
 				err_msg[MAX_ERRMSG_SIZE-1] = '\0'; // make sure it's null terminated
 				err = ERROR_INVALID_SNAPSHOT;
 				goto identify_error;
 			}
-			u32 new_usecnt = snap_info->usecnt + 1;
-			if (new_usecnt < snap_info->usecnt) {
+			u32 new_usecnt = snapshot->usecnt + 1;
+			if (new_usecnt < snapshot->usecnt) {
 				snprintf(err_msg, MAX_ERRMSG_SIZE, "Usecount overflow.");
 				err_msg[MAX_ERRMSG_SIZE-1] = '\0'; // make sure it's null terminated
 				err = ERROR_USECOUNT;
 				goto identify_error;
 			}
 			
-			snap_info->usecnt = new_usecnt;
+			snapshot->usecnt = new_usecnt;
 		}
 
 		if (len != sb->image.orgsectors) {
@@ -2939,8 +2920,8 @@ static int incoming(struct superblock *sb, struct client *client)
 #ifdef DEBUG_ERROR
 		goto delete_error;
 #endif
-		struct snapshot *snap = find_snap(sb, ((struct create_snapshot *)message.body)->snap);
-		if (!snap || delete_snap(sb, snap))
+		struct snapshot *snapshot = find_snap(sb, ((struct create_snapshot *)message.body)->snap);
+		if (!snapshot || delete_snap(sb, snapshot))
 			goto delete_error;
 		save_state(sb);
 		if (outbead(sock, DELETE_SNAPSHOT_OK, struct { }) < 0)
@@ -2983,20 +2964,17 @@ static int incoming(struct superblock *sb, struct client *client)
 	}
 	case LIST_SNAPSHOTS:
 	{
-		struct snapshot *snap = sb->image.snaplist;
-		unsigned int ns = sb->image.snapshots;
+		struct snapshot *snapshot = sb->image.snaplist;
+		unsigned int n = sb->image.snapshots;
 
-		outhead(sock, SNAPSHOT_LIST, sizeof(int) + ns * sizeof(struct snapinfo));
-		fdwrite(sock, &ns, sizeof(int));
-
-		unsigned int i;
-
-		for (i = 0; i < ns; i++) {
+		outhead(sock, SNAPSHOT_LIST, sizeof(int) + n * sizeof(struct snapinfo));
+		fdwrite(sock, &n, sizeof(int));
+		for (; n--; snapshot++) {
 			fdwrite(sock, &(struct snapinfo){ 
-					.snap   = snap[i].tag,
-					.prio   = snap[i].prio,
-					.ctime  = snap[i].ctime,
-					.usecnt = snap[i].usecnt},
+					.snap   = snapshot->tag,
+					.prio   = snapshot->prio,
+					.ctime  = snapshot->ctime,
+					.usecnt = snapshot->usecnt},
 				sizeof(struct snapinfo));
 		}
 		break;
@@ -3005,7 +2983,7 @@ static int incoming(struct superblock *sb, struct client *client)
 	{
 		u32 tag = ((struct priority_info *)message.body)->snap;
 		s8 prio  = ((struct priority_info *)message.body)->prio;
-		struct snapshot *snap_info;
+		struct snapshot *snapshot;
 		uint32_t err = 0;
 		char err_msg[MAX_ERRMSG_SIZE];
 		unsigned int err_len;
@@ -3021,15 +2999,15 @@ static int incoming(struct superblock *sb, struct client *client)
 			err = ERROR_INVALID_SNAPSHOT;
 			goto prio_error;
 		}
-		if (!(snap_info = find_snap(sb, tag))) {
+		if (!(snapshot = find_snap(sb, tag))) {
 			warn("Snapshot tag %u is not valid", tag);
 			snprintf(err_msg, MAX_ERRMSG_SIZE, "Snapshot tag %u is not valid", tag);
 			err_msg[MAX_ERRMSG_SIZE-1] = '\0';
 			err = ERROR_INVALID_SNAPSHOT;
 			goto prio_error;
 		}
-		snap_info->prio = prio;
-		if (outbead(sock, PRIORITY_OK, struct priority_ok, snap_info->prio) < 0)
+		snapshot->prio = prio;
+		if (outbead(sock, PRIORITY_OK, struct priority_ok, snapshot->prio) < 0)
 			warn("unable to reply to set priority message");
 		break;
 	prio_error:
@@ -3055,7 +3033,7 @@ static int incoming(struct superblock *sb, struct client *client)
 		goto usecnt_error;
 #endif
 
-		struct snapshot *snap_info;
+		struct snapshot *snapshot;
 		if (tag == (u32)~0UL) {
 			snprintf(err_msg, MAX_ERRMSG_SIZE, "Setting the usecount of the origin.");
 			err_msg[MAX_ERRMSG_SIZE-1] = '\0';
@@ -3063,14 +3041,14 @@ static int incoming(struct superblock *sb, struct client *client)
 			goto usecnt_error; /* not really an error though */
 		}
 
-		if (!(snap_info = find_snap(sb, tag))) {
+		if (!(snapshot = find_snap(sb, tag))) {
 			warn("Snapshot tag %u is not valid", tag);
 			snprintf(err_msg, MAX_ERRMSG_SIZE, "Snapshot tag %u is not valid", tag);
 			err_msg[MAX_ERRMSG_SIZE-1] = '\0';
 			err = ERROR_INVALID_SNAPSHOT;
 			goto usecnt_error;
 		}
-		new_usecnt = usecnt_dev + snap_info->usecnt;
+		new_usecnt = usecnt_dev + snapshot->usecnt;
 
 		if (((new_usecnt >> 16) != 0) && (usecnt_dev >= 0)) {
 			snprintf(err_msg, MAX_ERRMSG_SIZE, "Usecount overflow.");
@@ -3085,8 +3063,8 @@ static int incoming(struct superblock *sb, struct client *client)
 			goto usecnt_error;
 		}
 		
-		snap_info->usecnt = new_usecnt;
-		if (outbead(sock, USECOUNT_OK, struct usecount_ok, .usecount = snap_info->usecnt) < 0)
+		snapshot->usecnt = new_usecnt;
+		if (outbead(sock, USECOUNT_OK, struct usecount_ok, .usecount = snapshot->usecnt) < 0)
 			warn("unable to reply to USECOUNT message");
 		break;
 
@@ -3151,7 +3129,6 @@ static int incoming(struct superblock *sb, struct client *client)
 	{
 		struct status_request request;
 		struct snapshot const *snaplist = sb->image.snaplist;
-		unsigned int snapslot;
 		char const *err_msg;
 
 #ifdef DEBUG_ERROR
@@ -3175,24 +3152,21 @@ static int incoming(struct superblock *sb, struct client *client)
 		 * extra rows or columns can be ignored when reducing the
 		 * table to be sent because they are always zero.
 		 */
-		unsigned int num_rows = max_snapbit(snaplist, sb->image.snapshots) + 1;
-		unsigned int num_columns = num_rows;
-		unsigned int status_count;
+		unsigned num_rows = max_snapbit(snaplist, sb->image.snapshots) + 1;
+		unsigned num_columns = num_rows, status_count;
+		unsigned rowsize = (sizeof(struct status) + num_columns * sizeof(chunk_t));
 
 		if (request.snap != (u32)~0UL) { /* meaning "all snapshots" */
 			status_count = 0;
-			for (snapslot = 0; snapslot < sb->image.snapshots; snapslot++)
+			for (int snapslot = 0; snapslot < sb->image.snapshots; snapslot++)
 				if (snaplist[snapslot].tag == request.snap) {
 					status_count = 1;
 					break;
 				}
-		} else {
+		} else
 			status_count = sb->image.snapshots;
-		}
 
-		unsigned int reply_len = sizeof(struct status_message) +
-					status_count * (sizeof(struct status) +
-							num_columns * sizeof(uint64_t));
+		unsigned int reply_len = sizeof(struct status_message) + status_count * rowsize;
 		struct status_message *reply = calloc(reply_len, 1);
 
 		/* calculate the usage statistics */
@@ -3212,18 +3186,16 @@ static int incoming(struct superblock *sb, struct client *client)
 
 #ifdef DEBUG_STATUS
 		{
-			int row, col;
-
 			printf("num_rows=%u num_columns=%u status_count=%u\n", num_rows, num_columns, status_count);
 
 			printf("snapshots:\n");
-			for (snapslot = 0; snapslot < sb->image.snapshots; snapslot++)
+			for (int snapslot = 0; snapslot < sb->image.snapshots; snapslot++)
 				printf(" %2u: bit=%d, idtag=%u\n", snapslot, sb->image.snaplist[snapslot].bit, sb->image.snaplist[snapslot].tag);
 			printf("\n");
 
-			for (row = 0; row < num_rows; row++) {
+			for (int row = 0; row < num_rows; row++) {
 				printf("%2d: ", row);
-				for (col = 0; col < num_columns; col++)
+				for (int col = 0; col < num_columns; col++)
 					printf(" %2llu", share_table[row][col]);
 				printf("\n");
 			}
@@ -3252,26 +3224,22 @@ static int incoming(struct superblock *sb, struct client *client)
 		reply->status_count = status_count;
 		reply->num_columns = num_columns;
 
-		unsigned int row, col;
-		struct status *snap_status;
+		for (int row  = 0; row < sb->image.snapshots; row++) {
+			if (request.snap != (u32)~0UL && snaplist[row].tag != request.snap)
+				continue; // !!! are we attaching special meaning to snapshot 0? what is this about?
 
-		row = 0;
-		for (snapslot = 0; snapslot < sb->image.snapshots; snapslot++) {
-			if (request.snap != (u32)~0UL && snaplist[snapslot].tag != request.snap)
-				continue;
+			struct status *snap_status = (struct status *)(reply->status_data + row * rowsize );
 
-			snap_status = get_snap_status(reply, row);
+			snap_status->ctime = snaplist[row].ctime;
+			snap_status->snap = snaplist[row].tag;
 
-			snap_status->ctime = snaplist[snapslot].ctime;
-			snap_status->snap = snaplist[snapslot].tag;
-
-			if (is_squashed(&snaplist[snapslot]))
+			if (is_squashed(&snaplist[row])) {
 				snap_status->chunk_count[0] = -1;
-			else
-				for (col = 0; col < num_columns; col++)
-					snap_status->chunk_count[col] = share_table[snaplist[snapslot].bit][col];
+				continue;
+			}
 
-			row++;
+			for (int col = 0; col < num_columns; col++)
+				snap_status->chunk_count[col] = share_table[snaplist[row].bit][col];
 		}
 
 		free(share_table);
@@ -3554,7 +3522,7 @@ int snap_server(struct superblock *sb, int listenfd, int getsigfd, int agentfd)
 				err = DDSNAPD_AGENT_ERROR;
 				goto done;
 			} else
-				incoming(sb, &(struct client){ .sock = agentfd, .id = -2, .snap = -2 });
+				incoming(sb, &(struct client){ .sock = agentfd, .id = -2, .snaptag = -2 });
 		}
 
 		/* Client message? */
@@ -3569,19 +3537,14 @@ int snap_server(struct superblock *sb, int listenfd, int getsigfd, int agentfd)
 					warn("Client %llu disconnected", client->id);
 
 					if (client->flags == USING) {
-						if (client->snap != -1) {
-							struct snapshot *snap_info;
-							if (!(snap_info = valid_snapnum(sb, client->snap))) {
-								u32 tag = snapnum_tag(sb, client->snap);
-								warn("Snapshot tag %u is not valid", tag);
-								goto close_client;
-							}
-							u32 new_usecnt = snap_info->usecnt - 1;
+						if (client->snaptag != -1) {
+							struct snapshot *snapshot = client_snap(sb, client);
+							u32 new_usecnt = snapshot->usecnt - 1;
 							if (new_usecnt < 0) {
-								warn("Usecount underflow.");
+								warn("usecount underflow!");
 								new_usecnt = 0;
 							}
-							snap_info->usecnt = new_usecnt;
+							snapshot->usecnt = new_usecnt;
 						}
 					}
 
@@ -3646,9 +3609,8 @@ int really_init_snapstore(int orgdev, int snapdev, int metadev, unsigned bs_bits
 	create_snapshot(sb, 0);
 	
 	int i;
-	for (i = 0; i < 100; i++) {
-		make_unique(sb, i, 0);
-	}
+	for (i = 0; i < 100; i++)
+		make_unique(sb, i, NULL);
 	
 	flush_buffers();
 	evict_buffers();
