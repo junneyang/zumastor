@@ -554,6 +554,12 @@ static int recover_journal(struct superblock *sb)
 	sb->image.sequence = commit->sequence + 1;
 	sb->snapdata.chunks_used = commit->snap_used;
 	sb->metadata.chunks_used = commit->meta_used;
+	if (sb->metadata.asi == sb->snapdata.asi)
+			  sb->snapdata.asi->freechunks = sb->snapdata.asi->chunks - sb->snapdata.chunks_used - sb->metadata.chunks_used;
+	else {
+			  sb->snapdata.asi->freechunks = sb->snapdata.asi->chunks - sb->snapdata.chunks_used;
+			  sb->metadata.asi->freechunks = sb->metadata.asi->chunks - sb->metadata.chunks_used;
+	}
 	brelse(buffer);
 	return 0;
 
