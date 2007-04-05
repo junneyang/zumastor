@@ -243,6 +243,13 @@ struct superblock
 			u32      allocsize_bits;
 		} alloc[2];
 	} image;
+	struct allocspace {
+		struct allocspace_img *asi;
+		u32 allocsize;
+		u32 chunk_sectors_bits;
+		u32 alloc_per_node; /* only for metadata */
+		u64 chunks_used;
+	} metadata, snapdata;
 	char bogus[4096]; /* !!! FIXME this is a hack, padding so O_DIRECT diskread doesn't overwrite other values !!! */
 
 	/* Derived, not saved to disk */
@@ -257,13 +264,6 @@ struct superblock
 	chunk_t dest_exception;
 	unsigned copy_chunks;
 	unsigned max_commit_blocks;
-	struct allocspace {
-		struct allocspace_img *asi;
-		u32 allocsize;
-		u32 chunk_sectors_bits;
-		u32 alloc_per_node; /* only for metadata */
-		u64 chunks_used;
-	} metadata, snapdata;
 };
 
 #if 0
@@ -2380,11 +2380,13 @@ static void load_sb(struct superblock *sb)
 	setup_sb(sb, METADATA_ALLOC(sb).allocsize_bits, SNAPDATA_ALLOC(sb).allocsize_bits);
 	sb->snapmask = calc_snapmask(sb);
 	trace(printf("Active snapshot mask: %016llx\n", sb->snapmask););
+#if 0
 	// don't always count here !!!
 	sb->metadata.chunks_used = sb->metadata.asi->chunks - count_free(sb, &sb->metadata);
 	if (sb->metadata.asi == sb->snapdata.asi)
 		return;
 	sb->snapdata.chunks_used = sb->snapdata.asi->chunks - count_free(sb, &sb->snapdata);
+#endif
 }
 
 static void save_state(struct superblock *sb)
