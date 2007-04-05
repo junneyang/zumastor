@@ -48,7 +48,6 @@
 #define SB_BUSY 2
 #define SB_DIRTY 1
 #define SB_SECTOR 8
-#define SB_SIZE 4096
 #define SB_MAGIC "snapshot"
 
 #define METADATA_ALLOC(SB) ((SB)->image.alloc[0])
@@ -244,6 +243,7 @@ struct superblock
 			u32      allocsize_bits;
 		} alloc[2];
 	} image;
+	char bogus[4096]; /* !!! FIXME this is a hack, padding so O_DIRECT diskread doesn't overwrite other values !!! */
 
 	/* Derived, not saved to disk */
 	u64 snapmask;
@@ -853,7 +853,7 @@ static void set_sb_dirty(struct superblock *sb)
 static void save_sb(struct superblock *sb)
 {
 	if (sb->flags & SB_DIRTY) {
-		if (diskwrite(sb->metadev, &sb->image, SB_SIZE , SB_SECTOR << SECTOR_BITS) < 0)
+		if (diskwrite(sb->metadev, &sb->image, 4096, SB_SECTOR << SECTOR_BITS) < 0)
 			warn("Unable to write superblock to disk: %s", strerror(errno));
 		sb->flags &= ~SB_DIRTY;
 	}
@@ -2355,7 +2355,7 @@ static void setup_sb(struct superblock *sb, u32 bs_bits, u32 cs_bits)
 
 	setup_alloc_sb(sb, bs_bits, cs_bits);
 	sb->copybuf_size = 32 * sb->snapdata.allocsize;
-	if ((err = posix_memalign((void **)&(sb->copybuf), 4096, sb->copybuf_size)))
+	if ((err = posix_memalign((void **)&(sb->copybuf), SECTOR_SIZE, sb->copybuf_size)))
 	    error("unable to allocate buffer for copyout data: %s", strerror(err));
 	sb->snapmask = 0;
 	sb->flags = 0;
@@ -2370,7 +2370,7 @@ static void setup_sb(struct superblock *sb, u32 bs_bits, u32 cs_bits)
 
 static void load_sb(struct superblock *sb)
 {
-	if (diskread(sb->metadev, &sb->image, SB_SIZE, SB_SECTOR << SECTOR_BITS) < 0)
+	if (diskread(sb->metadev, &sb->image, 4096, SB_SECTOR << SECTOR_BITS) < 0)
 		error("Unable to read superblock: %s", strerror(errno));
 	assert(!memcmp(sb->image.magic, SB_MAGIC, sizeof(sb->image.magic)));
 	setup_sb(sb, METADATA_ALLOC(sb).allocsize_bits, SNAPDATA_ALLOC(sb).allocsize_bits);
@@ -3576,11 +3576,11 @@ int sniff_snapstore(int metadev)
 {
 	int error;
 	struct superblock *sb;
-	if ((error = posix_memalign((void **)&sb, 1 << SECTOR_BITS, SB_SIZE))) {
+	if ((error = posix_memalign((void **)&sb, SECTOR_SIZE, sizeof(*sb)))) {
 		warn("Error: %s unable to allocate temporary superblock", strerror(error));
 		return -1;
 	}
-	if (diskread(metadev, sb, SB_SIZE, SB_SECTOR << SECTOR_BITS) < 0) {
+	if (diskread(metadev, &sb->image, 4096, SB_SECTOR << SECTOR_BITS) < 0) {
 		warn("Unable to read superblock: %s", strerror(errno));
 		return -1;
 	}
@@ -3593,11 +3593,11 @@ int really_init_snapstore(int orgdev, int snapdev, int metadev, unsigned bs_bits
 {
 	int error;
 	struct superblock *sb;
-	if ((error = posix_memalign((void **)&sb, 1 << SECTOR_BITS, SB_SIZE))) {
+	if ((error = posix_memalign((void **)&sb, SECTOR_SIZE, sizeof(*sb)))) {
 		warn("Error: %s unable to allocate memory for superblock", strerror(error));
 		return -1;
 	}
-	memset(sb, 0, SB_SIZE);
+	memset(sb, 0, sizeof(*sb));
 	sb->orgdev = orgdev;
 	sb->snapdev = snapdev;
 	sb->metadev = metadev;
@@ -3633,16 +3633,16 @@ int start_server(int orgdev, int snapdev, int metadev, char const *agent_socknam
 {
 	int error = 0;
 	struct superblock *sb;
-	if ((error = posix_memalign((void **)&sb, 1 << SECTOR_BITS, SB_SIZE))) {
+	if ((error = posix_memalign((void **)&sb, SECTOR_SIZE, sizeof(*sb)))) {
 		warn("Error: %s unable to allocate memory for superblock", strerror(error));
 		return -1;
 	}
-	memset(sb, 0, SB_SIZE);
+	memset(sb, 0, sizeof(*sb));
 	sb->orgdev = orgdev;
 	sb->snapdev = snapdev;
 	sb->metadev = metadev;
 
-	if (diskread(sb->metadev, &sb->image, SB_SIZE, SB_SECTOR << SECTOR_BITS) < 0)
+	if (diskread(sb->metadev, &sb->image, 4096, SB_SECTOR << SECTOR_BITS) < 0)
 		warn("Unable to read superblock: %s", strerror(errno));
 
 	int listenfd, getsigfd, agentfd, ret;
