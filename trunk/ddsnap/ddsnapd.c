@@ -442,6 +442,8 @@ static void commit_transaction(struct superblock *sb)
 		warn("metadata free chunks count wrong: counted %llu, freechunks %llu", counted, sb->metadata.asi->freechunks);
 		sb->metadata.asi->freechunks = counted;
 	}
+	if (sb->metadata.asi == sb->snapdata.asi)
+		return;
 	counted = count_free(sb, &sb->snapdata);
 	if (counted != sb->snapdata.asi->freechunks) {
 		warn("snapdata free chunks count wrong: counted %llu, freechunks %llu", counted, sb->snapdata.asi->freechunks);
@@ -2380,6 +2382,8 @@ static void load_sb(struct superblock *sb)
 	trace(printf("Active snapshot mask: %016llx\n", sb->snapmask););
 	// don't always count here !!!
 	sb->metadata.chunks_used = sb->metadata.asi->chunks - count_free(sb, &sb->metadata);
+	if (sb->metadata.asi == sb->snapdata.asi)
+		return;
 	sb->snapdata.chunks_used = sb->snapdata.asi->chunks - count_free(sb, &sb->snapdata);
 }
 
