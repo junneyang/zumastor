@@ -266,10 +266,12 @@ struct superblock
 	} metadata, snapdata;
 };
 
-static inline chunk_t freechunks(struct superblock *sb, struct allocspace *space)
+#if 0
+static inline chunk_t usedchunks(struct superblock *sb, struct allocspace *space)
 {
 	return space->chunks_used;
 }
+#endif
 
 #define METADATA_ALLOC(SB) ((SB)->image.alloc[0]) // do we really need?
 #define SNAPDATA_ALLOC(SB) ((SB)->image.alloc[((SB)->metadev == (SB)->snapdev) ? 0 : 1]) // ditto?
@@ -364,7 +366,7 @@ static chunk_t count_free(struct superblock *sb, struct allocspace *alloc)
 	while (bytes) {
 		struct buffer *buffer = snapread(sb, alloc->asi->bitmap_base + (block << sb->metadata.chunk_sectors_bits));
 		if (!buffer)
-			return -1;
+			return -1; // field this error!!!! (or just abort)
 		unsigned char *p = buffer->data;
 		unsigned n = blocksize < bytes ? blocksize : bytes;
 		trace_off(printf("count %u bytes of bitmap %Lx\n", n, block););
@@ -2376,6 +2378,9 @@ static void load_sb(struct superblock *sb)
 	setup_sb(sb, METADATA_ALLOC(sb).allocsize_bits, SNAPDATA_ALLOC(sb).allocsize_bits);
 	sb->snapmask = calc_snapmask(sb);
 	trace(printf("Active snapshot mask: %016llx\n", sb->snapmask););
+	// don't always count here !!!
+	sb->metadata.chunks_used = sb->metadata.asi->chunks - count_free(sb, &sb->metadata);
+	sb->snapdata.chunks_used = sb->snapdata.asi->chunks - count_free(sb, &sb->snapdata);
 }
 
 static void save_state(struct superblock *sb)
@@ -3210,6 +3215,9 @@ static int incoming(struct superblock *sb, struct client *client)
 
 		reply->ctime = sb->image.create_time;
 
+		// don't always count here!!!
+//		sb->metadata.chunks_used = count_free(sb, &sb->metadata);
+//		sb->snapdata.chunks_used = count_free(sb, &sb->snapdata);
 		reply->meta.chunksize_bits = sb->metadata.asi->allocsize_bits;
 		reply->meta.used = sb->metadata.chunks_used;
 		reply->meta.free = sb->metadata.asi->chunks - sb->metadata.chunks_used;
