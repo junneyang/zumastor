@@ -1906,20 +1906,9 @@ static chunk_t make_unique(struct superblock *sb, chunk_t chunk, int snapbit)
 	}
 	u64 newex = alloc_exception(sb);
 	if (newex == -1) {
-		/* possibly all of the snapshots are deleted or squashed,
-		 * in that case, snapmask should have been cleared */
-		if (snapbit == -1?
-			origin_chunk_unique(buffer2leaf(leafbuf), chunk, sb->snapmask):
-			snapshot_chunk_unique(buffer2leaf(leafbuf), chunk, snapbit, &exception))
-		{
-			exception = 0;
-			brelse(leafbuf);
-			goto out;
-		}
-		exception = newex;
-		brelse(leafbuf); // !!! maybe add_exception_to_tree should not do this
-		goto out;
-	}
+		// count_free
+		error("we should count free bits here and try to get the accounting right");
+	}; /* if this broke, then our ensure above is broken */
 
 	copyout(sb, exception? (exception | (1ULL << chunk_highbit)): chunk, newex);
 	if ((error = add_exception_to_tree(sb, leafbuf, chunk, newex, snapbit, path, levels)) < 0) {
