@@ -45,13 +45,11 @@
 #define DEFAULT_JOURNAL_SIZE (100 * CHUNK_SIZE)
 #define INPUT_ERROR 0
 
-#define SB_BUSY 2
 #define SB_DIRTY 1
+#define SB_BUSY 2
+#define SB_SELFCHECK 4
 #define SB_SECTOR 8
-#define SB_MAGIC "snapshot"
-
-#define METADATA_ALLOC(SB) ((SB)->image.alloc[0])
-#define SNAPDATA_ALLOC(SB) ((SB)->image.alloc[((SB)->metadev == (SB)->snapdev) ? 0 : 1])
+#define SB_MAGIC { 's', 'n', 'a', 'p', 0xad, 0x07, 0x04, 0x05 } /* date of latest incompatible sb format */
 
 #define DDSNAPD_CLIENT_ERROR -1
 #define DDSNAPD_AGENT_ERROR -2
@@ -61,9 +59,8 @@
  * kernel headers. Make sure that these are same when
  * building with a new kernel. 
  */
-#define PR_SET_LESS_THROTTLE    21  
-
-#define MAX_NEW_METACHUNKS	10
+#define PR_SET_LESS_THROTTLE 21
+#define MAX_NEW_METACHUNKS 10
 
 #define trace trace_off
 #define jtrace trace_off
@@ -158,6 +155,46 @@ static void hexdump(void const *data, unsigned length)
 	}
 }
 
+struct disksuper
+{
+	typeof((char[])SB_MAGIC) magic;
+	u64 create_time;
+	sector_t etree_root;
+	sector_t orgoffset, orgsectors;
+	u64 flags;
+	u64 deleting;
+	struct snapshot
+	{
+		u32 ctime; // upper 32 bits are in super create_time
+		u32 tag;   // external name (id) of snapshot
+		u16 usecnt; // use count on snapshot device
+		u8 bit;    // internal snapshot number, not derived from tag
+		s8 prio;   // 0=normal, 127=highest, -128=lowestdrop
+		char reserved[4]; /* adds up to 16 */
+	} snaplist[MAX_SNAPSHOTS]; // entries are contiguous, in creation order
+	u32 snapshots;
+	u32 etree_levels;
+	s32 journal_base, journal_next, journal_size;
+	u32 sequence;
+	struct allocspace_img
+	{
+		sector_t bitmap_base;
+		sector_t chunks; /* if zero then snapdata is combined in metadata space */
+		sector_t freechunks;
+		chunk_t  last_alloc;
+		u64      bitmap_blocks;
+		u32      allocsize_bits;
+	} metadata, snapdata;
+};
+
+struct allocspace { // everything bogus here!!!
+	struct allocspace_img *asi;
+	u32 allocsize;
+	u32 chunk_sectors_bits;
+	u32 alloc_per_node; /* only for metadata */
+	u64 chunks_used;
+};
+
 /*
  * Snapshot btree
  */
@@ -212,52 +249,16 @@ static inline struct exception *emap(struct eleaf *leaf, unsigned i)
 struct superblock
 {
 	/* Persistent, saved to disk */
-	struct disksuper
-	{
-		char magic[8];
-		u64 create_time;
-		sector_t etree_root;
-		sector_t orgoffset, orgsectors;
-		u64 flags;
-		u64 deleting;
-		struct snapshot
-		{
-			u32 ctime; // upper 32 bits are in super create_time
-			u32 tag;   // external name (id) of snapshot
-			u8 bit;    // internal snapshot number, not derived from tag
-			s8 prio;   // 0=normal, 127=highest, -128=lowestdrop
-			u16 usecnt; // use count on snapshot device (just use a bit?)
-			char reserved[7];  // change me to 4 !!!
-		} snaplist[MAX_SNAPSHOTS]; // entries are contiguous, in creation order
-		u32 snapshots;
-		u32 etree_levels;
-		s32 journal_base, journal_next, journal_size;
-		u32 sequence;
-		struct allocspace_img
-		{
-			sector_t bitmap_base;
-			sector_t chunks;
-			sector_t freechunks;
-			chunk_t  last_alloc;
-			u64      bitmap_blocks;
-			u32      allocsize_bits;
-		} alloc[2];
-	} image;
-	struct allocspace {
-		struct allocspace_img *asi;
-		u32 allocsize;
-		u32 chunk_sectors_bits;
-		u32 alloc_per_node; /* only for metadata */
-		u64 chunks_used;
-	} metadata, snapdata;
-	char bogus[4096]; /* !!! FIXME this is a hack, padding so O_DIRECT diskread doesn't overwrite other values !!! */
+	struct disksuper image;
+	struct allocspace metadata, snapdata; // kill me!!!
+	char bogopad[4096 - sizeof(struct disksuper) - 2*sizeof(struct allocspace) ];
 
 	/* Derived, not saved to disk */
 	u64 snapmask;
 	unsigned flags;
 	unsigned snapdev, metadev, orgdev;
 	unsigned snaplock_hash_bits;
-	struct snaplock **snaplocks;
+	struct snaplock **snaplocks; // forward ref!!!
 	unsigned copybuf_size;
 	char *copybuf;
 	chunk_t source_chunk;
@@ -266,15 +267,15 @@ struct superblock
 	unsigned max_commit_blocks;
 };
 
-#if 0
-static inline chunk_t usedchunks(struct superblock *sb, struct allocspace *space)
+static int valid_sb(struct superblock *sb)
 {
-	return space->chunks_used;
+	return !memcmp(sb->image.magic, (char[])SB_MAGIC, sizeof(sb->image.magic));
 }
-#endif
 
-#define METADATA_ALLOC(SB) ((SB)->image.alloc[0]) // do we really need?
-#define SNAPDATA_ALLOC(SB) ((SB)->image.alloc[((SB)->metadev == (SB)->snapdev) ? 0 : 1]) // ditto?
+static inline int combined(struct superblock *sb)
+{
+	return !sb->image.snapdata.chunks;
+}
 
 static inline unsigned chunk_sectors(struct allocspace *space)
 {
@@ -366,7 +367,7 @@ static chunk_t count_free(struct superblock *sb, struct allocspace *alloc)
 	while (bytes) {
 		struct buffer *buffer = snapread(sb, alloc->asi->bitmap_base + (block << sb->metadata.chunk_sectors_bits));
 		if (!buffer)
-			return -1; // field this error!!!! (or just abort)
+			return 0; // can't happen!
 		unsigned char *p = buffer->data;
 		unsigned n = blocksize < bytes ? blocksize : bytes;
 		trace_off(printf("count %u bytes of bitmap %Lx\n", n, block););
@@ -437,12 +438,14 @@ static void commit_transaction(struct superblock *sb)
 		// we hope the order we just listed these is the same as committed above
 	}
 	/* checking free chunks for debugging purpose only,, return before this to skip the checking */
+	if (!(sb->flags & SB_SELFCHECK))
+		return;
 	chunk_t counted = count_free(sb, &sb->metadata);
 	if (counted != sb->metadata.asi->freechunks) {
 		warn("metadata free chunks count wrong: counted %llu, freechunks %llu", counted, sb->metadata.asi->freechunks);
 		sb->metadata.asi->freechunks = counted;
 	}
-	if (sb->metadata.asi == sb->snapdata.asi)
+	if (combined(sb))
 		return;
 	counted = count_free(sb, &sb->snapdata);
 	if (counted != sb->snapdata.asi->freechunks) {
@@ -558,13 +561,14 @@ static int recover_journal(struct superblock *sb)
 	sb->image.sequence = commit->sequence + 1;
 	sb->snapdata.chunks_used = commit->snap_used;
 	sb->metadata.chunks_used = commit->meta_used;
-	if (sb->metadata.asi == sb->snapdata.asi)
-			  sb->snapdata.asi->freechunks = sb->snapdata.asi->chunks - sb->snapdata.chunks_used - sb->metadata.chunks_used;
-	else {
-			  sb->snapdata.asi->freechunks = sb->snapdata.asi->chunks - sb->snapdata.chunks_used;
-			  sb->metadata.asi->freechunks = sb->metadata.asi->chunks - sb->metadata.chunks_used;
-	}
 	brelse(buffer);
+
+	sb->metadata.asi->freechunks = sb->metadata.asi->chunks - sb->metadata.chunks_used;
+	if (combined(sb)) {
+		sb->metadata.asi->freechunks -= sb->snapdata.chunks_used;
+		return 0;
+	}
+	sb->snapdata.asi->freechunks = sb->snapdata.asi->chunks - sb->snapdata.chunks_used;
 	return 0;
 
 failed:
@@ -902,8 +906,7 @@ static int init_allocation(struct superblock *sb)
 	sb->metadata.chunks_used += res;
 	
 	if (meta_flag) {
-		u64 snap_bitmap_base_chunk = 
-			(sb->metadata.asi->bitmap_base >> sb->metadata.chunk_sectors_bits) + sb->metadata.asi->bitmap_blocks;
+		u64 snap_bitmap_base_chunk = (sb->metadata.asi->bitmap_base >> sb->metadata.chunk_sectors_bits) + sb->metadata.asi->bitmap_blocks;
 	
 		sb->snapdata.asi->bitmap_blocks = calc_bitmap_blocks(sb, sb->snapdata.asi->chunks);
 		sb->snapdata.asi->bitmap_base = snap_bitmap_base_chunk << sb->metadata.chunk_sectors_bits;
@@ -1879,7 +1882,7 @@ static chunk_t make_unique(struct superblock *sb, chunk_t chunk, int snapbit)
 	trace(warn("chunk %Lx, snapbit %i", chunk, snapbit););
 
 	/* first we check if we will have enough freespace */
-	if (sb->snapdata.asi == sb->metadata.asi) { /* combined metadata/snapshore */
+	if (combined(sb)) {
 		if (ensure_free_chunks(sb, &sb->metadata, MAX_NEW_METACHUNKS + 1))
 			return -1;
 	} else { /* separate */
@@ -2331,17 +2334,13 @@ static void finish_reply(int sock, struct addto *r, unsigned code, unsigned id)
  * Initialization, State load/save
  */
 
-static void setup_alloc_sb(struct superblock *sb, u32 bs_bits, u32 cs_bits)
+static void setup_sb(struct superblock *sb)
 {
-	sb->metadata.asi = &(METADATA_ALLOC(sb));
-	sb->snapdata.asi = &(SNAPDATA_ALLOC(sb));
+	int err;
 
-	if (sb->metadev == sb->snapdev)
-		assert(bs_bits == cs_bits);
-
-	sb->metadata.asi->allocsize_bits = bs_bits;
-	sb->snapdata.asi->allocsize_bits = cs_bits;
-	
+	int bs_bits = sb->image.metadata.allocsize_bits;
+	int cs_bits = sb->image.snapdata.allocsize_bits;
+	assert(!combined(sb) || bs_bits == cs_bits);
 	sb->metadata.allocsize = 1 << bs_bits;
 	sb->snapdata.allocsize = 1 << cs_bits;
 	sb->metadata.chunk_sectors_bits = bs_bits - SECTOR_BITS;
@@ -2351,13 +2350,6 @@ static void setup_alloc_sb(struct superblock *sb, u32 bs_bits, u32 cs_bits)
 	sb->metadata.alloc_per_node = 10;
 #endif
 
-}
-
-static void setup_sb(struct superblock *sb, u32 bs_bits, u32 cs_bits)
-{
-	int err;
-
-	setup_alloc_sb(sb, bs_bits, cs_bits);
 	sb->copybuf_size = 32 * sb->snapdata.allocsize;
 	if ((err = posix_memalign((void **)&(sb->copybuf), SECTOR_SIZE, sb->copybuf_size)))
 	    error("unable to allocate buffer for copyout data: %s", strerror(err));
@@ -2370,20 +2362,22 @@ static void setup_sb(struct superblock *sb, u32 bs_bits, u32 cs_bits)
 	sb->snaplock_hash_bits = snaplock_hash_bits;
 	sb->snaplocks = (struct snaplock **)calloc(1 << snaplock_hash_bits, sizeof(struct snaplock *));
 
+	sb->metadata.asi = &sb->image.metadata; // !!! so why even have sb->metadata??
+	sb->snapdata.asi = combined(sb) ? &(sb)->image.metadata : &(sb)->image.snapdata;
 }
 
 static void load_sb(struct superblock *sb)
 {
 	if (diskread(sb->metadev, &sb->image, 4096, SB_SECTOR << SECTOR_BITS) < 0)
 		error("Unable to read superblock: %s", strerror(errno));
-	assert(!memcmp(sb->image.magic, SB_MAGIC, sizeof(sb->image.magic)));
-	setup_sb(sb, METADATA_ALLOC(sb).allocsize_bits, SNAPDATA_ALLOC(sb).allocsize_bits);
+	assert(valid_sb(sb));
+	setup_sb(sb);
 	sb->snapmask = calc_snapmask(sb);
 	trace(printf("Active snapshot mask: %016llx\n", sb->snapmask););
 #if 0
 	// don't always count here !!!
 	sb->metadata.chunks_used = sb->metadata.asi->chunks - count_free(sb, &sb->metadata);
-	if (sb->metadata.asi == sb->snapdata.asi)
+	if (combined(sb))
 		return;
 	sb->snapdata.chunks_used = sb->snapdata.asi->chunks - count_free(sb, &sb->snapdata);
 #endif
@@ -2407,28 +2401,33 @@ int init_snapstore(struct superblock *sb, u32 js_bytes, u32 bs_bits, u32 cs_bits
 	int i, error;
 	
 	sb->image = (struct disksuper){ .magic = SB_MAGIC };
-	setup_sb(sb, bs_bits, cs_bits);
-	sb->image.etree_levels = 1;
-	sb->image.create_time = time(NULL);
+	sb->image.metadata.allocsize_bits = bs_bits;
+	sb->image.snapdata.allocsize_bits = cs_bits;
 
 	u64 size;
-	if ((error = fd_size(sb->snapdev, &size)) < 0) {
-		warn("Error %i: %s determining snapshot store size", error, strerror(-error));
-		return error;
-	}
-	sb->snapdata.asi->chunks = size >> sb->snapdata.asi->allocsize_bits;
 	if ((error = fd_size(sb->metadev, &size)) < 0) {
 		warn("Error %i: %s determining metadata store size", error, strerror(-error));
 		return error;
 	}
-	sb->metadata.asi->chunks = size >> sb->metadata.asi->allocsize_bits;
+	sb->image.metadata.chunks = size >> sb->image.metadata.allocsize_bits;
+
+	if (sb->metadev != sb->snapdev) {
+		if ((error = fd_size(sb->snapdev, &size)) < 0) {
+			warn("Error %i: %s determining snapshot store size", error, strerror(-error));
+			return error;
+		}
+		sb->image.snapdata.chunks = size >> sb->image.snapdata.allocsize_bits;
+	}
+
 	if ((error = fd_size(sb->orgdev, &size)) < 0) {
 		warn("Error %i: %s determining origin volume size", errno, strerror(-errno));
 		return error;
 	}
-	sb->image.orgsectors = size >> sb->snapdata.asi->allocsize_bits;
-	sb->image.orgsectors <<= sb->snapdata.asi->allocsize_bits;
-	sb->image.orgsectors >>= SECTOR_BITS;
+	sb->image.orgsectors = size >> SECTOR_BITS;
+
+	setup_sb(sb);
+	sb->image.etree_levels = 1;
+	sb->image.create_time = time(NULL);
 	sb->image.orgoffset  = 0; //!!! FIXME: shouldn't always assume offset starts at 0
 
 	trace_on(printf("cs_bits %u\n", sb->snapdata.asi->allocsize_bits););
@@ -3227,17 +3226,14 @@ static int incoming(struct superblock *sb, struct client *client)
 		reply->meta.chunksize_bits = sb->metadata.asi->allocsize_bits;
 		reply->meta.used = sb->metadata.chunks_used;
 		reply->meta.free = sb->metadata.asi->chunks - sb->metadata.chunks_used;
-		if (sb->metadata.asi == sb->snapdata.asi)
+		if (combined(sb))
 			reply->meta.free -= sb->snapdata.chunks_used;
 	
 		reply->store.chunksize_bits = sb->snapdata.asi->allocsize_bits;
 		reply->store.used = sb->snapdata.chunks_used;
 		reply->store.free = sb->snapdata.asi->chunks - sb->snapdata.chunks_used;
-		if (sb->metadata.asi == sb->snapdata.asi)
-			reply->store.free -= sb->metadata.chunks_used;
 
 		reply->write_density = 0;
-
 		reply->status_count = status_count;
 		reply->num_columns = num_columns;
 
@@ -3586,35 +3582,31 @@ done:
 	return err;
 }
 
-int sniff_snapstore(int metadev)
+struct superblock *new_sb(int metadev, int orgdev, int snapdev)
 {
 	int error;
 	struct superblock *sb;
-	if ((error = posix_memalign((void **)&sb, SECTOR_SIZE, sizeof(*sb)))) {
-		warn("Error: %s unable to allocate temporary superblock", strerror(error));
-		return -1;
-	}
+	if ((error = posix_memalign((void **)&sb, SECTOR_SIZE, sizeof(*sb))))
+		error("no memory for superblock: %s", strerror(error));
+	*sb = (struct superblock){ .orgdev = orgdev, .snapdev = snapdev, .metadev = metadev };
+	return sb;
+}
+
+int sniff_snapstore(int metadev)
+{
+	struct superblock *sb = new_sb(metadev, -1, -1);
 	if (diskread(metadev, &sb->image, 4096, SB_SECTOR << SECTOR_BITS) < 0) {
 		warn("Unable to read superblock: %s", strerror(errno));
 		return -1;
 	}
-	int sniff = !(memcmp(sb->image.magic, SB_MAGIC, sizeof(sb->image.magic)));
+	int sniff = valid_sb(sb);
 	free(sb);
 	return sniff;
 }
 
 int really_init_snapstore(int orgdev, int snapdev, int metadev, unsigned bs_bits, unsigned cs_bits, unsigned js_bytes)
 {
-	int error;
-	struct superblock *sb;
-	if ((error = posix_memalign((void **)&sb, SECTOR_SIZE, sizeof(*sb)))) {
-		warn("Error: %s unable to allocate memory for superblock", strerror(error));
-		return -1;
-	}
-	memset(sb, 0, sizeof(*sb));
-	sb->orgdev = orgdev;
-	sb->snapdev = snapdev;
-	sb->metadev = metadev;
+	struct superblock *sb = new_sb(metadev, orgdev, snapdev);
 
 #ifdef MKDDSNAP_TEST
 	if (init_snapstore(sb, js_bytes, bs_bits, cs_bits) < 0)
@@ -3645,23 +3637,14 @@ int really_init_snapstore(int orgdev, int snapdev, int metadev, unsigned bs_bits
 
 int start_server(int orgdev, int snapdev, int metadev, char const *agent_sockname, char const *server_sockname, char const *logfile, char const *pidfile, int nobg)
 {
-	int error = 0;
-	struct superblock *sb;
-	if ((error = posix_memalign((void **)&sb, SECTOR_SIZE, sizeof(*sb)))) {
-		warn("Error: %s unable to allocate memory for superblock", strerror(error));
-		return -1;
-	}
-	memset(sb, 0, sizeof(*sb));
-	sb->orgdev = orgdev;
-	sb->snapdev = snapdev;
-	sb->metadev = metadev;
+	struct superblock *sb = new_sb(metadev, orgdev, snapdev);
 
 	if (diskread(sb->metadev, &sb->image, 4096, SB_SECTOR << SECTOR_BITS) < 0)
 		warn("Unable to read superblock: %s", strerror(errno));
 
 	int listenfd, getsigfd, agentfd, ret;
 	
-	unsigned bufsize = 1 << METADATA_ALLOC(sb).allocsize_bits;	
+	unsigned bufsize = 1 << sb->image.metadata.allocsize_bits;	
 	init_buffers(bufsize, (1 << 27)); /* preallocate 128Mb of buffers */
 	
 	if (snap_server_setup(agent_sockname, server_sockname, &listenfd, &getsigfd, &agentfd) < 0)
