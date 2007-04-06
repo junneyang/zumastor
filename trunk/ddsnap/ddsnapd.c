@@ -3633,6 +3633,9 @@ int start_server(int orgdev, int snapdev, int metadev, char const *agent_socknam
 
 	int listenfd, getsigfd, agentfd, ret;
 	
+	if (!valid_sb(sb))
+		error("Invalid superblock\n");
+
 	unsigned bufsize = 1 << sb->image.metadata.allocsize_bits;	
 	init_buffers(bufsize, (1 << 27)); /* preallocate 128Mb of buffers */
 	
