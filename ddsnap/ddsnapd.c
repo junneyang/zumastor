@@ -3538,7 +3538,7 @@ int snap_server(struct superblock *sb, int listenfd, int getsigfd, int agentfd)
 					if (client->flags == USING) {
 						if (client->snaptag != -1) {
 							struct snapshot *snapshot = client_snap(sb, client);
-							u32 new_usecnt = snapshot->usecnt - 1;
+							int new_usecnt = snapshot->usecnt - 1;
 							if (new_usecnt < 0) {
 								warn("usecount underflow!");
 								new_usecnt = 0;
