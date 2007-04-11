@@ -205,7 +205,7 @@ function create_device {
 		esac
 	fi 
 
-	echo 0 $size ddsnap $sdev $odev $agent $id | dmsetup create $name || return 1
+	echo 0 $size ddsnap $sdev $odev $agent $id | dmsetup create $name >/dev/null 2>&1 || { log "error: dmsetup returned $?"; return 1; }
 }
 
 # create_snapshot <vol> <id>
