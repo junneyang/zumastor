@@ -7,11 +7,11 @@ BUILD_DIR=build # relative to current directory
 LOG=/dev/null
 TIME=`date +%s`
 
-mkdir $BUILD_DIR 2>/dev/null
-pushd $BUILD_DIR >> $LOG
-
 [[ -e $1 ]] || { echo "Usage: $0 <path_to_kernel_config>"; exit 1; }
-KERNEL_CONFIG=$1
+
+mkdir $BUILD_DIR 2>/dev/null
+cp $1 $BUILD_DIR/$KERNEL_VERSION.config
+pushd $BUILD_DIR >> $LOG
 
 echo -ne Getting zumastor sources from subversion ...
 if [[ -e zumastor ]]; then
@@ -53,7 +53,7 @@ tar xjf linux-${KERNEL_VERSION}.tar.bz2 || exit 1
 echo -e "done.\n"
 
 echo -n "Setting .config ..."
-cat $KERNEL_CONFIG > linux-${KERNEL_VERSION}/.config
+mv $KERNEL_VERSION.config linux-${KERNEL_VERSION}/.config
 echo -e "done.\n"
 
 echo Applying patches...
