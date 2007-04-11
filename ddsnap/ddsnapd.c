@@ -2374,7 +2374,7 @@ static void load_sb(struct superblock *sb)
 
 static void save_state(struct superblock *sb)
 {
-	flush_buffers();
+	(void)flush_buffers();
 	save_sb(sb);
 }
 
@@ -2446,7 +2446,7 @@ int init_snapstore(struct superblock *sb, u32 js_bytes, u32 bs_bits, u32 cs_bits
 #ifdef TEST_JOURNAL
 	show_journal(sb);
 	show_tree(sb);
-	flush_buffers();
+	(void)flush_buffers();
 	recover_journal(sb);
 	show_buffers();
 #endif
@@ -2510,13 +2510,13 @@ int init_snapstore(struct superblock *sb, u32 js_bytes, u32 bs_bits, u32 cs_bits
 	show_buffers();
 	show_dirty_buffers();
 	commit_transaction(sb);
-	flush_buffers();
+	(void)flush_buffers();
 	evict_buffers();
 
 	show_journal(sb);
 	show_tree(sb);
 	recover_journal(sb);
-	flush_buffers();
+	(void)flush_buffers();
 	evict_buffers();
 	show_tree(sb);
 #endif
@@ -3506,7 +3506,7 @@ int snap_server(struct superblock *sb, int listenfd, int getsigfd, int agentfd)
 			trace_on(warn("Cleaning up before server dies. Caught signal %i", sig););
 			cleanup(sb); // !!! don't do it on segfault
 			if (sig == SIGINT || sig == SIGTERM) {
-				flush_buffers();
+				(void)flush_buffers();
 				evict_buffers();
 				signal(SIGINT, SIG_DFL);
 				kill(getpid(), sig); /* commit harikiri */ /* FIXME: use raise()? */
@@ -3538,7 +3538,7 @@ int snap_server(struct superblock *sb, int listenfd, int getsigfd, int agentfd)
 					if (client->flags == USING) {
 						if (client->snaptag != -1) {
 							struct snapshot *snapshot = client_snap(sb, client);
-							int new_usecnt = snapshot->usecnt - 1;
+							u32 new_usecnt = snapshot->usecnt - 1;
 							if (new_usecnt < 0) {
 								warn("usecount underflow!");
 								new_usecnt = 0;
@@ -3606,7 +3606,7 @@ int really_init_snapstore(int orgdev, int snapdev, int metadev, unsigned bs_bits
 	for (i = 0; i < 100; i++)
 		make_unique(sb, i, NULL);
 	
-	flush_buffers();
+	(void)flush_buffers();
 	evict_buffers();
 	warn("delete...");
 	delete_tree_range(sb, 1, 0, 5);
@@ -3632,7 +3632,7 @@ int start_server(int orgdev, int snapdev, int metadev, char const *agent_socknam
 		warn("Unable to read superblock: %s", strerror(errno));
 
 	int listenfd, getsigfd, agentfd, ret;
-	
+
 	if (!valid_sb(sb))
 		error("Invalid superblock\n");
 
