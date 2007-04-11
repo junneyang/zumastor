@@ -45,7 +45,7 @@ struct buffer *getblk(unsigned fd, sector_t sector, unsigned size);
 struct buffer *bread(unsigned fd, sector_t sector, unsigned size);
 void evict_buffer(struct buffer *buffer);
 void evict_buffers(void);
-void flush_buffers(void);
+int flush_buffers(void);
 void show_buffer(struct buffer *buffer);
 void show_active_buffers(void);
 void show_buffers(void);

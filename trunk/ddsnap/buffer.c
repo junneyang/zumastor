@@ -295,14 +295,20 @@ void evict_buffers(void)
 	}
 }
 
-void flush_buffers(void) // !!! should use lru list
+int flush_buffers(void) // !!! should use lru list
 {
+	int err = 0;
+
 	while (!list_empty(&dirty_buffers)) {
 		struct list_head *entry = dirty_buffers.next;
 		struct buffer *buffer = list_entry(entry, struct buffer, dirty_list);
 		if (buffer_dirty(buffer))
-			write_buffer(buffer);
+			if ((err = write_buffer(buffer)) != 0)
+				break;
 	}
+	if (err != 0)
+		error("Flush buffers failed with %s", strerror(-err));
+	return(err);
 }
 
 void show_buffer(struct buffer *buffer)
