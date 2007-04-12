@@ -155,46 +155,6 @@ static void hexdump(void const *data, unsigned length)
 	}
 }
 
-struct disksuper
-{
-	typeof((char[])SB_MAGIC) magic;
-	u64 create_time;
-	sector_t etree_root;
-	sector_t orgoffset, orgsectors;
-	u64 flags;
-	u64 deleting;
-	struct snapshot
-	{
-		u32 ctime; // upper 32 bits are in super create_time
-		u32 tag;   // external name (id) of snapshot
-		u16 usecnt; // use count on snapshot device
-		u8 bit;    // internal snapshot number, not derived from tag
-		s8 prio;   // 0=normal, 127=highest, -128=lowestdrop
-		char reserved[4]; /* adds up to 16 */
-	} snaplist[MAX_SNAPSHOTS]; // entries are contiguous, in creation order
-	u32 snapshots;
-	u32 etree_levels;
-	s32 journal_base, journal_next, journal_size;
-	u32 sequence;
-	struct allocspace_img
-	{
-		sector_t bitmap_base;
-		sector_t chunks; /* if zero then snapdata is combined in metadata space */
-		sector_t freechunks;
-		chunk_t  last_alloc;
-		u64      bitmap_blocks;
-		u32      allocsize_bits;
-	} metadata, snapdata;
-};
-
-struct allocspace { // everything bogus here!!!
-	struct allocspace_img *asi;
-	u32 allocsize;
-	u32 chunk_sectors_bits;
-	u32 alloc_per_node; /* only for metadata */
-	u64 chunks_used;
-};
-
 /*
  * Snapshot btree
  */
@@ -246,6 +206,46 @@ static inline struct exception *emap(struct eleaf *leaf, unsigned i)
 	return	(struct exception *)((char *) leaf + leaf->map[i].offset);
 }
 
+struct disksuper
+{
+	typeof((char[])SB_MAGIC) magic;
+	u64 create_time;
+	sector_t etree_root;
+	sector_t orgoffset, orgsectors;
+	u64 flags;
+	u64 deleting;
+	struct snapshot
+	{
+		u32 ctime; // upper 32 bits are in super create_time
+		u32 tag;   // external name (id) of snapshot
+		u16 usecnt; // use count on snapshot device
+		u8 bit;    // internal snapshot number, not derived from tag
+		s8 prio;   // 0=normal, 127=highest, -128=lowestdrop
+		char reserved[4]; /* adds up to 16 */
+	} snaplist[MAX_SNAPSHOTS]; // entries are contiguous, in creation order
+	u32 snapshots;
+	u32 etree_levels;
+	s32 journal_base, journal_next, journal_size;
+	u32 sequence;
+	struct allocspace_img
+	{
+		sector_t bitmap_base;
+		sector_t chunks; /* if zero then snapdata is combined in metadata space */
+		sector_t freechunks;
+		chunk_t  last_alloc;
+		u64      bitmap_blocks;
+		u32      allocsize_bits;
+	} metadata, snapdata;
+};
+
+struct allocspace { // everything bogus here!!!
+	struct allocspace_img *asi;
+	u32 allocsize;
+	u32 chunk_sectors_bits;
+	u32 alloc_per_node; /* only for metadata */
+	u64 chunks_used;
+};
+
 struct superblock
 {
 	/* Persistent, saved to disk */
@@ -275,6 +275,18 @@ static int valid_sb(struct superblock *sb)
 static inline int combined(struct superblock *sb)
 {
 	return !sb->image.snapdata.chunks;
+}
+
+static inline chunk_t metafree(struct superblock *sb)
+{
+	chunk_t free = sb->image.metadata.chunks - sb->metadata.chunks_used;
+	return combined(sb) ? free - sb->snapdata.chunks_used : free;
+}
+
+static inline chunk_t snapfree(struct superblock *sb)
+{
+	/* do not call with combined store */
+	return combined(sb) ? 0 : sb->image.snapdata.chunks - sb->snapdata.chunks_used;
 }
 
 static inline unsigned chunk_sectors(struct allocspace *space)
@@ -380,6 +392,26 @@ static chunk_t count_free(struct superblock *sb, struct allocspace *alloc)
 	return count;
 }
 
+static void check_freespace(struct superblock *sb)
+{
+	if (metafree(sb) != sb->metadata.asi->freechunks)
+		warn("metadata freechunks out of sync with used counts (%Li, %Li)", metafree(sb), sb->metadata.asi->freechunks);
+	chunk_t counted = count_free(sb, &sb->metadata);
+	if (counted != sb->metadata.asi->freechunks) {
+		warn("metadata free chunks count wrong: counted %llu, freechunks %llu", counted, sb->metadata.asi->freechunks);
+		sb->metadata.asi->freechunks = counted;
+	}
+	if (combined(sb))
+		return;
+	if (snapfree(sb) != sb->snapdata.asi->freechunks)
+		warn("snapdata freechunks out of sync with used counts (%Li, %Li)", snapfree(sb), sb->snapdata.asi->freechunks);
+	counted = count_free(sb, &sb->snapdata);
+	if (counted != sb->snapdata.asi->freechunks) {
+		warn("snapdata free chunks count wrong: counted %llu, freechunks %llu", counted, sb->snapdata.asi->freechunks);
+		sb->snapdata.asi->freechunks = counted;
+	}
+}
+
 /*
  * For now there is only ever one open transaction in the journal, the newest
  * one, so we don't have to check for journal wrap, but just ensure that each
@@ -438,20 +470,8 @@ static void commit_transaction(struct superblock *sb)
 		// we hope the order we just listed these is the same as committed above
 	}
 	/* checking free chunks for debugging purpose only,, return before this to skip the checking */
-	if (!(sb->flags & SB_SELFCHECK))
-		return;
-	chunk_t counted = count_free(sb, &sb->metadata);
-	if (counted != sb->metadata.asi->freechunks) {
-		warn("metadata free chunks count wrong: counted %llu, freechunks %llu", counted, sb->metadata.asi->freechunks);
-		sb->metadata.asi->freechunks = counted;
-	}
-	if (combined(sb))
-		return;
-	counted = count_free(sb, &sb->snapdata);
-	if (counted != sb->snapdata.asi->freechunks) {
-		warn("snapdata free chunks count wrong: counted %llu, freechunks %llu", counted, sb->snapdata.asi->freechunks);
-		sb->snapdata.asi->freechunks = counted;
-	}
+	if ((sb->flags & SB_SELFCHECK))
+		check_freespace(sb);
 }
 
 static int recover_journal(struct superblock *sb)
@@ -1578,7 +1598,7 @@ static chunk_t alloc_chunk(struct superblock *sb, struct allocspace *as)
 	return -1;
 }
 
-static sector_t alloc_block(struct superblock *sb)
+static sector_t alloc_metablock(struct superblock *sb)
 {
 	chunk_t new_block;  
 	if ((new_block = alloc_chunk(sb, &sb->metadata)) != -1)
@@ -1586,7 +1606,7 @@ static sector_t alloc_block(struct superblock *sb)
 	return  new_block == -1? new_block : new_block << sb->metadata.chunk_sectors_bits;
 }
 
-static u64 alloc_exception(struct superblock *sb)
+static u64 alloc_snapblock(struct superblock *sb)
 {
 	chunk_t new_exception;
 	if ((new_exception = alloc_chunk(sb, &sb->snapdata)) != -1)
@@ -1596,8 +1616,8 @@ static u64 alloc_exception(struct superblock *sb)
 
 static struct buffer *new_block(struct superblock *sb)
 {
-	// !!! handle alloc_block failure
-	return getblk(sb->metadev, alloc_block(sb), sb->metadata.allocsize); // !!! possible null ptr deferenced
+	// !!! handle alloc_metablock failure
+	return getblk(sb->metadev, alloc_metablock(sb), sb->metadata.allocsize); // !!! possible null ptr deferenced
 }
 
 static struct buffer *new_leaf(struct superblock *sb)
@@ -1904,7 +1924,7 @@ static chunk_t make_unique(struct superblock *sb, chunk_t chunk, int snapbit)
 		brelse(leafbuf);
 		goto out;
 	}
-	u64 newex = alloc_exception(sb);
+	u64 newex = alloc_snapblock(sb);
 	if (newex == -1) {
 		// count_free
 		error("we should count free bits here and try to get the accounting right");
@@ -3215,12 +3235,13 @@ static int incoming(struct superblock *sb, struct client *client)
 		reply->meta.chunksize_bits = sb->metadata.asi->allocsize_bits;
 		reply->meta.used = sb->metadata.chunks_used;
 		reply->meta.free = sb->metadata.asi->chunks - sb->metadata.chunks_used;
+		reply->store.used = sb->snapdata.chunks_used;
+		reply->store.chunksize_bits = sb->snapdata.asi->allocsize_bits;
+
 		if (combined(sb))
 			reply->meta.free -= sb->snapdata.chunks_used;
-	
-		reply->store.chunksize_bits = sb->snapdata.asi->allocsize_bits;
-		reply->store.used = sb->snapdata.chunks_used;
-		reply->store.free = sb->snapdata.asi->chunks - sb->snapdata.chunks_used;
+		else
+			reply->store.free = sb->snapdata.asi->chunks - sb->snapdata.chunks_used;
 
 		reply->write_density = 0;
 		reply->status_count = status_count;
@@ -3251,7 +3272,7 @@ static int incoming(struct superblock *sb, struct client *client)
 			warn("unable to send status message");
 
 		free(reply);
-
+		check_freespace(sb);
 		break;
 
 	status_error:
