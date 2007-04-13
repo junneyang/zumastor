@@ -468,20 +468,6 @@ found:
 	return 0;
 }
 
-/* daemonize code for kernel threads */
-static void daemonize_properly(char const *name, int snap)
-{
-	struct files_struct *files = current->files;
-
-	atomic_inc(&current->files->count); /* a ref count of files */
-	daemonize("%s %d", name, snap);
-	put_files_struct(current->files);   /* decrement the init files */
-	task_lock(current);
-	current->files = files;	/* re-assign file struct */
-	task_unlock(current);
-}
-
-
 /*
  * There happen to be four flavors of server replies to rw queries, two
  * write and two read, but the symmetry ends there.  Only one flavor
@@ -544,7 +530,7 @@ static int incoming(struct dm_target *target)
 	char *err_msg;
 	u32 chunksize_bits;
 
-	daemonize_properly("ddsnap-clnt", info->snap);
+	daemonize("%s %d", "ddsnap-clnt", info->snap);
 	while (down_interruptible(&info->exit2_sem))
 		;
 	trace_on(warn("Client thread started, pid=%i for snapshot %d", current->pid, info->snap);)
@@ -783,7 +769,7 @@ static int worker(struct dm_target *target)
 	struct task_struct *task = current;
 	int err;
 
-	daemonize_properly("ddsnap-wrkr", info->snap);
+	daemonize("%s %d", "ddsnap-wrkr", info->snap);
 	current->flags |= PF_LESS_THROTTLE;
 	trace_on(warn("Worker thread started, pid=%i for snapshot %d", current->pid, info->snap);)
 	while (down_interruptible(&info->exit1_sem))
@@ -895,7 +881,7 @@ static int control(struct dm_target *target)
 	int err, length;
 	char *err_msg;
 
-	daemonize_properly("ddsnap-cntl", info->snap);
+	daemonize("ddsnap-cntl", info->snap);
 	trace_on(warn("Control thread started, pid=%i for snapshot %d", current->pid, info->snap);)
 	sock = info->control_socket;
 	trace(warn("got socket %p", sock);)
@@ -1335,11 +1321,11 @@ static int ddsnap_create(struct dm_target *target, unsigned argc, char **argv)
 #endif
 
 	error = "Can't start daemon";
-	if ((err = kernel_thread((void *)incoming, target, 0)) < 0)
+	if ((err = kernel_thread((void *)incoming, target, CLONE_FILES)) < 0)
 		goto eek;
-	if ((err = kernel_thread((void *)worker, target, 0)) < 0)
+	if ((err = kernel_thread((void *)worker, target, CLONE_FILES)) < 0)
 		goto eek;
-	if ((err = kernel_thread((void *)control, target, 0)) < 0)
+	if ((err = kernel_thread((void *)control, target, CLONE_FILES)) < 0)
 		goto eek;
 	warn("Created snapshot device snapstore=%s origin=%s socket=%s snapshot=%i", argv[0], argv[1], argv[2], snap);
 	ddsnap_add_proc(argv[3], target); // use snapshot number as file name

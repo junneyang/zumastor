@@ -803,65 +803,52 @@ static int ddsnap_generate_vol(int serv_fd, char const *vol_filename, char const
 
 static int generate_delta_extents(u32 mode, int level, struct change_list *cl, int deltafile, char const *dev1name, char const *dev2name, int progress)
 {
-	int snapdev1, snapdev2;
-	int err = 0;
-	
-	snapdev1 = open(dev1name, O_RDONLY);
-	if (snapdev1 < 0) {
-		err = -errno;
-		goto gen_open1_error;
-	}
-
-	snapdev2 = open(dev2name, O_RDONLY);
-	if (snapdev2 < 0) {
-		err = -errno;
-		goto gen_open2_error;
-	}
-
-	/* Variable set up */
-	u32 chunk_size = 1 << cl->chunksize_bits;
+	int err = -ENOMEM;
+	int snapdev1 = -1, snapdev2 = -1;
 	unsigned char *dev1_extent   = malloc(MAX_MEM_SIZE);
 	unsigned char *dev2_extent   = malloc(MAX_MEM_SIZE);
 	unsigned char *extents_delta = malloc(MAX_MEM_SIZE);
 	unsigned char *gzip_delta    = malloc(MAX_MEM_SIZE + 12 + (MAX_MEM_SIZE >> 9));
+	unsigned char *dev2_gzip_extent = malloc(MAX_MEM_SIZE + 12 + (MAX_MEM_SIZE >> 9));
+
+	if (!dev1_extent || !dev2_extent || !extents_delta || !gzip_delta || !dev2_gzip_extent) {
+		warn("variable memory allocation failed: %s", strerror(-err));
+		goto out;
+	}
+	if (((snapdev1 = open(dev1name, O_RDONLY))< 0) || ((snapdev2 = open(dev2name, O_RDONLY)) < 0)) {
+		warn("could not open snapshot device \"%s\" for reading: %s", (snapdev1 < 0) ? dev1name : dev2name, strerror(errno));
+		err = -errno;
+       		goto out;
+	}
+	trace_on(printf("opened snapshot devices snap1=%d snap2=%d to create delta.\n", snapdev1, snapdev2););
 
 	u64 dev2_gzip_size;
-	unsigned char *dev2_gzip_extent = malloc(MAX_MEM_SIZE + 12 + (MAX_MEM_SIZE >> 9));
-	struct delta_extent_header deh2 = { .magic_num = MAGIC_NUM, .mode = RAW };
-
-	if (!dev1_extent || !dev2_extent || !extents_delta || !gzip_delta || !dev2_gzip_extent)
-       		goto gen_alloc_error;
-
-	trace_on(printf("opened snapshot devices snap1=%d snap2=%d to create delta.\n", snapdev1, snapdev2););
-	trace_off(printf("dev1name: %s\n", dev1name););
-	trace_off(printf("dev2name: %s\n", dev2name););
-	trace_on(printf("mode: %u\n", mode););
-	trace_off(printf("level: %d\n", level););
-	trace_off(printf("chunksize bits: %u\t", cl->chunksize_bits););
-	trace_off(printf("chunk_count: "U64FMT"\n", cl->count););
-	trace_on(printf("chunksize: %u\n", chunk_size););
-	trace_on(printf("starting delta generation\n"););
-
 	struct delta_extent_header deh = { .magic_num = MAGIC_NUM };
 	u64 extent_addr, chunk_num, num_of_chunks;
 	u64 extent_size, delta_size, gzip_size;
+	u32 chunk_size = 1 << cl->chunksize_bits;
+	struct delta_extent_header deh2 = { .magic_num = MAGIC_NUM, .mode = RAW };
 
+	trace_off(printf("dev1name: %s, dev2name: %s\n", dev1name, dev2name););
+	trace_off(printf("level: %d, chunksize bits: %u, chunk_count: "U64FMT"\n", level, cl->chunksize_bits, cl->count););
+	trace_on(printf("starting delta generation, mode %u, chunksize %u\n", mode, chunk_size););
 	for (chunk_num = 0; chunk_num < cl->count;) {
-		
 		extent_addr = cl->chunks[chunk_num] << cl->chunksize_bits;
-		
 		if (chunk_num == (cl->count - 1) )
 			num_of_chunks = 1;
 		else
 			num_of_chunks = chunks_in_extent(cl, chunk_num, chunk_size);
-
 		extent_size = chunk_size * num_of_chunks;
 		
 		/* read in extents from dev1 & dev2 */
-		if ((err = diskread(snapdev1, dev1_extent, extent_size, extent_addr)) < 0)
-			goto gen_readsnap1_error;
-		if ((err = diskread(snapdev2, dev2_extent, extent_size, extent_addr)) < 0)
-			goto gen_readsnap2_error;
+		if ((err = diskread(snapdev1, dev1_extent, extent_size, extent_addr)) < 0) {
+			warn("read from snapshot device \"%s\" failed ", dev1name);
+			goto error_source;
+		}
+		if ((err = diskread(snapdev2, dev2_extent, extent_size, extent_addr)) < 0) {
+			warn("read from snapshot device \"%s\" failed ", dev2name);
+			goto error_source;
+		}
 
 		/* delta extent header set-up*/
 		deh.gzip_on = FALSE;
@@ -871,43 +858,39 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 		deh.ext2_chksum = checksum((const unsigned char *) dev2_extent, extent_size);
 		
 		/* 3 different modes, raw (raw dev2 extent), xdelta (xdelta dev2 extent), best (either gzipped raw dev2 extent or gzipped xdelta dev2 extent) */
-		if (mode == RAW) {
-			if ((err = create_raw_delta (&deh, dev2_extent, extents_delta, extent_size, &delta_size)) < 0) 
-				goto error_source;
-			if ((err = gzip_on_delta(&deh, extents_delta, gzip_delta, delta_size, &gzip_size, level)) < 0)
-				goto error_source;
-		} else {
-			if ((err = create_xdelta_delta (&deh, dev1_extent, dev2_extent, extents_delta, extent_size, &delta_size)) < 0)
-				goto error_source;
-			if ((err = gzip_on_delta(&deh, extents_delta, gzip_delta, delta_size, &gzip_size, level)) < 0)
-				goto error_source;
-			if (mode != XDELTA) {
-				/* delta extent header set-up for dev2_extent */
-				deh2.gzip_on = FALSE;
-				deh2.extents_delta_length = extent_size;
-				if ((err = gzip_on_delta(&deh2, dev2_extent, dev2_gzip_extent, extent_size, &dev2_gzip_size, level)) < 0)
-					goto error_source;
+		if (mode == RAW)
+			err = create_raw_delta (&deh, dev2_extent, extents_delta, extent_size, &delta_size);
+		else
+			err = create_xdelta_delta (&deh, dev1_extent, dev2_extent, extents_delta, extent_size, &delta_size);
+		if ((err < 0) || ((err = gzip_on_delta(&deh, extents_delta, gzip_delta, delta_size, &gzip_size, level)) < 0))
+			goto error_source;
 
-				if (dev2_gzip_size <= gzip_size) {
-					
-					deh.mode = deh2.mode;
-					deh.gzip_on = deh2.gzip_on;
-					deh.extents_delta_length = deh2.extents_delta_length;
-
-					memcpy(gzip_delta, dev2_gzip_extent, dev2_gzip_size);
-				}
+		if (mode != RAW && mode != XDELTA) {
+			/* delta extent header set-up for dev2_extent */
+			deh2.gzip_on = FALSE;
+			deh2.extents_delta_length = extent_size;
+			if ((err = gzip_on_delta(&deh2, dev2_extent, dev2_gzip_extent, extent_size, &dev2_gzip_size, level)) < 0)
+				goto error_source;
+			if (dev2_gzip_size <= gzip_size) {
+				deh.mode = deh2.mode;
+				deh.gzip_on = deh2.gzip_on;
+				deh.extents_delta_length = deh2.extents_delta_length;
+				memcpy(gzip_delta, dev2_gzip_extent, dev2_gzip_size);
 			}
 		}
 
 		/* write the delta extent header and extents_delta to the delta file*/
 		trace_off(printf("writing delta for extent starting at chunk "U64FMT", address "U64FMT"\n", chunk_num, extent_addr););
-		if ((err = fdwrite(deltafile, &deh, sizeof(deh))) < 0)
-			goto gen_writehead_error;
-		if ((err = fdwrite(deltafile, gzip_delta, deh.extents_delta_length)) < 0)
-			goto gen_writedata_error;
+		if ((err = fdwrite(deltafile, &deh, sizeof(deh))) < 0) {
+			warn("unable to write delta header ");
+			goto error_source;
+		}
+		if ((err = fdwrite(deltafile, gzip_delta, deh.extents_delta_length)) < 0) {
+			warn("unable to write delta data ");
+			goto error_source;
+		}
 
 		chunk_num = chunk_num + num_of_chunks;
-
 		if (progress) {
 #ifdef DEBUG_GEN
 			printf("Generating chunk "U64FMT"/"U64FMT" ("U64FMT"%%)\n", chunk_num, cl->count, (chunk_num * 100) / cl->count);
@@ -918,75 +901,26 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 		}
 	}
 
-	/* clean up: release memory and close file */
-	free(dev2_gzip_extent);
-	free(gzip_delta);
-	free(extents_delta);
-	free(dev2_extent);
-	free(dev1_extent);
-
-	close(snapdev2);
-	close(snapdev1);
-
-	if (progress)
-		printf("\n");
-
 	/* Make sure everything in changelist was properly transmitted */
 	if (chunk_num != cl->count) {
 		warn("changelist was not fully transmitted");
-		return -ERANGE;
+		err = -ERANGE;
+	} else {
+		trace_on(printf("All chunks written to delta\n"););
+		err = 0;
 	}
-
-	trace_on(printf("All chunks written to delta\n"););
-
-	return 0;
-
-	/* error messages*/
-gen_open1_error:
-	warn("could not open snapshot device \"%s\" for reading: %s", dev1name, strerror(-err));
-	goto gen_cleanup;
-
-gen_open2_error:
-	warn("could not open snapshot device \"%s\" for reading: %s", dev2name, strerror(-err));
-	goto gen_close1_cleanup;
-
-gen_alloc_error:
-	err = -ENOMEM;
-	if (progress)
-		printf("\n");
-	warn("memory allocation failed while generating a "U64FMT" chunk extent starting at offset "U64FMT": %s", num_of_chunks, extent_addr, strerror(-err));
-	goto gen_closeall_cleanup;
-
-gen_readsnap1_error:
-	if (progress)
-		printf("\n");
-	warn("read from snapshot device \"%s\" failed ", dev1name);
-	goto error_source;
-
-gen_readsnap2_error:
-	if (progress)
-		printf("\n");
-	warn("read from snapshot device \"%s\" failed ", dev2name);
-	goto error_source;
-
-gen_writehead_error:
-	if (progress)
-		printf("\n");
-	warn("unable to write delta header ");
-	goto error_source;
-
-gen_writedata_error:
-	if (progress)
-		printf("\n");
-	warn("unable to write delta data ");
-	goto error_source;
+	goto print_out;
 
 error_source:
 	warn("for "U64FMT" chunk extent starting at offset "U64FMT": %s", num_of_chunks, extent_addr, strerror(-err));
-	goto gen_free_cleanup;
-
-	/* error cleanup */
-gen_free_cleanup:
+print_out:
+	if (progress)
+		printf("\n");
+out:
+	if (snapdev1 >= 0)
+		close(snapdev1);
+	if (snapdev2 >= 0)
+		close(snapdev2);
 	if (dev1_extent)
 		free(dev1_extent);
 	if (dev2_extent)
@@ -997,14 +931,6 @@ gen_free_cleanup:
 		free(gzip_delta);
 	if (dev2_gzip_extent)
 		free(dev2_gzip_extent);
-
-gen_closeall_cleanup:
-	close(snapdev2);
-
-gen_close1_cleanup:
-	close(snapdev1);
-
-gen_cleanup:
 	return err;
 }
 
@@ -1209,6 +1135,7 @@ static int ddsnap_send_delta(int serv_fd, u32 src_snap, u32 tgt_snap, char const
 
 	if ((err = outbead(ds_fd, SEND_DELTA, struct send_delta, remsnap, cl->count, 1 << cl->chunksize_bits, mode))) {
 		warn("unable to send delta: %s", strerror(-err));
+		free_change_list(cl);
 		return 1;
 	}
 
@@ -1218,21 +1145,21 @@ static int ddsnap_send_delta(int serv_fd, u32 src_snap, u32 tgt_snap, char const
 
 	if ((err = readpipe(ds_fd, &head, sizeof(head))) < 0) {
 		warn("unable to read response from downstream: %s", strerror(-err));
+		free_change_list(cl);
 		return 1;
 	}
 
 	trace_on(printf("reply = %x\n", head.code););
 
 	if (head.code != SEND_DELTA_PROCEED) {
-		if (head.code != SEND_DELTA_ERROR) {
+		if (head.code != SEND_DELTA_ERROR)
 			unknown_message_handler(ds_fd, &head);
-			return 1;
-		}
-		error_message_handler(ds_fd, "downstream server reason why send delta failed",
+		else
+			error_message_handler(ds_fd, "downstream server reason why send delta failed",
 				head.length);
+		free_change_list(cl);
 		return 1;
 	}
-
 	trace_on(fprintf(stderr, "sending delta\n"););
 
 	/* stream delta */
@@ -1240,6 +1167,7 @@ static int ddsnap_send_delta(int serv_fd, u32 src_snap, u32 tgt_snap, char const
 	char *dev1name;
 	if (!(dev1name = malloc_snapshot_name(devstem, src_snap))) {
 		warn("unable to allocate memory for dev1name");
+		free_change_list(cl);
 		return 1;
 	}
 
@@ -1247,6 +1175,7 @@ static int ddsnap_send_delta(int serv_fd, u32 src_snap, u32 tgt_snap, char const
 	if (!(dev2name = malloc_snapshot_name(devstem, tgt_snap))) {
 		warn("unable to allocate memory for dev2name");
 		free(dev1name); 
+		free_change_list(cl);
 		return 1;
 	}
 
@@ -1254,11 +1183,13 @@ static int ddsnap_send_delta(int serv_fd, u32 src_snap, u32 tgt_snap, char const
 		warn("could not send delta downstream for snapshot devices %s and %s", dev1name, dev2name);
 		free(dev2name);
 		free(dev1name);
+		free_change_list(cl);
 		return 1;
 	}
 
 	free(dev2name);
 	free(dev1name);
+	free_change_list(cl);
 
 	trace_on(fprintf(stderr, "waiting for response\n"););
 
@@ -1283,7 +1214,6 @@ static int ddsnap_send_delta(int serv_fd, u32 src_snap, u32 tgt_snap, char const
 	/* success */
 
 	trace_on(fprintf(stderr, "downstream server successfully applied delta to snapshot %u\n", remsnap););
-
 	return 0;
 }
 
@@ -1688,6 +1618,7 @@ static int ddsnap_generate_changelist(int serv_fd, char const *changelist_filena
 	}
 
 	int err = write_changelist(change_fd, cl);
+	free_change_list(cl);
 
 	close(change_fd);
 
