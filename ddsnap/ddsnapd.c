@@ -3541,8 +3541,8 @@ int snap_server(struct superblock *sb, int listenfd, int getsigfd, int agentfd)
 			if (pollvec[2].revents & (POLLHUP|POLLERR)) { /* agent went away */
 				err = DDSNAPD_AGENT_ERROR;
 				goto done;
-			} else
-				incoming(sb, &(struct client){ .sock = agentfd, .id = -2, .snaptag = -2 });
+			}
+			incoming(sb, &(struct client){ .sock = agentfd, .id = -2, .snaptag = -2 });
 		}
 
 		/* Client message? */
