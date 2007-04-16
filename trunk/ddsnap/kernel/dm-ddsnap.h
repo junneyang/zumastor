@@ -100,7 +100,7 @@ struct snapinfo { uint32_t snap; int8_t prio; uint16_t usecnt; char zero[3]; uin
 struct snaplist { uint32_t count; struct snapinfo snapshots[]; } PACKED;
 struct stream_changelist { uint32_t snap1; uint32_t snap2; } PACKED;
 struct changelist_stream { uint64_t chunk_count; uint32_t chunksize_bits; } PACKED;
-struct send_delta { uint32_t snap; uint64_t chunk_count; uint32_t chunk_size; uint32_t delta_mode; } PACKED;
+struct send_delta { uint32_t snap; uint64_t chunk_count; uint32_t chunk_size; uint32_t delta_mode; uint32_t vol_device; } PACKED;
 struct status_request { uint32_t snap; } PACKED;
 struct overall_status { uint32_t chunksize_bits; uint64_t used; uint64_t free; } PACKED;
 struct status { uint64_t ctime; uint32_t snap; uint64_t chunk_count[]; } PACKED;
