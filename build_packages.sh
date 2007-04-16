@@ -31,14 +31,14 @@ echo -e "done.\n"
 echo -n Building zumastor Debian package...
 pushd zumastor/zumastor >> $LOG || exit 1
 dch -b -v $VERSION-r$SVNREV "revision $SVNREV" || exit 1
-dpkg-buildpackage -rfakeroot >> $LOG || exit 1
+dpkg-buildpackage -uc -us -rfakeroot >> $LOG || exit 1
 popd >> $LOG
 echo -e "done.\n"
 
 echo -n Building ddsnap Debian package...
 pushd zumastor/ddsnap >> $LOG || exit 1
 dch -b -v $VERSION-r$SVNREV "revision $SVNREV" || exit 1
-dpkg-buildpackage -rfakeroot >> $LOG || exit 1
+dpkg-buildpackage -uc -us -rfakeroot >> $LOG || exit 1
 popd >> $LOG
 cp zumastor/*.deb .
 echo -e "done.\n"
