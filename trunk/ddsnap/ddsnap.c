@@ -198,7 +198,6 @@ struct delta_header
 	char magic[MAGIC_SIZE];
 	u64 chunk_num;
 	u32 chunk_size;
-	u32 vol_device;
 	u32 src_snap;
 	u32 tgt_snap;
 };
@@ -654,7 +653,7 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 	u64 dev2_gzip_size;
 	struct delta_extent_header deh = { .magic_num = MAGIC_NUM };
 	u64 extent_addr, chunk_num, num_of_chunks;
-	u64 extent_size, delta_size, gzip_size;
+	u64 extent_size, delta_size, gzip_size = MAX_MEM_SIZE;
 	u32 chunk_size = 1 << cl->chunksize_bits;
 	struct delta_extent_header deh2 = { .magic_num = MAGIC_NUM, .mode = RAW };
 
@@ -962,7 +961,7 @@ static struct change_list *stream_changelist(int serv_fd, u32 src_snap, u32 tgt_
 	return cl;
 }
 
-static int ddsnap_replication_send(int serv_fd, u32 src_snap, u32 tgt_snap, char const *devstem, u32 remsnap, u32 mode, int level, int ds_fd)
+static int ddsnap_replication_send(int serv_fd, u32 src_snap, u32 tgt_snap, char const *devstem, u32 mode, int level, int ds_fd)
 {
 	int fullvolume = (src_snap == -1);
 	char *dev1name = NULL, *dev2name = NULL;
@@ -997,7 +996,7 @@ static int ddsnap_replication_send(int serv_fd, u32 src_snap, u32 tgt_snap, char
 		u64 vol_size_bytes;
 		int dev2;
 		if ((dev2 = open(dev2name, O_RDONLY)) < 0) {
-			warn("cannot open the volume for getting volume size");
+			warn("cannot open the volume %s for getting volume size", dev2name);
 			goto out;
 		}
 		if ((err = fd_size(dev2, &vol_size_bytes)) < 0) {
@@ -1021,7 +1020,7 @@ static int ddsnap_replication_send(int serv_fd, u32 src_snap, u32 tgt_snap, char
 	trace_on(fprintf(stderr, "got changelist, sending upload request\n"););
 
 	/* request approval for delta send */
-	if ((err = outbead(ds_fd, SEND_DELTA, struct send_delta, remsnap, cl->count, 1 << cl->chunksize_bits, mode, fullvolume))) {
+	if ((err = outbead(ds_fd, SEND_DELTA, struct delta_header, DELTA_MAGIC_ID, cl->count, 1 << cl->chunksize_bits, src_snap, tgt_snap))) {
 		warn("unable to send delta: %s", strerror(-err));
 		goto out;
 	}
@@ -1069,7 +1068,7 @@ static int ddsnap_replication_send(int serv_fd, u32 src_snap, u32 tgt_snap, char
 	}
 
 	/* success */
-	trace_on(fprintf(stderr, "downstream server successfully applied delta to snapshot %u\n", remsnap););
+	trace_on(fprintf(stderr, "downstream server successfully applied delta to snapshot\n"););
 	err = 0;
 out:
 	if (dev1name)
@@ -1081,13 +1080,14 @@ out:
 	return err;
 }
 
-static int apply_delta_extents(int deltafile, u32 chunk_size, u64 chunk_count, char const *dev1name, char const *dev2name, int progress, int vol_device)
+static int apply_delta_extents(int deltafile, u32 chunk_size, u64 chunk_count, char const *dev1name, char const *dev2name, int progress)
 {
+	int fullvolume = !dev1name;
 	int snapdev1, snapdev2;
 	int err;
 
 	/* if an extent is being applied */
-	if (!vol_device) {
+	if (!fullvolume) {
 		snapdev1 = open(dev1name, O_RDONLY);
 		if (snapdev1 < 0) {
 			err = -errno;
@@ -1130,15 +1130,12 @@ static int apply_delta_extents(int deltafile, u32 chunk_size, u64 chunk_count, c
 		uncomp_size = extent_size;
 		extent_addr = deh.extent_addr;
 		
-		if (!vol_device && ((err = diskread(snapdev1, extent_data, extent_size, extent_addr)) < 0))
+		if (!fullvolume && ((err = diskread(snapdev1, extent_data, extent_size, extent_addr)) < 0))
 			goto apply_devread_error;
 		/* check to see if the checksum of snap0 is the same on upstream and downstream */
-		if (!vol_device && deh.ext1_chksum != checksum((const unsigned char *)extent_data, extent_size)) 
+		if (!fullvolume && deh.ext1_chksum != checksum((const unsigned char *)extent_data, extent_size)) 
 			goto apply_checksum_error_snap0;
 
-		trace_on(printf("extent data length is %llu (extent buffer is %llu)\n", deh.extents_delta_length, extent_size););
-
-		//printf("gzip_on %d, mode %d\n", deh.gzip_on, deh.mode);
 		/* gzip compression was used on extent */
 		if (deh.gzip_on == TRUE) {
 			if ((err = fdread(deltafile, comp_delta, deh.extents_delta_length)) < 0)
@@ -1161,7 +1158,7 @@ static int apply_delta_extents(int deltafile, u32 chunk_size, u64 chunk_count, c
 		//if the mode is RAW or XDELTA RAW then copy the delta file directly to updated (no uncompression)
 		if (deh.mode == RAW)
 			memcpy(updated, delta_data, extent_size);
-		if (!vol_device && deh.mode == XDELTA) {
+		if (!fullvolume && deh.mode == XDELTA) {
 			trace_off(printf("read %llx chunk delta extent data starting at chunk "U64FMT"/offset "U64FMT" from \"%s\"\n", deh.num_of_chunks, chunk_num, extent_addr, dev1name););
 			int apply_ret = apply_delta_chunk(extent_data, updated, delta_data, extent_size, uncomp_size);
 			trace_off(printf("apply_ret %d\n", apply_ret););
@@ -1192,7 +1189,7 @@ static int apply_delta_extents(int deltafile, u32 chunk_size, u64 chunk_count, c
 		printf("\n");
 
 	close(snapdev2);
-	if (!vol_device)
+	if (!fullvolume)
 		close(snapdev1);
 
 	trace_on(printf("All extents applied to %s\n", dev2name););
@@ -1335,26 +1332,24 @@ static int apply_delta(int deltafile, char const *devstem)
 		return -1; /* FIXME: use named error */
 	}
 
-	char *dev1name;
-	int err;
+	char *dev1name = NULL;
+	int err, fullvolume = (dh.src_snap == ~0UL);
 
-	/* check to see if the replication is full volume replication or replication via snapshot */
-	if (dh.vol_device)
-		dev1name = NULL;
-	else {
-		if (!(dev1name = malloc_snapshot_name(devstem, dh.src_snap))) {
-			warn("unable to allocate memory for dev1name");
-			return -ENOMEM;
-		}
+	/* check to see if the replication is full volume replication (dh.src_snap == -1) 
+	 * or replication via snapshot. In case of full volume replication, pass NULL dev1name 
+	 * to apply_delta_extents */
+	if (!fullvolume && !(dev1name = malloc_snapshot_name(devstem, dh.src_snap))) {
+		warn("unable to allocate memory for dev1name");
+		return -ENOMEM;
 	}
 
-	if ((err = apply_delta_extents(deltafile, dh.chunk_size, dh.chunk_num, dev1name, devstem, TRUE, dh.vol_device)) < 0) {
-		if (!dh.vol_device)
+	if ((err = apply_delta_extents(deltafile, dh.chunk_size, dh.chunk_num, dev1name, devstem, TRUE)) < 0) {
+		if (dev1name)
 			free(dev1name);
 		return err;
 	}
 
-	if (!dh.vol_device)
+	if (!fullvolume)
 		free(dev1name);
 
 	return 0;
@@ -1685,7 +1680,7 @@ static int ddsnap_delta_server(int lsock, char const *devstem)
 			goto end_connection;
 		}
 
-		struct send_delta body;
+		struct delta_header body;
 
 		switch (message.head.code) {
 		case SEND_DELTA:
@@ -1697,22 +1692,14 @@ static int ddsnap_delta_server(int lsock, char const *devstem)
 
 			memcpy(&body, message.body, sizeof(body));
 
-			trace_on(fprintf(stderr, "vol_device %u, snap %u\n", body.vol_device, body.snap););
-			if (!body.vol_device && body.snap == (u32)~0UL) {
-				snprintf(err_msg, MAX_ERRMSG_SIZE, "invalid snapshot %u in SEND_DELTA", body.snap);
-				err_msg[MAX_ERRMSG_SIZE-1] = '\0';
-				goto end_connection;
-			}
-
 			if (body.chunk_size == 0) {
 				snprintf(err_msg, MAX_ERRMSG_SIZE, "invalid chunk size %u in SEND_DELTA", body.chunk_size);
 				err_msg[MAX_ERRMSG_SIZE-1] = '\0';
 				goto end_connection;
 			}
 
-			char *snapdev;
-
-			if (!(snapdev = malloc_snapshot_name(devstem, body.snap))) {
+			char *src_snapdev = NULL;
+			if ((body.src_snap != (u32)~0UL) && !(src_snapdev = malloc_snapshot_name(devstem, body.src_snap))) {
 				snprintf(err_msg, MAX_ERRMSG_SIZE, "unable to allocate device name");
 				err_msg[MAX_ERRMSG_SIZE-1] = '\0';
 				goto end_connection;
@@ -1727,19 +1714,24 @@ static int ddsnap_delta_server(int lsock, char const *devstem)
 			if (outbead(csock, SEND_DELTA_PROCEED, struct {}) < 0) {
 				snprintf(err_msg, MAX_ERRMSG_SIZE, "unable to send delta proceed message to server");
 				err_msg[MAX_ERRMSG_SIZE-1] = '\0';
+				if (src_snapdev)
+					free(src_snapdev);
 				goto end_connection;
 			}
 
 			/* retrieve it */
 
 			if (apply_delta_extents(csock, body.chunk_size, 
-						body.chunk_count, snapdev, origindev, TRUE, body.vol_device) < 0) {
+						body.chunk_num, src_snapdev, origindev, TRUE) < 0) {
 				snprintf(err_msg, MAX_ERRMSG_SIZE, "unable to apply upstream delta to device \"%s\"", origindev);
 				err_msg[MAX_ERRMSG_SIZE-1] = '\0';
+				if (src_snapdev)
+					free(src_snapdev);
 				goto end_connection;
 			}
 
-			free(snapdev);
+			if (src_snapdev)
+				free(src_snapdev);
 
 			/* success */
 
@@ -2043,6 +2035,7 @@ static void cdUsage(poptContext optCon, int exitcode, char const *error, char co
 	exit(exitcode);
 }
 
+#define DEVMAP_PATH "/dev/mapper"
 int main(int argc, char *argv[])
 {
 	char const *command;
@@ -2695,6 +2688,120 @@ int main(int argc, char *argv[])
 			return ret;
 		}
 	}
+	/* syntax for delta/volume replication: ddsnap transmit <socket> <host[:port]> [fromsnap] <tosnap> */
+	if (strcmp(command, "transmit") == 0) {
+		poptContext cdCon;
+
+		struct poptOption options[] = {
+			{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &cdOptions, 0, NULL, NULL },
+			POPT_AUTOHELP
+			POPT_TABLEEND
+		};
+
+		cdCon = poptGetContext(NULL, argc-1, (const char **)&(argv[1]), options, 0);
+		poptSetOtherOptionHelp(cdCon, "<sockname> <snapshot1> <snapshot2> <devstem> <remsnapshot> <host>[:<port>]");
+
+		char c;
+
+		while ((c = poptGetNextOpt(cdCon)) >= 0);
+		if (c < -1) {
+			fprintf(stderr, "%s: %s: %s\n", argv[0], poptBadOption(cdCon, POPT_BADOPTION_NOALIAS), poptStrerror(c));
+			poptFreeContext(cdCon);
+			return 1;
+		}
+
+		/* Make sure the options are mutually exclusive */
+		if (xd+raw+test+best_comp > 1) {
+			fprintf(stderr, "%s %s: Too many chunk options were selected.\nPlease select only one: -x, -r, -t or -o\n", argv[0], argv[1]);
+			poptPrintUsage(cdCon, stderr, 0);
+			poptFreeContext(cdCon);
+			return 1;
+		}
+
+		u32 mode = (test ? TEST : (raw ? RAW : (xd ? XDELTA : BEST_COMP)));
+		if (best_comp)
+			gzip_level = MAX_GZIP_COMP;
+
+		trace_on(fprintf(stderr, "xd=%d raw=%d test=%d best_comp=%d mode=%u gzip_level=%d\n", xd, raw, test, best_comp, mode, gzip_level););
+
+		char const *sockname, *snaptag1str, *snaptag2str, *hoststr;
+
+		sockname      = poptGetArg(cdCon);
+		hoststr       = poptGetArg(cdCon);
+		snaptag1str   = poptGetArg(cdCon);
+		snaptag2str   = poptGetArg(cdCon);
+
+		if (hoststr == NULL)
+			cdUsage(cdCon, 1, argv[0], "Not enough arguments to send-delta\n");
+		if (poptPeekArg(cdCon) != NULL)
+			cdUsage(cdCon, 1, argv[0], "Too many arguments to send-delta\n");
+
+		poptFreeContext(cdCon);
+
+		char *hostname;
+		unsigned port;
+		hostname = strdup(hoststr);
+		if (strchr(hostname, ':')) {
+			unsigned int len = strlen(hostname);
+			port = parse_port(hostname, &len);
+			hostname[len] = '\0';
+		} else {
+			port = DEFAULT_REPLICATION_PORT;
+		}
+		int sock = create_socket(sockname);
+		int ds_fd = open_socket(hostname, port);
+		if (ds_fd < 0) {
+			fprintf(stderr, "%s %s: unable to connect to downstream server %s port %u\n", argv[0], argv[1], hostname, port);
+			free(hostname);
+			return 1;
+		}
+		free(hostname);
+
+		u32 snaptag1, snaptag2;
+		/* the fromsnap is optional. in case a single snap is specified, set src_snap to -1 
+		 * when calling ddsnap_replication_send to indicate full volume replication */
+		if (parse_snaptag(snaptag1str, &snaptag1) < 0) {
+			fprintf(stderr, "%s %s: invalid snapshot %s\n", argv[0], argv[1], snaptag1str);
+			return 1;
+		}
+		if (snaptag2str == NULL) {
+			snaptag2 = snaptag1;
+			snaptag1 = -1;
+		} else if (parse_snaptag(snaptag2str, &snaptag2) < 0) {
+			fprintf(stderr, "%s %s: invalid snapshot %s\n", argv[0], argv[1], snaptag2str);
+			return 1;
+		}
+		fprintf(stderr, "snaptag %d, snaptag2 %d\n", snaptag1, snaptag2);
+
+		struct sigaction ign_sa;
+		ign_sa.sa_handler = SIG_IGN;
+		sigemptyset(&ign_sa.sa_mask);
+		ign_sa.sa_flags = 0;
+		if (sigaction(SIGPIPE, &ign_sa, NULL) == -1)
+			warn("could not disable SIGPIPE: %s", strerror(errno));
+
+		int ret;
+		char *volume = strrchr(sockname, '/');
+		if (!volume) {
+			warn ("cannot get volume name from server sockname");
+			ret = 1;
+		} else {
+			/* FIXME: should get device name from ddsnap server instead of assuming the naming style by zumastor */
+			char *devstem = malloc(strlen(DEVMAP_PATH) + strlen(volume));
+			if (!devstem) {
+				warn ("cannot get volume name from server sockname");
+				ret = 1;
+			} else {
+				sprintf(devstem, "%s%s", DEVMAP_PATH, volume);
+				ret = ddsnap_replication_send(sock, snaptag1, snaptag2, devstem, mode, gzip_level, ds_fd);
+				free(devstem);
+			}
+		}
+		close(ds_fd);
+		close(sock);
+
+		return ret;
+	}
 	if (strcmp(command, "delta") == 0) {
 		poptContext deltaCon;
 		struct poptOption options[] = {
@@ -2820,109 +2927,6 @@ int main(int argc, char *argv[])
 			}
 			return ddsnap_apply_delta(argv[3], argv[4]);
 		}
-		if (strcmp(subcommand, "send") == 0) {
-			poptContext cdCon;
-
-			struct poptOption options[] = {
-				{ NULL, '\0', POPT_ARG_INCLUDE_TABLE, &cdOptions, 0, NULL, NULL },
-				POPT_AUTOHELP
-				POPT_TABLEEND
-			};
-
-			cdCon = poptGetContext(NULL, argc-2, (const char **)&(argv[2]), options, 0);
-			poptSetOtherOptionHelp(cdCon, "<sockname> <snapshot1> <snapshot2> <devstem> <remsnapshot> <host>[:<port>]");
-
-			char c;
-
-			while ((c = poptGetNextOpt(cdCon)) >= 0);
-			if (c < -1) {
-				fprintf(stderr, "%s: %s: %s\n", argv[0], poptBadOption(cdCon, POPT_BADOPTION_NOALIAS), poptStrerror(c));
-				poptFreeContext(cdCon);
-				return 1;
-			}
-
-			/* Make sure the options are mutually exclusive */
-			if (xd+raw+test+best_comp > 1) {
-				fprintf(stderr, "%s %s: Too many chunk options were selected.\nPlease select only one: -x, -r, -t or -o\n", argv[0], argv[1]);
-				poptPrintUsage(cdCon, stderr, 0);
-				poptFreeContext(cdCon);
-				return 1;
-			}
-
-			u32 mode = (test ? TEST : (raw ? RAW : (xd ? XDELTA : BEST_COMP)));
-			if (best_comp)
-				gzip_level = MAX_GZIP_COMP;
-
-			trace_on(fprintf(stderr, "xd=%d raw=%d test=%d best_comp=%d mode=%u gzip_level=%d\n", xd, raw, test, best_comp, mode, gzip_level););
-
-			char const *sockname, *snaptag1str, *snaptag2str, *devstem, *snaptagremstr, *hoststr;
-
-			sockname      = poptGetArg(cdCon);
-			snaptag1str   = poptGetArg(cdCon);
-			snaptag2str   = poptGetArg(cdCon);
-			devstem       = poptGetArg(cdCon);
-			snaptagremstr = poptGetArg(cdCon);
-			hoststr       = poptGetArg(cdCon);
-
-			if (hoststr == NULL)
-				cdUsage(cdCon, 1, argv[0], "Not enough arguments to send-delta\n");
-			if (poptPeekArg(cdCon) != NULL)
-				cdUsage(cdCon, 1, argv[0], "Too many arguments to send-delta\n");
-
-			poptFreeContext(cdCon);
-
-			char *hostname;
-			unsigned port;
-
-			hostname = strdup(hoststr);
-
-			if (strchr(hostname, ':')) {
-				unsigned int len = strlen(hostname);
-				port = parse_port(hostname, &len);
-				hostname[len] = '\0';
-			} else {
-				port = DEFAULT_REPLICATION_PORT;
-			}
-
-			u32 snaptag1, snaptag2, remsnaptag;
-
-			if (parse_snaptag(snaptag1str, &snaptag1) < 0)
-				snaptag1 = -1;
-
-			if (parse_snaptag(snaptag2str, &snaptag2) < 0) {
-				fprintf(stderr, "%s %s: invalid snapshot %s\n", argv[0], argv[1], snaptag2str);
-				return 1;
-			}
-
-			if (parse_snaptag(snaptagremstr, &remsnaptag) < 0) {
-				fprintf(stderr, "%s %s: invalid snapshot %s\n", argv[0], argv[1], snaptagremstr);
-				return 1;
-			}
-
-			fprintf(stderr, "snaptag %u, snaptag2 %u, remsnaptag %u\n", snaptag1, snaptag2, remsnaptag);
-			int sock = create_socket(sockname);
-
-			int ds_fd = open_socket(hostname, port);
-			if (ds_fd < 0) {
-				fprintf(stderr, "%s %s: unable to connect to downstream server %s port %u\n", argv[0], argv[1], hostname, port);
-				return 1;
-			}
-
-			struct sigaction ign_sa;
-
-			ign_sa.sa_handler = SIG_IGN;
-			sigemptyset(&ign_sa.sa_mask);
-			ign_sa.sa_flags = 0;
-
-			if (sigaction(SIGPIPE, &ign_sa, NULL) == -1)
-				warn("could not disable SIGPIPE: %s", strerror(errno));
-
-			int ret = ddsnap_replication_send(sock, snaptag1, snaptag2, devstem, remsnaptag, mode, gzip_level, ds_fd);
-			close(ds_fd);
-			close(sock);
-
-			return ret;
-		}
 		if (strcmp(subcommand, "listen") == 0) {
 			char const *devstem;
 			char const *hostspec;
@@ -2985,6 +2989,7 @@ int main(int argc, char *argv[])
 			int origin = open(devstem, O_RDONLY);
 			if (origin < 0) {
 				fprintf(stderr, "%s %s: unable to open origin device \"%s\" for reading: %s\n", command, subcommand, devstem, strerror(errno));
+				free(hostname);
 				return 1;
 			}
 
@@ -2993,8 +2998,10 @@ int main(int argc, char *argv[])
 			int sock = bind_socket(hostname, port);
 			if (sock < 0) {
 				fprintf(stderr, "%s %s: unable to bind to %s port %u\n", command, subcommand, hostname, port);
+				free(hostname);
 				return 1;
 			}
+			free(hostname);
 
 			if (!nobg) {
 				pid_t pid;
