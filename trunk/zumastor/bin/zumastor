@@ -110,7 +110,7 @@ function new_target_snapshot {
 
 	log "new snapshot will be '$next'"
 
-	# need to create the device in order for ddsnap delta send to work
+	# need to create the device in order for ddsnap transmit to work
 	create_snapshot $vol $next
 	# but we don't need to mount it
 
@@ -186,7 +186,7 @@ function replicate_snapshot {
 
 	log "replication for snapshot '$snap' on volume '$vol' to '$host'"
 
-	old_snap=$(cat $hold_file) || { echo "initial replication"; old_snap=0; }
+	old_snap=$(cat $hold_file) || { echo "initial replication"; }
 
 	rem_snap=$(run_remote $host "cat $VOLUMES/$vol/source/hostname") && [[ $rem_snap = $MYHOSTNAME ]] || \
 		{ log "set '$MYHOSTNAME' as source for '$vol' on '$host' first!"; usecount_decrement $vol $snap; return 1; }
@@ -210,19 +210,19 @@ function replicate_snapshot {
 
 	log "remote snapshot id $rem_snap listen started"
 
-	# send the changes since the last snapshot via ddsnap delta send
-	ddsnap delta send -r -g 5 $server $old_snap $snap /dev/mapper/$vol $rem_snap $host:$port || { \
-		log "delta send $server $old_snap $snap /dev/mapper/$vol $rem_snap $host:$port failed"; \
+	# send the changes since the last snapshot via ddsnap transmit
+	ddsnap transmit -r -g 5 $server $host:$port $old_snap $snap || { \
+		log "transmit $server $host:$port $old_snap $snap failed"; \
 		rm $send_file; usecount_decrement $vol $snap; return 1; }
 
-	run_remote $host "zumastor receive $vol $port done" || { log "zumastor receive $vol $port done failed"; \
+	run_remote $host "zumastor receive $vol $port done $snap" || { \
+		log "zumastor receive $vol $port done $snap failed"; \
 		rm $send_file; usecount_decrement $vol $snap; return 1; }
 
 	# !!! FIXME TODO this is racy, we should save state by journaling
 	mv $send_file $hold_file
 
-	# FIXME TODO conditional will go away once we have full volume replication
-	[[ $old_snap -ne 0 ]] && usecount_decrement $vol $old_snap
+	[[ $old_snap ]] && usecount_decrement $vol $old_snap
 
 	return 0
 }
@@ -604,11 +604,6 @@ function set_source {
 	else
 		echo $period > $path/source/period || return 1
 	fi
-
-	# FIXME TODO - snapshot 0 may be used for the source for chained replication, therefore
-	# we arbitrarily pick 1, because no other snapshots should exist
-	[[ $new == "yes" ]] && { create_snapshot $vol 1 || return 1; }
-	[[ $new == "yes" ]] && { echo 1 > $path/source/hold || return 1; }
 }
 
 function trigger_snapshot {
@@ -643,8 +638,9 @@ function trigger_replication {
 # replication_cycle -
 # called on a downstream host after each ddsnap listen cycle
 function replication_cycle {
-	[ $# -eq 1 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
+	[ $# -eq 2 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
 	local -r vol=$1
+	local -r next=$2
 	local -r sock=${SERVERS}/$vol
 	local -r path=${VOLUMES}/$vol
 	local -r holdfile=$path/source/hold
@@ -655,10 +651,6 @@ function replication_cycle {
 
 	if [[ -z $hold ]]; then
 		hold=initial
-		next=0
-	else
-		# FIXME TODO - can we assume next snapshot number? no not for chained replication
-		next=$(( $hold + 1 ))
 	fi
 
 	log "replication cycle beginning - snapshot ($hold, $next)..." $log
@@ -1068,7 +1060,7 @@ status)
 	;;
 receive)
 	# called via upstream host's ssh command to start/stop listen
-	[ $# -eq 4 ] || { echo "usage: $0 receive <vol> <port> {start|done}"; exit 2; }
+	[ $# -ge 4 ] || { echo "usage: $0 receive <vol> <port> {start|done <snap>}"; exit 2; }
 	declare vol=$2
 	declare port=$3
 	declare startstop=$4
@@ -1080,9 +1072,10 @@ receive)
 
 	case $startstop in
 	start)
+		[ $# -eq 4 ] || { echo "usage: $0 receive <vol> <port> start"; exit 2; }
 		# !!! FIXME TODO if the hold file doesn't exist
 		# assume we are initializing replication at snapshot 0
-		snap=$(cat $holdfile 2>/dev/null) || snap=0
+		snap=$(cat $holdfile 2>/dev/null)
 
 		# start the listen daemon
 		# FIXME TODO - for now we listen on 0.0.0.0 and we don't check where
@@ -1102,8 +1095,10 @@ receive)
 		[[ $rpid -gt 1 ]] && echo $snap
 		exit $? ;;
 	done)
+		[ $# -eq 5 ] || { echo "usage: $0 receive <vol> <port> done <snap>"; exit 2; }
 		pkill -f "ddsnap delta listen /dev/mapper/$vol 0.0.0.0:$port$"
-		replication_cycle $vol
+		snap=$5
+		replication_cycle $vol $snap
 
 		exit $? ;;
 	esac
