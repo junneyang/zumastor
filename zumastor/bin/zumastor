@@ -41,10 +41,12 @@ function new_snapshot {
 
 	log "new '$kind' snapshot requested for volume '$vol'"
 
-	[ -f $maxfile ] || { echo "$0: '$maxfile' is missing, doing nothing"; return 1; }
-	read max <$maxfile
-	[ $max ] || { echo "$0: '$maxfile' is empty, doing nothing"; return 1; }
-	[ $max -gt 0 ] || { echo "$0: '$maxfile' contains zero, doing nothing"; return 1; }
+	if [[ $kind != "nodevice" ]]; then
+		[ -f $maxfile ] || { echo "$0: '$maxfile' is missing, doing nothing"; return 1; }
+		read max <$maxfile
+		[ $max ] || { echo "$0: '$maxfile' is empty, doing nothing"; return 1; }
+		[ $max -gt 0 ] || { echo "$0: '$maxfile' contains zero, doing nothing"; return 1; }
+	fi
 
 	next=$(read_and_inc $master/next) || { log "snapshot number error: $master/next"; return 1; }
 	log "new snapshot will be '$next'"
@@ -58,6 +60,9 @@ function new_snapshot {
 	snapshots[$num]=$next
 
 	create_snapshot $vol $next
+	[[ $kind == "nodevice" ]] && return 0
+
+	create_device $vol $next
 	mount_device $vol $next
 
 	if [[ $num -ge $max ]]; then
@@ -112,6 +117,7 @@ function new_target_snapshot {
 
 	# need to create the device in order for ddsnap transmit to work
 	create_snapshot $vol $next
+	create_device $vol $next
 	# but we don't need to mount it
 
 	send_to_fifo $target_fifo $next || return 1
@@ -182,13 +188,13 @@ function replicate_snapshot {
 	local -r hold_file=$target_dir/hold
 	local -r server=$SERVERS/$vol
 	local -r port_file=$target_dir/port
-	local old_snap rem_snap port send
+	local old_snap output port send
 
 	log "replication for snapshot '$snap' on volume '$vol' to '$host'"
 
 	old_snap=$(cat $hold_file) || { echo "initial replication"; }
 
-	rem_snap=$(run_remote $host "cat $VOLUMES/$vol/source/hostname") && [[ $rem_snap = $MYHOSTNAME ]] || \
+	output=$(run_remote $host "cat $VOLUMES/$vol/source/hostname") && [[ $output= $MYHOSTNAME ]] || \
 		{ log "set '$MYHOSTNAME' as source for '$vol' on '$host' first!"; usecount_decrement $vol $snap; return 1; }
 
 	if [[ -e $send_file ]]; then
@@ -204,11 +210,11 @@ function replicate_snapshot {
 	port=$(cat $port_file) || { log "error reading port from '$port_file'"; \
 		rm $send_file; usecount_decrement $vol $snap; return 1; }
 
-	rem_snap=$(run_remote $host "zumastor receive $vol $port start") || \
+	run_remote $host "zumastor receive $vol $port start" || \
 		{ log "starting remote snapshot receive failed"; \
 		rm $send_file; usecount_decrement $vol $snap; return 1; }
 
-	log "remote snapshot id $rem_snap listen started"
+	log "remote listen for volume '$vol' on '$host:$port' started"
 
 	# send the changes since the last snapshot via ddsnap transmit
 	ddsnap transmit -r -g 5 $server $host:$port $old_snap $snap || { \
@@ -658,6 +664,9 @@ function replication_cycle {
 	log "creating snapshot..." $log
 	create_snapshot $vol $next >> $log 2>&1
 
+	log "creating device..." $log
+	create_device $vol $next >> $log 2>&1
+
 	log "setting snapshot unquashable..." $log
 	set_priority $vol $next 127 >> $log 2>&1
 
@@ -992,13 +1001,17 @@ stop)
 	esac
 	;;
 snapshot)
-	[ $# -eq 3 ] || { echo "usage: $0 snapshot <vol> <kind>"; exit 2; }
+	[[ $# -eq 2 ]] || [[ $# -eq 3 ]] || { echo "usage: $0 snapshot <vol> [kind]"; exit 2; }
 	declare vol=$2
 	declare kind=$3
 
 	verify_managed_vol $vol || { echo "$0: volume '$vol' is not a managed volume"; exit 1; }
-	find_in $kind ${KINDS[@]} || { echo "$0: unknown snapshot type '$kind'"; exit 1; }
-
+	if [[ $# -eq 3 ]]; then
+		find_in $kind ${KINDS[@]} || { echo "$0: unknown snapshot type '$kind'"; exit 1; }
+	else
+		kind="nodevice"
+	fi
+	
 	trigger_snapshot $vol $kind
 	exit $?
 	;;

@@ -209,8 +209,8 @@ function create_device {
 }
 
 # create_snapshot <vol> <id>
-# Given a volume <vol> and snapshot id <id>, create a new snapshot and device
-# mapper entry for snapshot device.  If id -1 is provided, return error
+# Given a volume <vol> and snapshot id <id>, set a new snapshot with tag <id>
+# If id -1 is provided, return error
 function create_snapshot {
 	[ $# -eq 2 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
 	local -r vol=$1
@@ -222,8 +222,6 @@ function create_snapshot {
 
 	ddsnap create $server $id || return 1
 
-	# always create the device
-	create_device $vol $id || { ddsnap delete $server $id ; return 1; }
 }
 
 # mount_device <vol> <id>
