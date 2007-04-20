@@ -41,7 +41,7 @@ function new_snapshot {
 
 	log "new '$kind' snapshot requested for volume '$vol'"
 
-	if [[ $kind != "nodevice" ]]; then
+	if [[ $kind != "manual" ]]; then
 		[ -f $maxfile ] || { echo "$0: '$maxfile' is missing, doing nothing"; return 1; }
 		read max <$maxfile
 		[ $max ] || { echo "$0: '$maxfile' is empty, doing nothing"; return 1; }
@@ -60,9 +60,9 @@ function new_snapshot {
 	snapshots[$num]=$next
 
 	create_snapshot $vol $next
-	[[ $kind == "nodevice" ]] && return 0
-
 	create_device $vol $next
+
+	[[ $kind == "manual" ]] && return 0
 	mount_device $vol $next
 
 	if [[ $num -ge $max ]]; then
@@ -1009,7 +1009,7 @@ snapshot)
 	if [[ $# -eq 3 ]]; then
 		find_in $kind ${KINDS[@]} || { echo "$0: unknown snapshot type '$kind'"; exit 1; }
 	else
-		kind="nodevice"
+		kind="manual"
 	fi
 	
 	trigger_snapshot $vol $kind
