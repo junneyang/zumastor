@@ -342,6 +342,7 @@ function stop_nag {
 	[ $# -eq 1 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
 	local -r vol=$1
 
+	pkill -f "ddsnap delta listen /dev/mapper/$vol 0.0.0.0"
 	pkill -f "zumastor start source $vol$" || return 1
 }
 
