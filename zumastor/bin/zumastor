@@ -194,7 +194,7 @@ function replicate_snapshot {
 
 	old_snap=$(cat $hold_file) || { echo "initial replication"; }
 
-	output=$(run_remote $host "cat $VOLUMES/$vol/source/hostname") && [[ $output= $MYHOSTNAME ]] || \
+	output=$(run_remote $host "cat $VOLUMES/$vol/source/hostname") && [[ $output = $MYHOSTNAME ]] || \
 		{ log "set '$MYHOSTNAME' as source for '$vol' on '$host' first!"; usecount_decrement $vol $snap; return 1; }
 
 	if [[ -e $send_file ]]; then
