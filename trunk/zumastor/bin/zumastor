@@ -449,7 +449,6 @@ function forget_volume {
 
 	rmdir $path/targets
 	rm -rf $path/device
-	[[ -e $path/zero ]] && rm $path/zero
 
 	[[ -d $LOGS/.archived ]] || mkdir $LOGS/.archived
 	mv $LOGS/$vol $LOGS/.archived/`date +%s`.$vol
@@ -786,10 +785,6 @@ define)
 				|| { echo "$0: init volume '$vol' failed"; exit 1; }
 
 			echo "Successfully created and initialized volume '$vol'."
-
-			create_snapshot $vol 0 || { echo "$0: error with initial snapshot"; exit 1; }
-			echo 0 > $VOLUMES/$vol/zero
-
 			echo "You can now create a filesystem on /dev/mapper/$vol"
 		fi
 
