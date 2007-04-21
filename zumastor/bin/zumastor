@@ -105,6 +105,7 @@ function new_target_snapshot {
 	local -r target_fifo=$VOLUMES/$vol/targets/$hostname/trigger
 	local -r sock=${SERVERS}/$vol
 	local -r master=$VOLUMES/$vol/master
+	local send_file send
 
 	[ -e $target_fifo ] || { log "target trigger for $hostname does not exist"; return 1; }
 
@@ -114,6 +115,17 @@ function new_target_snapshot {
 	next=$(read_and_inc $master/next) || { log "ssn error: $master/next"; return 1; }
 
 	log "new snapshot will be '$next'"
+
+	# record the snapshot to be created first so that we remember to remove it properly during zumastor stop
+	send_file=$VOLUMES/$vol/targets/$hostname/send.$next
+	if [[ -e $send_file ]]; then
+		log "$send_file exists, cleaning up previous replication cycle"
+		send=$(cat $send_file)
+		[[ -z $send ]] || { log "dropping usecount for $vol($send)"; usecount_decrement $vol $send; }
+		rm $send_file
+	fi
+	echo $next > $send_file || { log "error writing snapshot id '$next' to '$send_file'"; \
+		rm $send_file; usecount_decrement $vol $next; return 1; }
 
 	# need to create the device in order for ddsnap transmit to work
 	create_snapshot $vol $next
@@ -184,53 +196,58 @@ function replicate_snapshot {
 	local -r host=$2
 	local -r snap=$3
 	local -r target_dir=$VOLUMES/$vol/targets/$host
-	local -r send_file=$target_dir/send
+	local -r send_file=$target_dir/send.$snap
 	local -r hold_file=$target_dir/hold
 	local -r server=$SERVERS/$vol
 	local -r port_file=$target_dir/port
-	local old_snap output port send
+	local old_snap rem_snap port
 
 	log "replication for snapshot '$snap' on volume '$vol' to '$host'"
 
 	old_snap=$(cat $hold_file) || { echo "initial replication"; }
 
-	output=$(run_remote $host "cat $VOLUMES/$vol/source/hostname") && [[ $output = $MYHOSTNAME ]] || \
+	rem_snap=$(run_remote $host "cat $VOLUMES/$vol/source/hostname") && [[ $output = $MYHOSTNAME ]] || \
 		{ log "set '$MYHOSTNAME' as source for '$vol' on '$host' first!"; usecount_decrement $vol $snap; return 1; }
-
-	if [[ -e $send_file ]]; then
-		log "$send_file exists, cleaning up previous replication cycle"
-		send=$(cat $send_file)
-		[[ -z $send ]] || { log "dropping usecount for $vol($snap)"; usecount_decrement $vol $send; }
-		rm $send_file
-	fi
-
-	echo $snap > $send_file || { log "error writing snapshot id '$snap' to '$send_file'"; \
-		rm $send_file; usecount_decrement $vol $snap; return 1; }
 
 	port=$(cat $port_file) || { log "error reading port from '$port_file'"; \
 		rm $send_file; usecount_decrement $vol $snap; return 1; }
 
-	run_remote $host "zumastor receive $vol $port start" || \
+	rem_snap=$(run_remote $host "zumastor receive $vol $port start") || \
 		{ log "starting remote snapshot receive failed"; \
 		rm $send_file; usecount_decrement $vol $snap; return 1; }
 
 	log "remote listen for volume '$vol' on '$host:$port' started"
 
+	# in case of mismatch, trust the downstream side
+	if [[ $old_snap -ne $rem_snap ]]; then
+		echo replication mismatch old_snap $old_snap rem_snap $rem_snap
+		[[ $old_snap ]] && usecount_decrement $vol $old_snap
+		[[ -e $target_dir/send.$rem_snap ]] && rm $target_dir/send.$rem_snap
+		old_snap=$rem_snap
+	fi
 	# send the changes since the last snapshot via ddsnap transmit
-	ddsnap transmit -r -g 5 $server $host:$port $old_snap $snap || { \
+	# cleanup in case of failure so that we roll back to full volume replication next time
+	ddsnap transmit $server $host:$port -r -g 5 $old_snap $snap || { \
 		log "transmit $server $host:$port $old_snap $snap failed"; \
-		rm $send_file; usecount_decrement $vol $snap; return 1; }
+		rm $send_file; usecount_decrement $vol $snap; rm $hold_file; [[ $old_snap ]] && usecount_decrement $vol $old_snap; return 1; }
 
 	run_remote $host "zumastor receive $vol $port done $snap" || { \
 		log "zumastor receive $vol $port done $snap failed"; \
 		rm $send_file; usecount_decrement $vol $snap; return 1; }
 
+	#[[ $snap -eq 5 ]] && restart_plug
 	# !!! FIXME TODO this is racy, we should save state by journaling
 	mv $send_file $hold_file
 
 	[[ $old_snap ]] && usecount_decrement $vol $old_snap
 
 	return 0
+}
+
+function restart_plug {
+	echo "TESTING"
+	/etc/init.d/zumastor restart
+	exit
 }
 
 function run_master {
@@ -350,6 +367,8 @@ function stop_nag {
 
 	pkill -f "ddsnap delta listen /dev/mapper/$vol 0.0.0.0"
 	pkill -f "zumastor start source $vol$" || return 1
+	pkill -f "ddsnap delta listen /dev/mapper/$vol 0.0.0.0" || return 1
+	sync
 }
 
 function stop_target {
@@ -358,6 +377,7 @@ function stop_target {
 	local -r host=$2
 
 	pkill -f "zumastor start target $vol $host$" || return 1
+	pkill -f "ddsnap transmit $SERVERS/$vol $host$" || return 1
 	rm $VOLUMES/$vol/targets/$host/.sleeppid 2> /dev/null
 }
 
@@ -389,12 +409,6 @@ function init_define_volume {
 
 	create_device $vol -1 || { echo create failed;return 1; }
 	# do not mount
-
-	log "zeroing out origin device" $log
-	echo -n Zeroing out origin device. This may take a while...
-	dd if=/dev/zero of=/dev/mapper/$vol bs=1M >> $log 2>&1
-	echo done!
-	log "zeroing out origin device completed" $log
 }
 
 function define_volume {
@@ -515,6 +529,7 @@ function forget_source {
 	local -r vol=$1
 	local hold
 
+	zumastor stop source $vol
 	# !!! FIXME TODO clean up replication in progress
 	hold=$(cat $VOLUMES/$vol/source/hold 2> /dev/null)
 	[[ $hold != "" ]] && usecount_decrement $vol $hold
@@ -1074,6 +1089,7 @@ receive)
 	declare port=$3
 	declare startstop=$4
 	declare holdfile=$VOLUMES/$vol/source/hold
+	declare log=${LOGS}/$vol/delta.log
 	declare rpid
 	declare snap
 
@@ -1093,9 +1109,9 @@ receive)
 		# environment variable
 
 		# kill listen first in case it is already listening (previous replication interrupted)
-		pkill -f "ddsnap delta listen /dev/mapper/$vol 0.0.0.0:$port$"
+		pkill -f "ddsnap delta listen /dev/mapper/$vol 0.0.0.0"
 
-		rpid=$(ddsnap delta listen /dev/mapper/$vol 0.0.0.0:$port)
+		rpid=$(ddsnap delta listen /dev/mapper/$vol 0.0.0.0:$port -l $log)
 
 		# if successful, ouput should be "pid = <pid>"
 		rpid=${rpid/pid = /}
@@ -1105,7 +1121,7 @@ receive)
 		exit $? ;;
 	done)
 		[ $# -eq 5 ] || { echo "usage: $0 receive <vol> <port> done <snap>"; exit 2; }
-		pkill -f "ddsnap delta listen /dev/mapper/$vol 0.0.0.0:$port$"
+		pkill -f "ddsnap delta listen /dev/mapper/$vol 0.0.0.0"
 		snap=$5
 		replication_cycle $vol $snap
 
