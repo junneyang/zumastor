@@ -283,13 +283,12 @@ function get_managed_snapshots {
 	local snappath
 	local snapshots
 
-	# !!! FIXME TODO: add hold/send
 	for kind in ${KINDS[@]}; do
 		snappath=$VOLUMES/$vol/master/snapshots/$kind
 		[[ -e $snappath ]] && cat $snappath # !!! find a better way
 	done
 
-	for snappath in $VOLUMES/$vol/targets/*/{hold,send} $VOLUMES/$vol/source/{hold,send}; do
+	for snappath in $VOLUMES/$vol/targets/*/{hold,send.*} $VOLUMES/$vol/source/{hold,send}; do
 		[[ -e $snappath ]] && cat $snappath # !!! find a better way
 	done
 
