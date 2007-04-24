@@ -102,6 +102,7 @@ sed --in-place '/^kernel.*zumastor/s/$/ noapic/' /boot/grub/menu.lst
 #
 cp zumtest.sh /etc/init.d/zumtest
 chmod 755 /etc/init.d/zumtest
+ln -s ../init.d/zumtest /etc/rc2.d/S99zumtest
 #
 # Install 'tree' dependency
 #
