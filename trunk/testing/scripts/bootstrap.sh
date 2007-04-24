@@ -1,5 +1,23 @@
 #!/bin/sh
 
+#
+# Potentially modifiable parameters.
+#
+# Name of the main installed Qemu disk image.
+TESTIMG=test.img
+# Names of the test origin store and snapshot store Qemu disk images.
+ORIGIMG=origstore.img
+SNAPIMG=snapstore.img
+# Name of target Zumastor support directory.  This must match the name in the
+# preseed file!
+ZUMADIR=zuma
+# Where we put the "zumtest" link so it'll be run at boot.
+ZRUNDIR=/etc/rc2.d
+# Name of the zumastor volume we create for testing.
+TESTVOL=testvol
+# Name of the directory upon which we mount that volume.
+ZTESTFS=ztestfs
+
 usage()
 {
 	echo "Usage: $0 <path>" 1>&2
@@ -58,7 +76,6 @@ fi
 # Tar up the zumastor packages.
 #
 debtar=${SPWD}/debtar-$$.tar
-zuminstall=zuminstall.sh
 trap "rm -f ${instiso} ${debtar} test.img; exit 1" 1 2 3 9
 tar cf ${debtar} ${KHDR} ${KIMG} ${DDSN} ${ZUMA}
 cd $SPWD
@@ -68,7 +85,7 @@ cd $SPWD
 cat <<EOF_zuminstall.sh >zuminstall.sh
 #!/bin/sh
 
-cd /zuma
+cd /${ZUMADIR}
 #
 # Install the packages that have already been placed here by the bootstrap
 # script and the preseed mechanism.
@@ -102,11 +119,17 @@ sed --in-place '/^kernel.*zumastor/s/$/ noapic/' /boot/grub/menu.lst
 #
 cp zumtest.sh /etc/init.d/zumtest
 chmod 755 /etc/init.d/zumtest
-ln -s ../init.d/zumtest /etc/rc2.d/S99zumtest
+ln -s ../init.d/zumtest ${ZRUNDIR}/S99zumtest
 #
 # Install 'tree' dependency
 #
 /usr/bin/apt-get install tree
+#
+# Install contents of CD zumastor directory, if any.
+#
+if [ -d /cdrom/zumastor ]; then
+	cp -r /cdrom/zumastor /zuma
+fi 
 exit 0
 EOF_zuminstall.sh
 chmod 755 zuminstall.sh
@@ -123,8 +146,12 @@ cat <<EOF_zumtest.sh >zumtest.sh
 echo "Zumastor automated test lashup..."
 
 zumastor status
-zumastor define volume -i testvol /dev/hdb /dev/hdc
+zumastor define volume -i ${TESTVOL} /dev/hdb /dev/hdc
 zumastor status
+mkfs.ext3 /dev/mapper/${TESTVOL}
+mkdir -p /${ZTESTFS}
+mount /dev/mapper/${TESTVOL} /${ZTESTFS}
+
 # if zumastor volume exists, assume we're running
 # else set up zumastor volume
 # run test...
@@ -139,19 +166,19 @@ tar -r -f ${debtar} zuminstall.sh zumtest.sh
 # Create the qemu disk image then boot qemu from our iso to do the install
 #
 qemu-img create -f qcow2 test.img 10G
-qemu -no-reboot -hdb ${debtar} -cdrom ${instiso} -boot d test.img
+qemu -no-reboot -hdb ${debtar} -cdrom ${instiso} -boot d ${TESTIMG}
 
 trap - 1 2 3 9
 
 #
 # Build origin and snapstore disk images.
 #
-qemu-img create -f qcow2 origstore.img 2G
-qemu-img create -f qcow2 snapstore.img 2G
+qemu-img create -f qcow2 ${ORIGIMG} 2G
+qemu-img create -f qcow2 ${SNAPIMG} 2G
 #
 # Now start the test.
 #
-qemu -no-reboot -boot c -hdb origstore.img -hdc snapstore.img test.img
+qemu -no-reboot -boot c -hdb ${ORIGIMG} -hdc ${SNAPIMG} ${TESTIMG}
 
 exit 0
 
