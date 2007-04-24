@@ -1,13 +1,15 @@
 #!/bin/sh
 
+set -x
+
 #
 # Potentially modifiable parameters.
 #
 # Name of the main installed Qemu disk image.
-TESTIMG=test.img
+TESTIMG=~/local/test.img
 # Names of the test origin store and snapshot store Qemu disk images.
-ORIGIMG=origstore.img
-SNAPIMG=snapstore.img
+ORIGIMG=~/local/origstore.img
+SNAPIMG=~/local/snapstore.img
 # Name of target Zumastor support directory.  This must match the name in the
 # preseed file!
 ZUMADIR=zuma
@@ -17,6 +19,8 @@ ZRUNDIR=/etc/rc2.d
 TESTVOL=testvol
 # Name of the directory upon which we mount that volume.
 ZTESTFS=ztestfs
+# The command that actually runs the tests.
+RUNTESTS=/zuma/zumastor/tests/runtests
 
 usage()
 {
@@ -145,16 +149,35 @@ cat <<EOF_zumtest.sh >zumtest.sh
 
 echo "Zumastor automated test lashup..."
 
-zumastor status
-zumastor define volume -i ${TESTVOL} /dev/hdb /dev/hdc
-zumastor status
-mkfs.ext3 /dev/mapper/${TESTVOL}
-mkdir -p /${ZTESTFS}
-mount /dev/mapper/${TESTVOL} /${ZTESTFS}
+if [ ! -b /dev/mapper/${TESTVOL}1 ]; then
+	echo -n "	Creating ${TESTVOL}1..."
+	zumastor define volume -i ${TESTVOL}1 /dev/hdb1 /dev/hdc1
+	zumastor define master ${TESTVOL}1
+	echo -n "${TESTVOL}2..."
+	zumastor define volume -i ${TESTVOL}2 /dev/hdb2 /dev/hdc2
+	zumastor define master ${TESTVOL}2
+	echo -n "${TESTVOL}3..."
+	zumastor define volume -i ${TESTVOL}3 /dev/hdb3 /dev/hdc3
+	zumastor define master ${TESTVOL}3
+	echo "done."
+	echo -n "	Creating file systems..."
+	mkfs.ext3 /dev/mapper/${TESTVOL}1 >/dev/null 2>&1
+	mkfs.ext3 /dev/mapper/${TESTVOL}2 >/dev/null 2>&1
+	mkfs.ext3 /dev/mapper/${TESTVOL}3 >/dev/null 2>&1
+	echo "done."
+	mkdir -p /${ZTESTFS}1 /${ZTESTFS}2 /${ZTESTFS}3
+fi
 
-# if zumastor volume exists, assume we're running
-# else set up zumastor volume
-# run test...
+echo "	Mounting ${ZTESTFS}1, ${ZTESTFS}2, ${ZTESTFS}3."
+mount /dev/mapper/${TESTVOL}1 /${ZTESTFS}1
+mount /dev/mapper/${TESTVOL}2 /${ZTESTFS}2
+mount /dev/mapper/${TESTVOL}3 /${ZTESTFS}3
+
+if [ -n "${RUNTESTS}" -a -x ${RUNTESTS} ]; then
+	${RUNTESTS} &
+fi
+
+exit 0
 
 EOF_zumtest.sh
 chmod 755 zumtest.sh
@@ -168,13 +191,24 @@ tar -r -f ${debtar} zuminstall.sh zumtest.sh
 qemu-img create -f qcow2 test.img 10G
 qemu -no-reboot -hdb ${debtar} -cdrom ${instiso} -boot d ${TESTIMG}
 
+rm ${debtar}
+
 trap - 1 2 3 9
 
 #
 # Build origin and snapstore disk images.
 #
-qemu-img create -f qcow2 ${ORIGIMG} 2G
-qemu-img create -f qcow2 ${SNAPIMG} 2G
+qemu-img create -f raw ${ORIGIMG} 7G
+qemu-img create -f raw ${SNAPIMG} 28G
+parted ${ORIGIMG} mklabel msdos
+parted ${ORIGIMG} mkpart primary 0 2048
+parted ${ORIGIMG} mkpart primary 2049 4096
+parted ${ORIGIMG} mkpart primary 4097 6144
+parted ${SNAPIMG} mklabel msdos
+parted ${SNAPIMG} mkpart primary 0 8192
+parted ${SNAPIMG} mkpart primary 8193 16384
+parted ${SNAPIMG} mkpart primary 16385 24576
+
 #
 # Now start the test.
 #
