@@ -206,7 +206,7 @@ function replicate_snapshot {
 
 	old_snap=$(cat $hold_file) || { echo "initial replication"; }
 
-	rem_snap=$(run_remote $host "cat $VOLUMES/$vol/source/hostname") && [[ $output = $MYHOSTNAME ]] || \
+	rem_snap=$(run_remote $host "cat $VOLUMES/$vol/source/hostname") && [[ $rem_snap == $MYHOSTNAME ]] || \
 		{ log "set '$MYHOSTNAME' as source for '$vol' on '$host' first!"; usecount_decrement $vol $snap; return 1; }
 
 	port=$(cat $port_file) || { log "error reading port from '$port_file'"; \
@@ -766,7 +766,7 @@ define)
 		declare chunksize=16k
 
 		shift 2
-		args=`getopt -om:hi -l help,metadev:,initialize -n"$name" -- "$@"` || \
+		args=`getopt -ob:c:m:hi -l blocksize:,chunksize:,help,metadev:,initialize -n"$name" -- "$@"` || \
 			{ echo "usage: $name <vol> <origin> <snapstore> [Options]"; exit 2; }
 
 		eval set -- "$args" # remove getopt quotes and set new arguments
