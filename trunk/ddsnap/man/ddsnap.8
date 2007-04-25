@@ -29,7 +29,7 @@ ddsnap \- block level snapshot and replication
 .I socket_name snap_tag new_priority_value
 .br
 .B ddsnap usecount
-.I socket_name snap_tag diff_amount
+.I socket_name snap_tag [diff_amount]
 .br
 .B ddsnap status
 [\-v|--verbose] \fIsocket_name\fP [\fIsnapshot\fP]
@@ -142,9 +142,9 @@ Returns a list of snapshots currently held.
 .br
 Sets the priority of the snapshot with the given sockname and snap_tag to the given priority_value.
 .IP \fBusecount
-.I socket_name snap_tag diff_amount
+.I socket_name snap_tag [diff_amount]
 .br
-Changes the use count of the snapshot with the given sockname and snap_tag by adding diff_amount to current snapshot usecount.
+Changes the use count of the snapshot with the given sockname and snap_tag by adding diff_amount to current snapshot usecount.  If diff_amount is omitted, 0 is assumed.
 .IP \fBstatus
 [\-v|--verbose] \fIsocket_name\fP [\fIsnapshot\fP]
 .br
