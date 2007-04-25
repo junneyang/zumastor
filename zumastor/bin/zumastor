@@ -21,6 +21,47 @@ function read_and_inc {
 	return 0
 }
 
+function drop_snapshot {
+	[[ $# -eq 2 ]] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
+	local -r vol=$1
+	local -r snap=$2
+	local -r server=$SERVERS/$vol
+	local usecount
+
+	log "dropping snapshot for $vol($snap)"
+	usecount=$(ddsnap usecount $server $snap) || \
+		{ log "couldn't get usecount for vol '$vol' snap '$snap'"; return 1; }
+	[[ $usecount -eq 1 ]] || \
+		{ log "trying to remove snapshot with usecount '$usecount'"; return 1; }
+
+	remove_device $vol $snap || \
+		{ log "remove device failed for $vol($snap) "; return 1; }
+
+	# FIXME we wait for the usecount to hit zero
+	while true; do
+		usecount=$(ddsnap usecount $server $snap) || \
+			{ log "couldn't get usecount for vol '$vol' snap '$snap'"; return 1; }
+		verify_valid_number $usecount || \
+			{ log "usecount didn't return valid number '$usecount'"; return 1; }
+		[[ $usecount -eq 0 ]] && break
+		sleep 1
+	done
+		
+	ddsnap delete $server $snap || log "failed to delete snapshot '$vol($snap)'"
+}
+
+function umount_drop_snapshot {
+	[[ $# -eq 2 ]] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
+	local -r vol=$1
+	local -r snap=$2
+	local -r server=$SERVERS/$vol
+
+	umount_device $vol $snap || \
+		{ log "error umounting $vol($snap)"; return 1; }
+
+	drop_snapshot $vol $snap || return 1
+}
+
 # new_snapshot <volume name> <kind>
 #  Create a new snapshot for <volume>'s interval <kind> and rotate out old
 #  snapshots as necessary.  Called from the zumastor master when triggered with
@@ -70,7 +111,7 @@ function new_snapshot {
 
 		# this will umount, remove device, and delete snapshot if it
 		# is the only reference
-		usecount_decrement $vol $oldest
+		umount_drop_snapshot $vol $oldest
 		#umount_device $vol $oldest
 		#remove_device $vol $oldest
 		#ddsnap delete $sock $oldest
@@ -121,11 +162,11 @@ function new_target_snapshot {
 	if [[ -e $send_file ]]; then
 		log "$send_file exists, cleaning up previous replication cycle"
 		send=$(cat $send_file)
-		[[ -z $send ]] || { log "dropping usecount for $vol($send)"; usecount_decrement $vol $send; }
+		[[ -z $send ]] || drop_snapshot $vol $send
 		rm $send_file
 	fi
 	echo $next > $send_file || { log "error writing snapshot id '$next' to '$send_file'"; \
-		rm $send_file; usecount_decrement $vol $next; return 1; }
+		rm $send_file; drop_snapshot $vol $next; return 1; }
 
 	# need to create the device in order for ddsnap transmit to work
 	create_snapshot $vol $next
@@ -151,42 +192,15 @@ function run_remote  {
 	fi
 }
 
-function usecount_increment {
-	[[ $# -eq 2 ]] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
-	local -r vol=$1
-	local -r snap=$2
-	local -r server=$SERVERS/$vol
-
-	# FIXME TODO input chekcing
-	ddsnap usecount $server $snap 1 || return 1
-}
-
-function usecount_decrement {
-	[[ $# -eq 2 ]] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
-	local -r vol=$1
-	local -r snap=$2
-	local -r server=$SERVERS/$vol
-	local output
-	local usecount
-
-	# FIXME TODO input chekcing
-
-	output=$(ddsnap usecount $server $snap -1) || return 1
-	usecount=${output/*New usecount: /}
-
-	# output was wrong, didn't find "New usecount: ", so exit with an error
-	if [[ $usecount == $output ]]; then return 1; fi
-
-	if [[ $usecount -eq 0 ]]; then
-		# umount may fail if we haven't mounted the device
-		# so we just ignore the error
-		umount_device $vol $snap 2> /dev/null
-		remove_device $vol $snap || return 1
-		ddsnap delete $server $snap
-	fi
-
-	return 0
-}
+#function usecount_increment {
+#	[[ $# -eq 2 ]] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
+#	local -r vol=$1
+#	local -r snap=$2
+#	local -r server=$SERVERS/$vol
+#
+#	# FIXME TODO input chekcing
+#	ddsnap usecount $server $snap 1 || return 1
+#}
 
 # replicate_snapshot
 # called from target zumastor daemon (run_target)
@@ -207,21 +221,21 @@ function replicate_snapshot {
 	old_snap=$(cat $hold_file) || { echo "initial replication"; }
 
 	rem_snap=$(run_remote $host "cat $VOLUMES/$vol/source/hostname") && [[ $rem_snap == $MYHOSTNAME ]] || \
-		{ log "set '$MYHOSTNAME' as source for '$vol' on '$host' first!"; usecount_decrement $vol $snap; return 1; }
+		{ log "set '$MYHOSTNAME' as source for '$vol' on '$host' first!"; remove_device $vol $snap; return 1; }
 
 	port=$(cat $port_file) || { log "error reading port from '$port_file'"; \
-		rm $send_file; usecount_decrement $vol $snap; return 1; }
+		rm $send_file; drop_snapshot $vol $snap; return 1; }
 
 	rem_snap=$(run_remote $host "zumastor receive $vol $port start") || \
 		{ log "starting remote snapshot receive failed"; \
-		rm $send_file; usecount_decrement $vol $snap; return 1; }
+		rm $send_file; drop_snapshot $vol $snap; return 1; }
 
 	log "remote listen for volume '$vol' on '$host:$port' started"
 
 	# in case of mismatch, trust the downstream side
 	if [[ $old_snap -ne $rem_snap ]]; then
 		echo replication mismatch old_snap $old_snap rem_snap $rem_snap
-		[[ $old_snap ]] && usecount_decrement $vol $old_snap
+		[[ $old_snap ]] && drop_snapshot $vol $old_snap
 		[[ -e $target_dir/send.$rem_snap ]] && rm $target_dir/send.$rem_snap
 		old_snap=$rem_snap
 	fi
@@ -229,17 +243,17 @@ function replicate_snapshot {
 	# cleanup in case of failure so that we roll back to full volume replication next time
 	ddsnap transmit $server $host:$port -r -g 5 $old_snap $snap || { \
 		log "transmit $server $host:$port $old_snap $snap failed"; \
-		rm $send_file; usecount_decrement $vol $snap; rm $hold_file; [[ $old_snap ]] && usecount_decrement $vol $old_snap; return 1; }
+		rm $send_file; drop_snapshot $vol $snap; rm $hold_file; [[ $old_snap ]] && drop_snapshot $vol $old_snap; return 1; }
 
 	run_remote $host "zumastor receive $vol $port done $snap" || { \
 		log "zumastor receive $vol $port done $snap failed"; \
-		rm $send_file; usecount_decrement $vol $snap; return 1; }
+		rm $send_file; drop_snapshot $vol $snap; return 1; }
 
 	#[[ $snap -eq 5 ]] && restart_plug
 	# !!! FIXME TODO this is racy, we should save state by journaling
 	mv $send_file $hold_file
 
-	[[ $old_snap ]] && usecount_decrement $vol $old_snap
+	[[ $old_snap ]] && drop_snapshot $vol $old_snap
 
 	return 0
 }
@@ -342,7 +356,7 @@ function run_target {
 			) &
 		else
 			log "replicate error on snapshot $snap" $log
-			usecount_decrement $vol $snap >> $log 2>&1
+			drop_snapshot $vol $snap >> $log 2>&1
 		fi
 	done &
 }
@@ -515,11 +529,11 @@ function forget_target {
 
 	# clean up the hold snapshot
 	snap=$(cat $holdfile 2> /dev/null)
-	[[ $snap != "" ]] && usecount_decrement $vol $snap
+	[[ $snap != "" ]] && drop_snapshot $vol $snap
 
 	# clean up the send snapshot
 	snap=$(cat $sendfile 2> /dev/null)
-	[[ $snap != "" ]] && usecount_decrement $vol $snap
+	[[ $snap != "" ]] && drop_snapshot $vol $snap
 
 	rm -rf $path || return 1
 }
@@ -532,7 +546,7 @@ function forget_source {
 	zumastor stop source $vol
 	# !!! FIXME TODO clean up replication in progress
 	hold=$(cat $VOLUMES/$vol/source/hold 2> /dev/null)
-	[[ $hold != "" ]] && usecount_decrement $vol $hold
+	[[ $hold != "" ]] && drop_snapshot $vol $hold
 
 	rm -rf $VOLUMES/$vol/source || return 1
 	return 0
@@ -650,9 +664,9 @@ function trigger_replication {
 		send_to_fifo $master_fifo "target $host" || return 1
 	else
 		# increase reference count to pin snapshot
-		usecount_increment $vol $snap
+		#usecount_increment $vol $snap
 		# send specified snapshot
-		send_to_fifo $fifo $snap || { usecount_decrement $vol $snap; return 1; }
+		send_to_fifo $fifo $snap || { drop_snapshot $vol $snap; return 1; }
 	fi
 }
 
@@ -688,10 +702,6 @@ function replication_cycle {
 	log "setting holdfile to $next" $log
 	echo $next > $holdfile
 
-	# FIXME TODO - running sync is a workaround to make sure blocks are commited to disk
-	log "running sync" $log
-	sync >> $log 2>&1
-
 	# FIXME TODO - we have to umount -l first, because umount always removes the topmost
 	# filesystem :(, so we need to freeze access here
 	if [[ $hold != "initial" ]]; then
@@ -707,12 +717,10 @@ function replication_cycle {
 	if [[ $hold != "initial" ]]; then
 		# NFS resume 
 		cat /proc/fs/nfsd/suspend > /dev/null 2>&1
-		log "removing snapshot $hold " $log
-		usecount_decrement $vol $hold >> $log 2>&1
+		drop_snapshot $vol $hold >> $log 2>&1
 	fi
 
 	log "cycle complete" $log
-
 }
 
 # nag_daemon

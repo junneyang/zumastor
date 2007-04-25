@@ -1599,7 +1599,7 @@ static int usecount(int sock, u32 snaptag, int32_t usecnt_dev)
 		return 1;
 	}
 
-	trace_on(printf("reply = %x\n", head.code););
+	trace_off(printf("reply = %x\n", head.code););
 
 	/* check for error before reading message body */
 	if (head.code != USECOUNT_OK) {
@@ -1624,7 +1624,7 @@ static int usecount(int sock, u32 snaptag, int32_t usecnt_dev)
 		warn("unable to read usecount message body: %s", strerror(-err));
 		return 1;
 	}
-	printf("New usecount: %u\n", (unsigned int)((struct usecount_ok *)buf)->usecount);
+	printf("%u\n", (unsigned int)((struct usecount_ok *)buf)->usecount);
  
 	return 0; // should we return usecount here too?
 }
@@ -1859,16 +1859,16 @@ static int ddsnap_get_status(int serv_fd, u32 snaptag, int verbose)
 
 	if (reply->store.chunksize_bits == 0 && reply->store.used == 0 && reply->store.free == 0) {
 		printf("Chunk size: %lu\n", 1UL << reply->meta.chunksize_bits);
-		printf("Used: %llu\n", reply->meta.used);
-		printf("Free: %llu\n", reply->meta.free);
+		printf("Used: %Li\n", reply->meta.used);
+		printf("Free: %Li\n", reply->meta.free);
 	} else {
 		printf("Data chunk size: %lu\n", 1UL << reply->store.chunksize_bits);
-		printf("Used data: %llu\n", reply->store.used);
-		printf("Free data: %llu\n", reply->store.free);
+		printf("Used data: %Li\n", reply->store.used);
+		printf("Free data: %Li\n", reply->store.free);
 
 		printf("Metadata chunk size: %lu\n", 1UL << reply->meta.chunksize_bits);
-		printf("Used metadata: %llu\n", reply->meta.used);
-		printf("Free metadata: %llu\n", reply->meta.free);
+		printf("Used metadata: %Li\n", reply->meta.used);
+		printf("Free metadata: %Li\n", reply->meta.free);
 	}
 
 	printf("Origin size: %llu\n", get_origin_sectors(serv_fd) << SECTOR_BITS);
@@ -2528,10 +2528,14 @@ int main(int argc, char *argv[])
 		return ret;
 	}
 	if (strcmp(command, "usecount") == 0) {
-		if (argc != 5) {
-			printf("usage: %s usecount <sockname> <snap_tag> <diff_amount>\n", argv[0]);
+		int diff_amount = 0;
+
+		if (argc != 4 && argc != 5) {
+			printf("usage: %s usecount <sockname> <snap_tag> [diff_amount]\n", argv[0]);
 			return 1;
 		}
+		if (argc == 5)
+			diff_amount = atoi(argv[4]);
 
 		u32 snaptag;
 
@@ -2542,7 +2546,7 @@ int main(int argc, char *argv[])
 
 		int sock = create_socket(argv[2]);
 
-		int ret = usecount(sock, snaptag, atoi(argv[4]));
+		int ret = usecount(sock, snaptag, diff_amount);
 		close(sock);
 		return ret;
 	}

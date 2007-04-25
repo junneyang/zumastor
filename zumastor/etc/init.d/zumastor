@@ -90,7 +90,8 @@ function stop_zumastor {
 			remove_device $vol $id >> $log 2>&1
 		done
 		umount_device $vol -1 >> $log 2>&1
-		remove_device $vol -1 >> $log 2>&1  || { echo remove $vol -1 failed ; return 1; }
+		# FIXME error out if this fails so we don't kill the agent and need to reboot
+		remove_device $vol -1 >> $log 2>&1  || { echo remove origin device failed, aborting ; return 1; }
 
 		stop_volume $vol
 	done
