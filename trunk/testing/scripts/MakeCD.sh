@@ -11,7 +11,9 @@
 #    Copy this file to $BASEDIR/source on your build server.
 
 # The Base Directory
-BASEDIR="/home/fmayhar/cd"
+if [ "x${BASEDIR}" = "x" ] ; then
+  BASEDIR="/home/${USER}/cd"
+fi
 
 # This directory will contain files that need to be copied over
 # to the new CD.
