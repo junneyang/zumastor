@@ -398,7 +398,7 @@ static void check_freespace(struct superblock *sb)
 		warn("metadata freechunks out of sync with used counts (%Li, %Li)", metafree(sb), sb->metadata.asi->freechunks);
 	chunk_t counted = count_free(sb, &sb->metadata);
 	if (counted != sb->metadata.asi->freechunks) {
-		warn("metadata free chunks count wrong: counted %llu, freechunks %llu", counted, sb->metadata.asi->freechunks);
+		warn("metadata free chunks count wrong: counted %Li, freechunks %Li", counted, sb->metadata.asi->freechunks);
 		sb->metadata.asi->freechunks = counted;
 	}
 	if (combined(sb))
@@ -407,7 +407,7 @@ static void check_freespace(struct superblock *sb)
 		warn("snapdata freechunks out of sync with used counts (%Li, %Li)", snapfree(sb), sb->snapdata.asi->freechunks);
 	counted = count_free(sb, &sb->snapdata);
 	if (counted != sb->snapdata.asi->freechunks) {
-		warn("snapdata free chunks count wrong: counted %llu, freechunks %llu", counted, sb->snapdata.asi->freechunks);
+		warn("snapdata free chunks count wrong: counted %Li, freechunks %Li", counted, sb->snapdata.asi->freechunks);
 		sb->snapdata.asi->freechunks = counted;
 	}
 }
@@ -709,7 +709,6 @@ found:
 		/* shared if more than one bit set including this one */
 		if ((p->share & mask)) {
 			*exception = p->chunk;
-// printf("unique %Lx %Lx\n", p->share, mask);
 			return !(p->share & ~mask);
 		}
 	return 0;
@@ -758,7 +757,7 @@ static int add_exception_to_leaf(struct eleaf *leaf, u64 chunk, u64 exception, i
 	unsigned i, j, free = (char *)exceptions - maptop;
 
 	trace(warn("chunk %Lx exception %Lx, snapshot = %i free space = %u", 
-				chunk, exception, snapshot, free););
+		chunk, exception, snapshot, free););
 
 	for (i = 0; i < leaf->count; i++) // !!! binsearch goes here
 		if (leaf->map[i].rchunk >= target)
@@ -945,9 +944,9 @@ static int init_allocation(struct superblock *sb)
 	u64 chunks  = sb->metadata.asi->chunks  + (meta_flag ? sb->snapdata.asi->chunks  : 0);
 	unsigned bitmaps = sb->metadata.asi->bitmap_blocks + (meta_flag ? sb->snapdata.asi->bitmap_blocks : 0);
 	if (meta_flag)
-		warn("metadata store size: %llu chunks (%llu sectors)", 
+		warn("metadata store size: %Li chunks (%Li sectors)", 
 		     sb->metadata.asi->chunks, sb->metadata.asi->chunks << sb->metadata.chunk_sectors_bits);
-	warn("snapshot store size: %llu chunks (%llu sectors)", 
+	warn("snapshot store size: %Li chunks (%Li sectors)", 
 	     chunks, chunks << sb->snapdata.chunk_sectors_bits);
 	printf("Initializing %u bitmap blocks... ", bitmaps);
 	
@@ -1042,8 +1041,8 @@ static chunk_t alloc_chunk_range(struct superblock *sb, struct allocspace *as, c
 		for (length -= n; n--; p++)
 			if ((c = *p) != 0xff) {
 				int i, bit;
-				trace_off(printf("found byte at offset %u of bitmap %Lx = %hhx\n", 
-						 p - buffer->data, blocknum, c););
+				trace_off(printf("found byte at offset %u of bitmap %Lx = %hhx\n",
+					p - buffer->data, blocknum, c););
 				for (i = 0, bit = 1;; i++, bit <<= 1)
 					if (!(c & bit)) {
 						chunk = i + ((p - buffer->data) << 3) + (blocknum << bitmap_shift);
@@ -1116,7 +1115,11 @@ static struct buffer *probe(struct superblock *sb, u64 chunk, struct etree_path 
  * generic btree traversal
  */
 
-static int traverse_tree_range(struct superblock *sb, chunk_t start, unsigned int leaves, void (*visit_leaf)(struct superblock *sb, struct eleaf *leaf, void *data), void (*visit_leaf_buffer)(struct superblock *sb, struct buffer *leafbuf, void *data), void *data)
+static int traverse_tree_range(
+	struct superblock *sb, chunk_t start, unsigned int leaves,
+	void (*visit_leaf)(struct superblock *sb, struct eleaf *leaf, void *data),
+	void (*visit_leaf_buffer)(struct superblock *sb, struct buffer *leafbuf, void *data),
+	void *data)
 {
 	int levels = sb->image.etree_levels, level = -1;
 	struct etree_path path[levels];
@@ -1138,7 +1141,8 @@ static int traverse_tree_range(struct superblock *sb, chunk_t start, unsigned in
 			level++;
 			nodebuf = snapread(sb, level? path[level - 1].pnext++->sector: sb->image.etree_root);
 			if (!nodebuf) {
-				warn("unable to read node at sector 0x%llx at level %d of tree traversal", level? path[level - 1].pnext++->sector: sb->image.etree_root, level);
+				warn("unable to read node at sector 0x%Lx at level %d of tree traversal",
+					level? path[level - 1].pnext++->sector: sb->image.etree_root, level);
 				return -EIO;
 			}
 			node = buffer2node(nodebuf);
@@ -1151,7 +1155,8 @@ static int traverse_tree_range(struct superblock *sb, chunk_t start, unsigned in
 		while (path[level].pnext < node->entries + node->count) {
 			leafbuf = snapread(sb, path[level].pnext++->sector);
 			if (!leafbuf) {
-				warn("unable to read leaf at sector 0x%llx of tree traversal", level? path[level - 1].pnext++->sector: sb->image.etree_root);
+				warn("unable to read leaf at sector 0x%Lx of tree traversal",
+					level? path[level - 1].pnext++->sector: sb->image.etree_root);
 				return -EIO;
 			}
 
@@ -1181,7 +1186,11 @@ start:
 	}
 }
 
-static int traverse_tree_chunks(struct superblock *sb, void (*visit_leaf)(struct superblock *sb, struct eleaf *leaf, void *data), void (*visit_leaf_buffer)(struct superblock *sb, struct buffer *leafbuf, void *data), void *data)
+static int traverse_tree_chunks(
+	struct superblock *sb,
+	void (*visit_leaf)(struct superblock *sb, struct eleaf *leaf, void *data),
+	void (*visit_leaf_buffer)(struct superblock *sb, struct buffer *leafbuf, void *data),
+	void *data)
 {
 	return traverse_tree_range(sb, 0, 0, visit_leaf, visit_leaf_buffer, data);
 }
@@ -1202,7 +1211,8 @@ static void show_leaf(struct eleaf *leaf)
 		for (p = emap(leaf, i); p < emap(leaf, i+1); p++)
 			printf("%Lx/%08llx%s", p->chunk, p->share, p+1 < emap(leaf, i+1)? ",": " ");
 	}
-	printf("top@%i free space calc: %d payload: %d", leaf->map[i].offset, leaf_freespace(leaf), leaf_payload(leaf));
+	printf("top@%i free space calc: %d payload: %d",
+		leaf->map[i].offset, leaf_freespace(leaf), leaf_payload(leaf));
 	printf("\n");
 }
 
@@ -1263,7 +1273,8 @@ static void check_leaf(struct eleaf *leaf, u64 snapmask)
 		for (p = emap(leaf, i); p < emap(leaf, i+1); p++) {
 			trace(printf("%Lx/%08llx%s", p->chunk, p->share, p+1 < emap(leaf, i+1)? ",": " "););
 			if (p->share & snapmask)
-				printf("Leaf bitmap contains %016llx some snapshots in snapmask %016llx\n", p->share, snapmask);
+				printf("Leaf bitmap contains %016llx some snapshots in snapmask %016llx\n",
+					p->share, snapmask);
 		}
 	}
 	// printf("top@%i", leaf->map[i].offset);
@@ -1671,7 +1682,7 @@ static void gen_changelist_leaf(struct superblock *sb, struct eleaf *leaf, void 
 			if ( ((p->share & mask2) == mask2) != ((p->share & mask1) == mask1) ) {
 				newchunk = leaf->base_chunk + leaf->map[i].rchunk;
 				if (append_change_list(cl, newchunk) < 0)
-					warn("unable to write chunk %llu to changelist", newchunk);
+					warn("unable to write chunk %Li to changelist", newchunk);
 				break;
 			}
 		}
@@ -1806,14 +1817,14 @@ static int finish_copyout(struct superblock *sb)
 		int is_snap = sb->source_chunk >> chunk_highbit;
 		chunk_t source = sb->source_chunk & ~(1ULL << chunk_highbit);
 		unsigned size = sb->copy_chunks << sb->snapdata.asi->allocsize_bits;
-		trace(printf("copy %u %schunks from %Lx to %Lx\n", sb->copy_chunks, 
-					is_snap? "snapshot ": "origin ", source, sb->dest_exception););
+		trace(printf("copy %u %schunks from %Lx to %Lx\n", sb->copy_chunks,
+			is_snap? "snapshot ": "origin ", source, sb->dest_exception););
 		assert(size <= sb->copybuf_size);
-		if (diskread(is_snap? sb->snapdev: sb->orgdev, sb->copybuf, size, 
-					source << sb->snapdata.asi->allocsize_bits) < 0)
+		if (diskread(is_snap? sb->snapdev: sb->orgdev, sb->copybuf, size,
+			source << sb->snapdata.asi->allocsize_bits) < 0)
 			trace(printf("copyout death on read\n"););
-		if (diskwrite(sb->snapdev, sb->copybuf, size, 
-					sb->dest_exception << sb->snapdata.asi->allocsize_bits) < 0)
+		if (diskwrite(sb->snapdev, sb->copybuf, size,
+			sb->dest_exception << sb->snapdata.asi->allocsize_bits) < 0)
 			trace_on(printf("copyout death on write\n"););
 		sb->copy_chunks = 0;
 	}
@@ -1866,7 +1877,8 @@ static int ensure_free_chunks(struct superblock *sb, struct allocspace *as, int 
 	} while (sb->image.snapshots);
 
 	if (sb->snapdata.chunks_used != 0)
-		warn("non zero used data chunks %llu (freechunks %llu) after all snapshots are deleted", sb->snapdata.chunks_used, sb->snapdata.asi->freechunks);
+		warn("non zero used data chunks %Li (freechunks %Li) after all snapshots are deleted",
+			sb->snapdata.chunks_used, sb->snapdata.asi->freechunks);
 	unsigned meta_bitmap_base_chunk = (SB_SECTOR + 2*chunk_sectors(&sb->metadata) - 1) >> sb->metadata.chunk_sectors_bits;
 	/* reserved meta data + bitmap_blocks + super_block */
 	unsigned res = meta_bitmap_base_chunk + sb->metadata.asi->bitmap_blocks + sb->image.journal_size;
@@ -1874,7 +1886,8 @@ static int ensure_free_chunks(struct superblock *sb, struct allocspace *as, int 
 	if (sb->metadata.asi != sb->snapdata.asi)
 		res += 2*sb->snapdata.asi->bitmap_blocks;
 	if (sb->metadata.chunks_used != res)
-		warn("used metadata chunks %llu (freechunks %llu) are larger than reserved (%u) after all snapshots are deleted", sb->metadata.chunks_used, sb->metadata.asi->freechunks, res);
+		warn("used metadata chunks %Li (freechunks %Li) are larger than reserved (%u) after all snapshots are deleted",
+			sb->metadata.chunks_used, sb->metadata.asi->freechunks, res);
 	sb->snapdata.chunks_used = 0;
 	sb->metadata.chunks_used = res;
 	return -1; // we deleted all possible snapshots
@@ -2144,7 +2157,7 @@ static void show_locks(struct superblock *sb)
 			printf("chunk %Lx ", lock->chunk);
 			struct snaplock_hold *hold = lock->holdlist;
 			for (; hold; hold = hold->next)
-				printf("held by client %Lu ", hold->client->id);
+				printf("held by client %Lx ", hold->client->id);
 			struct snaplock_wait *wait = lock->waitlist;
 			for (; wait; wait = wait->next)
 				printf("wait [%02hx/%u] ", snaplock_hash(sb, (u32)wait->pending), wait->pending->holdcount);
@@ -2211,7 +2224,7 @@ static struct snaplock *release_lock(struct superblock *sb, struct snaplock *loc
 		holdp = &(*holdp)->next;
 
 	if (!*holdp) {
-		trace_on(printf("chunk %Lx holder %Lu not found\n", lock->chunk, client->id););
+		trace_on(printf("chunk %Lx holder %Lx not found\n", lock->chunk, client->id););
 		return NULL;
 	}
 
@@ -2863,8 +2876,9 @@ static int incoming(struct superblock *sb, struct client *client)
 		client->snaptag = tag;
 		client->flags = USING;
 		
-		trace(fprintf(stderr, "got identify request, setting id="U64FMT" snap=%i (tag=%u), sending chunksize_bits=%u\n", client->id, client->snap, tag, sb->snapdata.asi->allocsize_bits););
-		warn("client id %llu, snaptag %u", client->id, tag);
+		trace(warn("got identify request, setting id="U64FMT" snap=%i (tag=%u), sending chunksize_bits=%u\n",
+			client->id, client->snap, tag, sb->snapdata.asi->allocsize_bits););
+		warn("client id %Lx, snaptag %u", client->id, tag);
 
 		if (tag != (u32)~0UL) {
 			struct snapshot *snapshot = find_snap(sb, tag);
@@ -3524,7 +3538,7 @@ int snap_server(struct superblock *sb, int listenfd, int getsigfd, int agentfd)
 
 				trace_off(printf("event on socket %i = %x\n", client->sock, pollvec[others+i].revents););
 				if ((result = incoming(sb, client)) == -1) {
-					warn("Client %llu disconnected", client->id);
+					warn("Client %Lx disconnected", client->id);
 
 					if (client->flags == USING) {
 						if (client->snaptag != -1) {
