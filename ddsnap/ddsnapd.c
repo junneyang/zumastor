@@ -955,7 +955,6 @@ static int init_allocation(struct superblock *sb)
 		sector = sb->metadata.asi->bitmap_base;
 	for (i = 0; i < bitmaps; i++, sector += chunk_sectors(&sb->metadata)) {
 		struct buffer *buffer = getblk(sb->metadev, sector, sb->metadata.allocsize);
-		printf("%llx ", buffer->sector);
 		memset(buffer->data, 0, sb->metadata.allocsize);
 		/* Reserve bitmaps and superblock */
 		if (i == 0) {
@@ -2640,24 +2639,12 @@ next:
 
 #endif
 
-static unsigned int max_snapbit(struct snapshot const *snaplist, unsigned int snapshots)
-{
-	unsigned int i;
-	unsigned int max = 0;
-
-	for (i = 0; i < snapshots; i++)
-		if (snaplist[i].bit > max)
-			max = snaplist[i].bit;
-
-	return max;
-}
-
 /* A very simple-minded implementation.  You can do it in very
  * few operations with whole-register bit twiddling but I assume
  * that we can juse find a macro somewhere which works.
  *  AKA hamming weight, sideways add
  */
-static unsigned int popcount(u64 num)
+static unsigned int bit_count(u64 num)
 {
 	unsigned count = 0;
 
@@ -2670,7 +2657,7 @@ static unsigned int popcount(u64 num)
 
 static void calc_sharing(struct superblock *sb, struct eleaf *leaf, void *data)
 {
-	uint64_t **share_table = data;
+	uint64_t *share_table = data;
 	struct exception const *p;
 	unsigned bit;
 	unsigned int share_count;
@@ -2678,11 +2665,12 @@ static void calc_sharing(struct superblock *sb, struct eleaf *leaf, void *data)
 
 	for (i = 0; i < leaf->count; i++)
 		for (p = emap(leaf, i); p < emap(leaf, i+1); p++) {
-			share_count = popcount(p->share) - 1;
+			assert(p->share); // belongs in check leaf function
+			share_count = bit_count(p->share) - 1;
 
 			for (bit = 0; bit < MAX_SNAPSHOTS; bit++)
 				if (p->share & (1ULL << (u64)bit))
-					share_table[bit][share_count]++;
+					share_table[MAX_SNAPSHOTS * bit + share_count]++;
 		}
 }
 
@@ -3178,14 +3166,7 @@ static int incoming(struct superblock *sb, struct client *client)
 
 		/* allocate reply */
 
-		/* max_snapbit() + 1 is always >= the number of snapshots,
-		 * and will allow the calc_sharing() routine to index the
-		 * table by snapbit numbers.
-		 * and we need exactly same number of columns as snapshots.
-		 * extra rows or columns can be ignored when reducing the
-		 * table to be sent because they are always zero.
-		 */
-		unsigned num_rows = max_snapbit(snaplist, sb->image.snapshots) + 1;
+		unsigned num_rows = sb->image.snapshots;
 		unsigned num_columns = num_rows, status_count = sb->image.snapshots;
 		unsigned rowsize = (sizeof(struct status) + num_columns * sizeof(chunk_t));
 		unsigned int reply_len = sizeof(struct status_message) + status_count * rowsize;
@@ -3193,18 +3174,10 @@ static int incoming(struct superblock *sb, struct client *client)
 
 		/* calculate the usage statistics */
 
-		uint64_t *share_array = calloc(sizeof(uint64_t) * num_rows * num_columns, 1);
+		uint64_t share_array[MAX_SNAPSHOTS * MAX_SNAPSHOTS];
+		memset(share_array, 0, sizeof(share_array));
 
-		/* make it look like a two dimensional array so users don't have to
-		 * know about the number of columns.  the rows are in ascending
-		 * snapbit order.
-		 */
-		uint64_t **share_table = malloc(sizeof(uint64_t *) * num_rows);
-		unsigned int snapbit;
-		for (snapbit = 0; snapbit < num_rows; snapbit++)
-			share_table[snapbit] = share_array + num_columns * snapbit;
-
-		traverse_tree_chunks(sb, calc_sharing, NULL, share_table);
+		traverse_tree_chunks(sb, calc_sharing, NULL, share_array);
 
 #ifdef DEBUG_STATUS
 		{
@@ -3218,7 +3191,7 @@ static int incoming(struct superblock *sb, struct client *client)
 			for (int row = 0; row < num_rows; row++) {
 				printf("%2d: ", row);
 				for (int col = 0; col < num_columns; col++)
-					printf(" %2llu", share_table[row][col]);
+					printf(" %2llu", share_array[row][col]);
 				printf("\n");
 			}
 			printf("\n");
@@ -3259,11 +3232,8 @@ static int incoming(struct superblock *sb, struct client *client)
 			}
 
 			for (int col = 0; col < num_columns; col++)
-				snap_status->chunk_count[col] = share_table[snaplist[row].bit][col];
+				snap_status->chunk_count[col] = share_array[snaplist[row].bit * col];
 		}
-
-		free(share_table);
-		free(share_array);
 
 		/* send it */
 

@@ -13,7 +13,7 @@ function read_and_inc {
 	local num
 
 	# FIXME TODO add error 
-	read num < $filename || return 1
+	read num < $filename || num=0
 	echo $(( num+1 )) > $filename || return 1
 
 	echo $num
