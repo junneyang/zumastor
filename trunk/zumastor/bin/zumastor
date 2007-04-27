@@ -13,7 +13,7 @@ function read_and_inc {
 	local num
 
 	# FIXME TODO add error 
-	read num < $filename || num=0
+	read num <$filename || num=0
 	echo $(( num+1 )) > $filename || return 1
 
 	echo $num
@@ -158,10 +158,10 @@ function new_target_snapshot {
 	log "new snapshot will be '$next'"
 
 	# record the snapshot to be created first so that we remember to remove it properly during zumastor stop
-	send_file=$VOLUMES/$vol/targets/$hostname/send.$next
+	send_file=$VOLUMES/$vol/targets/$hostname/send
 	if [[ -e $send_file ]]; then
 		log "$send_file exists, cleaning up previous replication cycle"
-		send=$(cat $send_file)
+		read -d' ' send <$send_file
 		[[ -z $send ]] || drop_snapshot $vol $send
 		rm $send_file
 	fi
@@ -210,7 +210,7 @@ function replicate_snapshot {
 	local -r host=$2
 	local -r snap=$3
 	local -r target_dir=$VOLUMES/$vol/targets/$host
-	local -r send_file=$target_dir/send.$snap
+	local -r send_file=$target_dir/send
 	local -r hold_file=$target_dir/hold
 	local -r server=$SERVERS/$vol
 	local -r port_file=$target_dir/port
@@ -232,22 +232,26 @@ function replicate_snapshot {
 
 	log "remote listen for volume '$vol' on '$host:$port' started"
 
-	# in case of mismatch, trust the downstream side
-	if [[ $old_snap -ne $rem_snap ]]; then
-		echo replication mismatch old_snap $old_snap rem_snap $rem_snap
-		[[ $old_snap ]] && drop_snapshot $vol $old_snap
-		[[ -e $target_dir/send.$rem_snap ]] && rm $target_dir/send.$rem_snap
-		old_snap=$rem_snap
-	fi
+	# in case of mismatch, do initial volume
+	[[ $old_snap -ne $rem_snap ]] && old_snap=""
+
 	# send the changes since the last snapshot via ddsnap transmit
 	# cleanup in case of failure so that we roll back to full volume replication next time
-	ddsnap transmit $server $host:$port -r -g 5 $old_snap $snap || { \
-		log "transmit $server $host:$port $old_snap $snap failed"; \
-		rm $send_file; drop_snapshot $vol $snap; rm $hold_file; [[ $old_snap ]] && drop_snapshot $vol $old_snap; return 1; }
+	ddsnap transmit $server $host:$port -r -g 5 $old_snap $snap -p $send_file
+	if [[ $? -ne 0 ]]; then
+		log "transmit $server $host:$port $old_snap $snap failed"
+		rm $send_file
+		drop_snapshot $vol $snap
+		return 1
+	fi
 
-	run_remote $host "zumastor receive $vol $port done $snap" || { \
-		log "zumastor receive $vol $port done $snap failed"; \
-		rm $send_file; drop_snapshot $vol $snap; return 1; }
+	run_remote $host "zumastor receive $vol $port done $snap"
+	if [[ $? -ne 0 ]]; then
+		log "zumastor receive $vol $port done $snap failed"
+		rm $send_file
+		drop_snapshot $vol $snap
+		return 1
+	fi
 
 	#[[ $snap -eq 5 ]] && restart_plug
 	# !!! FIXME TODO this is racy, we should save state by journaling
@@ -311,7 +315,7 @@ function run_target {
 	local -r sleep_pid=$VOLUMES/$vol/targets/$host/.sleeppid
 	local snap state period spid
 
-	[[ -e $period_file ]] && read period < $period_file || log "no period specified" $log
+	[[ -e $period_file ]] && read period <$period_file || log "no period specified" $log
 	[[ -z $period ]] || [[ $period -ge 0 ]] || { log "invalid period '$period' specified" $log; return 1; }
 
 	[ -r $fifo ] && [ -p $fifo ] || { log "target replication trigger '$fifo' is missing" $log; return 1; }
@@ -344,7 +348,7 @@ function run_target {
 			[[ -z $period ]] || (
 				pid=$!
 				log "sleeper starting" $log
-				spid=""; read spid < $sleep_pid 2> /dev/null
+				spid=""; read spid <$sleep_pid 2> /dev/null
 				[[ $spid != "" ]] && { log "killing sleeper $spid" $log; kill $spid; }
 				echo $pid > $sleep_pid
 				log "sleeping ${period}s for replication cycle" $log
@@ -391,7 +395,7 @@ function stop_target {
 	local -r host=$2
 
 	pkill -f "zumastor start target $vol $host$" || return 1
-	pkill -f "ddsnap transmit $SERVERS/$vol $host$" || return 1
+	pkill -f "ddsnap transmit $SERVERS/$vol $host:" || return 1
 	rm $VOLUMES/$vol/targets/$host/.sleeppid 2> /dev/null
 }
 
