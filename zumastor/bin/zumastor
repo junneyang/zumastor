@@ -158,15 +158,15 @@ function new_target_snapshot {
 	log "new snapshot will be '$next'"
 
 	# record the snapshot to be created first so that we remember to remove it properly during zumastor stop
-	send_file=$VOLUMES/$vol/targets/$hostname/send
-	if [[ -e $send_file ]]; then
-		log "$send_file exists, cleaning up previous replication cycle"
-		read -d' ' send <$send_file
-		[[ -z $send ]] || drop_snapshot $vol $send
-		rm $send_file
-	fi
-	echo $next > $send_file || { log "error writing snapshot id '$next' to '$send_file'"; \
-		rm $send_file; drop_snapshot $vol $next; return 1; }
+	#send_file=$VOLUMES/$vol/targets/$hostname/send
+	#if [[ -e $send_file ]]; then
+	#	log "$send_file exists, cleaning up previous replication cycle"
+	#	read -d' ' send <$send_file
+	#	[[ -z $send ]] || drop_snapshot $vol $send
+	#	rm $send_file
+	#fi
+	#echo $next > $send_file || { log "error writing snapshot id '$next' to '$send_file'"; \
+	#	rm $send_file; drop_snapshot $vol $next; return 1; }
 
 	# need to create the device in order for ddsnap transmit to work
 	create_snapshot $vol $next
@@ -218,12 +218,12 @@ function replicate_snapshot {
 
 	log "replication for snapshot '$snap' on volume '$vol' to '$host'"
 
-	old_snap=$(cat $hold_file) || { echo "initial replication"; }
+	read old_snap <$hold_file || { echo "initial replication"; }
 
 	rem_snap=$(run_remote $host "cat $VOLUMES/$vol/source/hostname") && [[ $rem_snap == $MYHOSTNAME ]] || \
 		{ log "set '$MYHOSTNAME' as source for '$vol' on '$host' first!"; remove_device $vol $snap; return 1; }
 
-	port=$(cat $port_file) || { log "error reading port from '$port_file'"; \
+	read port <$port_file || { log "error reading port from '$port_file'"; \
 		rm $send_file; drop_snapshot $vol $snap; return 1; }
 
 	rem_snap=$(run_remote $host "zumastor receive $vol $port start") || \
@@ -256,6 +256,7 @@ function replicate_snapshot {
 	#[[ $snap -eq 5 ]] && restart_plug
 	# !!! FIXME TODO this is racy, we should save state by journaling
 	mv $send_file $hold_file
+	echo $snap > $hold_file # to remove progress status
 
 	[[ $old_snap ]] && drop_snapshot $vol $old_snap
 
@@ -532,11 +533,11 @@ function forget_target {
 	zumastor stop target $vol $host
 
 	# clean up the hold snapshot
-	snap=$(cat $holdfile 2> /dev/null)
+	read snap <$holdfile 2>/dev/null
 	[[ $snap != "" ]] && drop_snapshot $vol $snap
 
 	# clean up the send snapshot
-	snap=$(cat $sendfile 2> /dev/null)
+	read snap <$sendfile 2>/dev/null
 	[[ $snap != "" ]] && drop_snapshot $vol $snap
 
 	rm -rf $path || return 1
@@ -549,7 +550,7 @@ function forget_source {
 
 	zumastor stop source $vol
 	# !!! FIXME TODO clean up replication in progress
-	hold=$(cat $VOLUMES/$vol/source/hold 2> /dev/null)
+	read hold <$VOLUMES/$vol/source/hold 2>/dev/null
 	[[ $hold != "" ]] && drop_snapshot $vol $hold
 
 	rm -rf $VOLUMES/$vol/source || return 1
@@ -686,7 +687,7 @@ function replication_cycle {
 	local -r log=${LOGS}/$vol/source.log
 	local next hold junk
 
-	hold=$(cat $holdfile)
+	read hold <$holdfile
 
 	if [[ -z $hold ]]; then
 		hold=initial
@@ -740,8 +741,8 @@ function nag_daemon {
 	local kind
 	local host
 
-	host=$(cat $path/source/hostname)
-	period=$(cat $path/source/period 2>/dev/null)
+	read host <$path/source/hostname
+	read period <$path/source/period 2>/dev/null
 
 	[[ $period -gt 0 ]] || { log "no polling period specified for $vol, nothing to do" $log; return 0; }
 
@@ -1112,7 +1113,7 @@ receive)
 		[ $# -eq 4 ] || { echo "usage: $0 receive <vol> <port> start"; exit 2; }
 		# !!! FIXME TODO if the hold file doesn't exist
 		# assume we are initializing replication at snapshot 0
-		snap=$(cat $holdfile 2>/dev/null)
+		read snap <$holdfile 2>/dev/null
 
 		# start the listen daemon
 		# FIXME TODO - for now we listen on 0.0.0.0 and we don't check where
