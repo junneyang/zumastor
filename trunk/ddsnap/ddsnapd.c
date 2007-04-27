@@ -220,7 +220,7 @@ struct disksuper
 		u32 tag;   // external name (id) of snapshot
 		u16 usecnt; // use count on snapshot device
 		u8 bit;    // internal snapshot number, not derived from tag
-		s8 prio;   // 0=normal, 127=highest, -128=lowestdrop
+		s8 prio;   // 0=normal, 127=highest, -128=lowest
 		char reserved[4]; /* adds up to 16 */
 	} snaplist[MAX_SNAPSHOTS]; // entries are contiguous, in creation order
 	u32 snapshots;
@@ -1102,7 +1102,7 @@ static struct buffer *probe(struct superblock *sb, u64 chunk, struct etree_path 
 		path[i].pnext = pnext;
 		nodebuf = snapread(sb, (pnext - 1)->sector);
 		if (!nodebuf) {
-			brelse_path(path, i);		
+			brelse_path(path, i);
 			return NULL;
 		}
 		node = (struct enode *)nodebuf->data;
@@ -1271,10 +1271,10 @@ static void check_leaf(struct eleaf *leaf, u64 snapmask)
 		trace(printf("%x=", leaf->map[i].rchunk););
 		// printf("@%i ", leaf->map[i].offset);
 		for (p = emap(leaf, i); p < emap(leaf, i+1); p++) {
+			// !!! should also check for any zero sharemaps here
 			trace(printf("%Lx/%08llx%s", p->chunk, p->share, p+1 < emap(leaf, i+1)? ",": " "););
 			if (p->share & snapmask)
-				printf("Leaf bitmap contains %016llx some snapshots in snapmask %016llx\n",
-					p->share, snapmask);
+				printf("nonzero bits %016Lx outside snapmask %016Lx\n", p->share, snapmask);
 		}
 	}
 	// printf("top@%i", leaf->map[i].offset);
@@ -1877,7 +1877,7 @@ static int ensure_free_chunks(struct superblock *sb, struct allocspace *as, int 
 	} while (sb->image.snapshots);
 
 	if (sb->snapdata.chunks_used != 0)
-		warn("non zero used data chunks %Li (freechunks %Li) after all snapshots are deleted",
+		warn("nonzero used data chunks %Li (freechunks %Li) after all snapshots are deleted",
 			sb->snapdata.chunks_used, sb->snapdata.asi->freechunks);
 	unsigned meta_bitmap_base_chunk = (SB_SECTOR + 2*chunk_sectors(&sb->metadata) - 1) >> sb->metadata.chunk_sectors_bits;
 	/* reserved meta data + bitmap_blocks + super_block */
@@ -3249,10 +3249,7 @@ static int incoming(struct superblock *sb, struct client *client)
 				snap_status->chunk_count[col] = share_array[snaplist[row].bit * col];
 		}
 
-		/* send it */
-
-		if (outhead(sock, STATUS_OK, reply_len) < 0 ||
-			writepipe(sock, reply, reply_len) < 0)
+		if (outhead(sock, STATUS_OK, reply_len) < 0 || writepipe(sock, reply, reply_len) < 0)
 			warn("unable to send status message");
 
 		free(reply);
@@ -3291,8 +3288,6 @@ static int incoming(struct superblock *sb, struct client *client)
 				break;
 			}
 
-		//if (outhead(sock, SNAPSHOT_STATE, sizeof(reply)) < 0 ||
-		//	writepipe(sock, &reply, sizeof(reply)) < 0)
 		if (outbead(sock, SNAPSHOT_STATE, struct state_message, reply.snap, reply.state) < 0)
 			warn("unable to send state message");
 		break;
@@ -3317,13 +3312,13 @@ static int incoming(struct superblock *sb, struct client *client)
 	case SHUTDOWN_SERVER:
 		return -2;
 		
-	case PROTOCOL_ERROR: 
+	case PROTOCOL_ERROR:
 	{	struct protocol_error *pe = malloc(message.head.length);
 		
 		if (!pe) {
 			warn("received protocol error message; unable to retreive information");
 			break;
-		}	
+		}
 		
 		memcpy(pe, message.body, message.head.length);
 		
@@ -3408,8 +3403,8 @@ int snap_server_setup(const char *agent_sockname, const char *server_sockname, i
 		error("Can't create pipe: %s", strerror(errno));
 	sigpipe = pipevec[1];
 	*getsigfd = pipevec[0];
-	
-	if (strlen(server_sockname) > sizeof(server_addr.sun_path) - 1) 
+
+	if (strlen(server_sockname) > sizeof(server_addr.sun_path) - 1)
 		error("server socket name too long, %s", server_sockname);
 	strncpy(server_addr.sun_path, server_sockname, sizeof(server_addr.sun_path));
 	unlink(server_sockname);
@@ -3440,10 +3435,10 @@ int snap_server_setup(const char *agent_sockname, const char *server_sockname, i
 	struct server_head server_head = { .type = AF_UNIX, .length = (strlen(server_sockname) + 1) };
 	trace(warn("server socket name is %s and length is %d", server_sockname, server_head.length););
 	if (writepipe(*agentfd, &(struct head){ SERVER_READY, sizeof(struct server_head) }, sizeof(struct head)) < 0 ||
-	    writepipe(*agentfd, &server_head, sizeof(server_head)) < 0 || 
+	    writepipe(*agentfd, &server_head, sizeof(server_head)) < 0 ||
 	    writepipe(*agentfd, server_sockname, server_head.length) < 0)
 		error("Unable to send SEVER_READY msg to agent: %s", strerror(errno));
-	
+
 	return 0;
 }
 
@@ -3462,10 +3457,8 @@ int snap_server(struct superblock *sb, int listenfd, int getsigfd, int agentfd)
 	signal(SIGTERM, sighandler);
 	signal(SIGPIPE, SIG_IGN);
 
-	if ((err = prctl(PR_SET_LESS_THROTTLE, 0, 0, 0, 0))) {
-		warn("can not set process to throttle less, error:i %s",
-				strerror(errno));
-	}
+	if ((err = prctl(PR_SET_LESS_THROTTLE, 0, 0, 0, 0)))
+		warn("can not set process to throttle less, error:i %s", strerror(errno));
 	
 	while (1) {
 		trace(warn("Waiting for activity"););
@@ -3646,6 +3639,7 @@ int start_server(int orgdev, int snapdev, int metadev, char const *agent_socknam
 	
 	if (snap_server_setup(agent_sockname, server_sockname, &listenfd, &getsigfd, &agentfd) < 0)
 		error("Could not setup snapshot server\n");
+
 	if (!nobg) {
 		pid_t pid;
 		
