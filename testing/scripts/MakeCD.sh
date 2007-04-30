@@ -12,23 +12,23 @@
 
 # The Base Directory
 if [ "x${BASEDIR}" = "x" ] ; then
-  BASEDIR="/home/${USER}/cd"
+  BASEDIR=/home/${USER}/cd
 fi
 
 # This directory will contain files that need to be copied over
 # to the new CD.
-EXTRASDIR="$BASEDIR/testcd"
+EXTRASDIR=$BASEDIR/testcd
 # Seed file
-SEEDFILE="test.seed"
+SEEDFILE=test.seed
 
 # Ubuntu ISO image
-CDIMAGE="$BASEDIR/ubuntu-6.06.1-server-i386.iso"
+CDIMAGE=$BASEDIR/ubuntu-6.06.1-server-i386.iso
 
 # Where the ubuntu iso image will be mounted
-CDSOURCEDIR="$BASEDIR/cdsource"
+CDSOURCEDIR=$BASEDIR/cdsource
 
 # Directory for building packages
-SOURCEDIR="$BASEDIR/source"
+SOURCEDIR=$BASEDIR/source
 
 # GPG 
 GPGKEYNAME="Signing Key"
@@ -38,10 +38,10 @@ GPGKEYPHRASE=""
 MYGPGKEY="$GPGKEYNAME ($GPGKEYCOMMENT) <$GPGKEYEMAIL>"
 
 # Package list (dpkg -l) from an installed system.
-PACKAGELIST="$SOURCEDIR/PackageList"
+PACKAGELIST=$SOURCEDIR/PackageList
 
 # Output CD name
-CDNAME="test.iso"
+CDNAME=test.iso
 
 # 640x480 PNG with colours as specified in
 # https://wiki.ubuntu.com/USplashCustomizationHowto
