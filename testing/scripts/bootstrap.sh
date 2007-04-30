@@ -34,7 +34,7 @@ ZSOURCEIP=${ZNETWORK}.1
 ZTARGETNM=target
 ZTARGETIP=${ZNETWORK}.2
 # The command that actually runs the tests.
-RUNTESTS=/zuma/runtests.sh
+RUNTESTS=${ZUMADIR}/runtests.sh
 # Where the tests are actually located.
 TESTDIR=tests
 
@@ -354,7 +354,7 @@ if [ "zmodevar" = "source" ]; then
 fi
 
 if [ -n "${RUNTESTS}" -a -x ${RUNTESTS} ]; then
-	${RUNTESTS} &
+	${RUNTESTS} ${TESTDIR} &
 fi
 
 exit 0
