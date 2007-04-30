@@ -683,7 +683,7 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 
 	trace_off(printf("dev1name: %s, dev2name: %s\n", dev1name, dev2name););
 	trace_off(printf("level: %d, chunksize bits: %u, chunk_count: "U64FMT"\n", level, cl->chunksize_bits, cl->count););
-	trace_on(printf("starting delta generation, mode %u, chunksize %u\n", mode, chunk_size););
+	trace_off(printf("starting delta generation, mode %u, chunksize %u\n", mode, chunk_size););
 
 	if (progress_file) {
 		int progress_len = strlen(progress_file);
@@ -955,7 +955,7 @@ static struct change_list *stream_changelist(int serv_fd, u32 src_snap, u32 tgt_
 		return NULL;
 	}
 
-	trace_on(printf("reading "U64FMT" chunk addresses (%u bits) from ddsnapd\n", cl->count, cl->chunksize_bits););
+	trace_off(printf("reading "U64FMT" chunk addresses (%u bits) from ddsnapd\n", cl->count, cl->chunksize_bits););
 	if ((err = readpipe(serv_fd, cl->chunks, cl->count * sizeof(cl->chunks[0]))) < 0) {
 		warn("unable to read change list chunks: %s", strerror(-err));
 		free(cl->chunks);
@@ -1102,6 +1102,9 @@ static int apply_delta_extents(int deltafile, u32 chunk_size, u64 chunk_count, c
 	int snapdev1, snapdev2;
 	int err;
 
+	/* !!! FIXME !!! - checksum against origin due to journal replay */
+	dev1name = dev2name;
+
 	/* if an extent is being applied */
 	if (!fullvolume) {
 		snapdev1 = open(dev1name, O_RDONLY);
@@ -1145,8 +1148,10 @@ static int apply_delta_extents(int deltafile, u32 chunk_size, u64 chunk_count, c
 		if (!fullvolume && ((err = diskread(snapdev1, extent_data, extent_size, extent_addr)) < 0))
 			goto apply_devread_error;
 		/* check to see if the checksum of snap0 is the same on upstream and downstream */
-		if (!fullvolume && deh.ext1_chksum != checksum((const unsigned char *)extent_data, extent_size)) 
+		if (!fullvolume && deh.ext1_chksum != checksum((const unsigned char *)extent_data, extent_size)) {
+			warn("delta header checksum '%lld', actual checksum '%lld'", deh.ext1_chksum, checksum((const unsigned char *)extent_data, extent_size));
 			goto apply_checksum_error_snap0;
+		}
 
 		/* gzip compression was used on extent */
 		if (deh.gzip_on == TRUE) {
@@ -1171,15 +1176,15 @@ static int apply_delta_extents(int deltafile, u32 chunk_size, u64 chunk_count, c
 		if (deh.mode == RAW)
 			memcpy(updated, delta_data, extent_size);
 		if (!fullvolume && deh.mode == XDELTA) {
-			trace_off(printf("read %llx chunk delta extent data starting at chunk "U64FMT"/offset "U64FMT" from \"%s\"\n", deh.num_of_chunks, chunk_num, extent_addr, dev1name););
+			trace_off(warn("read %llx chunk delta extent data starting at chunk "U64FMT"/offset "U64FMT" from \"%s\"", deh.num_of_chunks, chunk_num, extent_addr, dev1name););
 			int apply_ret = apply_delta_chunk(extent_data, updated, delta_data, extent_size, uncomp_size);
-			trace_off(printf("apply_ret %d\n", apply_ret););
+			trace_off(warn("apply_ret %d\n", apply_ret););
 			if (apply_ret < 0)
 				goto apply_chunk_error;
 		}
 		
 		if (deh.ext2_chksum != checksum((const unsigned char *)updated, extent_size))  {
-			printf("deh chksum %lld, checksum %lld\n", deh.ext2_chksum, checksum((const unsigned char *)updated, extent_size));
+			warn("deh chksum %lld, checksum %lld", deh.ext2_chksum, checksum((const unsigned char *)updated, extent_size));
 			goto apply_checksum_error;
 		}
 		if ((err = diskwrite(snapdev2, updated, extent_size, extent_addr)) < 0)
@@ -1197,7 +1202,7 @@ static int apply_delta_extents(int deltafile, u32 chunk_size, u64 chunk_count, c
 	if (!fullvolume)
 		close(snapdev1);
 
-	trace_on(printf("All extents applied to %s\n", dev2name););
+	trace_on(warn("All extents applied to %s\n", dev2name););
 	return 0;
 
 	/* error messages */
