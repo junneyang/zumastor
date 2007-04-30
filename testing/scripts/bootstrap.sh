@@ -25,14 +25,16 @@ ZRUNDIR=/etc/rc2.d
 TESTVOL=testvol
 # Name of the directory upon which we mount that volume.
 ZTESTFS=ztestfs
-# The command that actually runs the tests.
-RUNTESTS=/zuma/zumastor/tests/runtests
+# IP /24 network of test setup.
+ZNETWORK=192.168.0
 # Name/IP address of replication source virtual machine.
 ZSOURCENM=source
-ZSOURCEIP=192.168.0.1
+ZSOURCEIP=${ZNETWORK}.1
 # Name/IP address of replication target virtual machine.
 ZTARGETNM=target
-ZTARGETIP=192.168.0.2
+ZTARGETIP=${ZNETWORK}.2
+# The command that actually runs the tests.
+RUNTESTS=/zuma/zumastor/tests/runtests
 
 usage()
 {
@@ -42,7 +44,7 @@ usage()
 
 if [ $# -ne 1 ]; then
 	usage
-	#exit 1
+	exit 1
 fi
 SPWD=`pwd`
 #
@@ -58,13 +60,17 @@ else
 	# For testing only
 	instiso=~/cd/test.iso
 fi
+#
+# We get the package directory on the command-line.  Verify that the
+# directory actually exists.
+#
 PACKAGEDIR=$1
 if [ ! -d "$PACKAGEDIR" ]; then
 	usage
 	exit 1
 fi
 #
-# Find the zumastor install packages
+# Find the Zumastor packages.
 #
 cd $PACKAGEDIR
 KHDR=`ls kernel-headers-*.deb | tail -1`
@@ -88,13 +94,8 @@ if [ ! -f "${ZUMA}" ]; then
 	echo "No zumastor package found!"
 	fail=1
 fi
-#
-# Tar up the zumastor packages.
-#
 debtar=${SPWD}/debtar-$$.tar
-trap "rm -f ${instiso} ${debtar} test.img; exit 1" 1 2 3 9
-tar cf ${debtar} ${KHDR} ${KIMG} ${DDSN} ${ZUMA}
-cd $SPWD
+cd ${SPWD}
 #
 # Create the zumastor install script.
 #
@@ -133,9 +134,9 @@ sed --in-place '/^kernel.*zumastor/s/$/ noapic/' /boot/grub/menu.lst
 #
 # Install our test startup script that will run when we reboot.
 #
-cp zumtest.sh /etc/init.d/zumtest
-chmod 755 /etc/init.d/zumtest
-ln -s ../init.d/zumtest ${ZRUNDIR}/S99zumtest
+cp zstartup.sh /etc/init.d/zstartup
+chmod 755 /etc/init.d/zstartup
+ln -s ../init.d/zstartup ${ZRUNDIR}/S99zstartup
 #
 # Install 'tree' dependency as well as openssh-server
 #
@@ -163,29 +164,31 @@ exit 0
 EOF_zuminstall.sh
 chmod 755 zuminstall.sh
 #
-# Create the zumastor test startup script.  This script gets run at boot and
-# sets up the test environment.
+# Create the test startup script.  This script runs at boot, sucks in the
+# zumastor test configuration script and runs it.
 #
-cat <<EOF_zumtest.sh >zumtest.sh
+cat <<EOF_zstartup >zstartup.sh
 #!/bin/sh
-
-# Grab the init shell script functions
-. /lib/lsb/init-functions
 
 echo "Zumastor automated test lashup..."
 
-# Pull in source/target config from /dev/cdrom
-cd /zuma
-dd if=/dev/hdd of=config.sh
-chmod 755 config.sh
-#
-# Source the source/target config so we know the mode in which we're running.
-#
-. ./config.sh
+cd /${ZUMADIR}
 
-echo "	Configuring mode zmodevar"
-
-if [ ! -b /dev/mapper/${TESTVOL}1 ]; then
+#
+# Pull in the test configuration script and modefile.
+#
+tar xf /dev/hdd
+if [ ! -f zumcfg.sh ]; then
+	echo "******* MISSING zumcfg.sh FILE! *******"
+	exit 2
+fi
+if [ ! -f zmode.sh ]; then
+	echo "******* MISSING zmode.sh FILE! *******"
+	exit 2
+fi
+. zmode.sh
+grep -q eth1 /etc/network/interfaces
+if [ \$? -ne 0 ]; then
 	#
 	# Configure our network appropriately.
 	#
@@ -195,76 +198,153 @@ if [ ! -b /dev/mapper/${TESTVOL}1 ]; then
 		echo "	address ${ZSOURCEIP}" >>/etc/network/interfaces
 		hostname ${ZSOURCENM}
 		echo ${ZSOURCENM} >/etc/hostname
+		cp sourcekey /root/.ssh/id_rsa
+		cp sourcekey.pub /root/.ssh/id_rsa.pub
+		cp targetkey.pub /root/.ssh/authorized_keys
 	else
 		echo "	address ${ZTARGETIP}" >>/etc/network/interfaces
 		hostname ${ZTARGETNM}
 		echo ${ZTARGETNM} >/etc/hostname
+		cp targetkey /root/.ssh/id_rsa
+		cp targetkey.pub /root/.ssh/id_rsa.pub
+		cp sourcekey.pub /root/.ssh/authorized_keys
 	fi
 	echo "	netmask 255.255.255.0" >>/etc/network/interfaces
-	ifdown eth1
+	ifdown eth1 >/dev/null 2>&1
 	ifup eth1
+fi
+route add -net ${ZNETWORK}.0/24 dev eth1
+
+nohup ./zumcfg.sh >/dev/null 2>&1 &
+exit 0
+EOF_zstartup
+sed --in-place 's/zmodevar/\$\{ZMODE\}/' zstartup.sh
+chmod 755 zstartup.sh
+#
+# If we've already built test.img, don't do it again.
+#
+if [ ! -f test.img ]; then
+	#
+	# Tar the zumastor install packages.
+	#
+	cd $PACKAGEDIR
+	trap "rm -f ${instiso} ${debtar} test.img; exit 1" 1 2 3 9
+	tar cf ${debtar} ${KHDR} ${KIMG} ${DDSN} ${ZUMA}
+	cd $SPWD
+	#
+	# Generate ssh keys for the source and target, if necessary.
+	#
+	if [ ! -f sourcekey ]; then
+		ssh-keygen -t rsa -f sourcekey -N "" -C root@source
+		ssh-keygen -t rsa -f targetkey -N "" -C root@target
+	fi
+	#
+	# Append scripts and keys to the tarfile.
+	#
+	tar -r -f ${debtar} zuminstall.sh zstartup.sh sourcekey* targetkey*
+	#
+	# Create the qemu disk image then boot qemu from our iso to do the
+	# install.
+	#
+	qemu-img create -f qcow2 test.img 10G
+	qemu -no-reboot -hdb ${debtar} -cdrom ${instiso} -boot d ${TESTIMG}
+	
+	rm ${debtar}
+fi
+
+trap - 1 2 3 9
+
+#
+# Create the zumastor test configuration script.  This script gets run by
+# the test startup script at boot and sets up the test environment.
+#
+cat <<EOF_zumcfg.sh >zumcfg.sh
+#!/bin/sh
+
+#
+# Source the source/target mode file so we know how we're running.
+#
+. ./zmode.sh
+
+echo "	Configuring mode zmodevar"
+
+if [ ! -b /dev/mapper/${TESTVOL}1 ]; then
 	#
 	# Set up our ssh keys.
 	#
 	if [ "zmodevar" = "source" ]; then
-		cp sourcekey /root/.ssh/id_rsa
-		cp sourcekey.pub /root/.ssh/id_rsa.pub
-		cp targetkey.pub /root/.ssh/authorized_keys
-		ssh-keyscan -t rsa target >/root/.ssh/known_hosts
+		#
+		# Rendezvous with the target virtual machine.  Wait at most
+		# ten minutes for two ping replies.
+		#
+		ping -c 2 -w 600 ${ZTARGETNM}
+#		while [ \$? -eq 1 ]; do
+#			ping -c 2 -w 600 ${ZTARGETNM}
+#		done
+		ssh-keyscan -t rsa target >/root/.ssh/known_hosts 2>/zuma/zt.log
 	else
-		cp targetkey /root/.ssh/id_rsa
-		cp targetkey.pub /root/.ssh/id_rsa.pub
-		cp sourcekey.pub /root/.ssh/authorized_keys
-		ssh-keyscan -t rsa source >/root/.ssh/known_hosts
+		#
+		# Rendezvous with the source virtual machine.  Wait at most
+		# ten minutes for two ping replies.
+		#
+		ping -c 2 -w 600 ${ZSOURCENM}
+#		while [ \$? -eq 1 ]; do
+#			ping -c 2 -w 600 ${ZSOURCENM}
+#		done
+		ssh-keyscan -t rsa source >/root/.ssh/known_hosts 2>/zuma/zt.log
 	fi
 	#
 	# Create the volumes
 	#
-	parted /dev/hdb mklabel msdos
-	parted /dev/hdb mkpart primary 0 32768
-	pvcreate /dev/hdb1
-	vgcreate sysvg /dev/hdb1
-	lvcreate --size 2g -n origstore1 sysvg
-	lvcreate --size 8g -n snapstore1 sysvg
-	lvcreate --size 2g -n origstore2 sysvg
-	lvcreate --size 8g -n snapstore2 sysvg
-	lvcreate --size 2g -n origstore3 sysvg
-	lvcreate --size 8g -n snapstore3 sysvg
+	parted -s /dev/hdb mklabel msdos >>/zuma/zt.log 2>&1
+	parted -s /dev/hdb mkpart primary 0 32768 >>/zuma/zt.log 2>&1
+	parted -s /dev/hdb check 1 >>/zuma/zt.log 2>&1
+	sleep 10
+	pvcreate /dev/hdb1 >>/zuma/zt.log 2>&1
+	vgcreate sysvg /dev/hdb1 >>/zuma/zt.log 2>&1
+	lvcreate --size 2g -n origstore1 sysvg >>/zuma/zt.log 2>&1
+	lvcreate --size 8g -n snapstore1 sysvg >>/zuma/zt.log 2>&1
+	lvcreate --size 2g -n origstore2 sysvg >>/zuma/zt.log 2>&1
+	lvcreate --size 8g -n snapstore2 sysvg >>/zuma/zt.log 2>&1
+	lvcreate --size 2g -n origstore3 sysvg >>/zuma/zt.log 2>&1
+	lvcreate --size 8g -n snapstore3 sysvg >>/zuma/zt.log 2>&1
 	echo -n "	Creating ${TESTVOL}1..."
-	zumastor define volume -i ${TESTVOL}1 /dev/sysvg/origstore1 /dev/sysvg/snapstore1
+	zumastor define volume -i ${TESTVOL}1 /dev/sysvg/origstore1 /dev/sysvg/snapstore1 >>/zuma/zt.log 2>&1
 	echo -n "${TESTVOL}2..."
-	zumastor define volume -i ${TESTVOL}2 /dev/sysvg/origstore2 /dev/sysvg/snapstore2
+	zumastor define volume -i ${TESTVOL}2 /dev/sysvg/origstore2 /dev/sysvg/snapstore2 >>/zuma/zt.log 2>&1
 	echo -n "${TESTVOL}3..."
-	zumastor define volume -i ${TESTVOL}3 /dev/sysvg/origstore3 /dev/sysvg/snapstore3
+	zumastor define volume -i ${TESTVOL}3 /dev/sysvg/origstore3 /dev/sysvg/snapstore3 >>/zuma/zt.log 2>&1
 	echo "done."
+	# Wait for things to calm down a bit.
+	sleep 60
 	if [ "zmodevar" = "source" ]; then
 		echo -n "	Creating file systems..."
-		mkfs.ext3 /dev/mapper/${TESTVOL}1 >/dev/null 2>&1
-		mkfs.ext3 /dev/mapper/${TESTVOL}2 >/dev/null 2>&1
-		mkfs.ext3 /dev/mapper/${TESTVOL}3 >/dev/null 2>&1
+		mkfs.ext3 /dev/mapper/${TESTVOL}1 >>/zuma/zt.log 2>&1
+		mkfs.ext3 /dev/mapper/${TESTVOL}2 >>/zuma/zt.log 2>&1
+		mkfs.ext3 /dev/mapper/${TESTVOL}3 >>/zuma/zt.log 2>&1
 		echo "done."
-		zumastor define master ${TESTVOL}1 -h 5
-		zumastor define master ${TESTVOL}2 -h 5
-		zumastor define master ${TESTVOL}3 -h 5
-		mkdir -p /${ZTESTFS}1 /${ZTESTFS}2 /${ZTESTFS}3
-		zumastor define target ${TESTVOL}1 ${ZTARGETNM}:11235 30
-		zumastor define target ${TESTVOL}2 ${ZTARGETNM}:11236 30
-		zumastor define target ${TESTVOL}3 ${ZTARGETNM}:11237 30
+		zumastor define master ${TESTVOL}1 -h 5 >>/zuma/zt.log 2>&1
+		zumastor define master ${TESTVOL}2 -h 5 >>/zuma/zt.log 2>&1
+		zumastor define master ${TESTVOL}3 -h 5 >>/zuma/zt.log 2>&1
+		mkdir -p /${ZTESTFS}1 /${ZTESTFS}2 /${ZTESTFS}3 >>/zuma/zt.log 2>&1
+		zumastor define target ${TESTVOL}1 ${ZTARGETNM}:11235 30 >>/zuma/zt.log 2>&1
+		zumastor define target ${TESTVOL}2 ${ZTARGETNM}:11236 30 >>/zuma/zt.log 2>&1
+		zumastor define target ${TESTVOL}3 ${ZTARGETNM}:11237 30 >>/zuma/zt.log 2>&1
 	else
-		zumastor define source ${TESTVOL}1 ${ZSOURCENM} 600
-		zumastor define source ${TESTVOL}2 ${ZSOURCENM} 600
-		zumastor define source ${TESTVOL}3 ${ZSOURCENM} 600
-		zumastor start source ${TESTVOL}1
-		zumastor start source ${TESTVOL}2
-		zumastor start source ${TESTVOL}3
+		zumastor define source ${TESTVOL}1 ${ZSOURCENM} 600 >>/zuma/zt.log 2>&1
+		zumastor define source ${TESTVOL}2 ${ZSOURCENM} 600 >>/zuma/zt.log 2>&1
+		zumastor define source ${TESTVOL}3 ${ZSOURCENM} 600 >>/zuma/zt.log 2>&1
+		zumastor start source ${TESTVOL}1 >>/zuma/zt.log 2>&1
+		zumastor start source ${TESTVOL}2 >>/zuma/zt.log 2>&1
+		zumastor start source ${TESTVOL}3 >>/zuma/zt.log 2>&1
 	fi
 fi
 
 if [ "zmodevar" = "source" ]; then
 	echo "	Mounting ${ZTESTFS}1, ${ZTESTFS}2, ${ZTESTFS}3."
-	mount /dev/mapper/${TESTVOL}1 /${ZTESTFS}1
-	mount /dev/mapper/${TESTVOL}2 /${ZTESTFS}2
-	mount /dev/mapper/${TESTVOL}3 /${ZTESTFS}3
+	mount /dev/mapper/${TESTVOL}1 /${ZTESTFS}1 >>/zuma/zt.log 2>&1
+	mount /dev/mapper/${TESTVOL}2 /${ZTESTFS}2 >>/zuma/zt.log 2>&1
+	mount /dev/mapper/${TESTVOL}3 /${ZTESTFS}3 >>/zuma/zt.log 2>&1
 fi
 
 if [ -n "${RUNTESTS}" -a -x ${RUNTESTS} ]; then
@@ -273,82 +353,82 @@ fi
 
 exit 0
 
-EOF_zumtest.sh
-sed --in-place 's/zmodevar/\$\{ZMODE\}/' zumtest.sh
-
-chmod 755 zumtest.sh
-#
-# Generate ssh keys for the source and target, if necessary.
-#
-if [ ! -f sourcekey ]; then
-	ssh-keygen -t rsa -f sourcekey -N "" -C root@source
-	ssh-keygen -t rsa -f targetkey -N "" -C root@target
-fi
-#
-# Append all that to the tarfile.
-#
-tar -r -f ${debtar} zuminstall.sh zumtest.sh sourcekey* targetkey*
+EOF_zumcfg.sh
+sed --in-place 's/zmodevar/\$\{ZMODE\}/' zumcfg.sh
+chmod 755 zumcfg.sh
 
 #
-# Create the qemu disk image then boot qemu from our iso to do the install
+# These files are in a tarfile pointed at by the "hdd" virtual device; they
+# let the virtual machine know the mode in which it should run as well as
+# other parameters.  The extra comment lines are to pad it out to a reasonable
+# size for a 'raw' disk image.
 #
-qemu-img create -f qcow2 test.img 10G
-qemu -no-reboot -hdb ${debtar} -cdrom ${instiso} -boot d ${TESTIMG}
-
-rm ${debtar}
-
-trap - 1 2 3 9
-
-#
-# These files are pointed at by the "hdd" virtual device to let the
-# virtual machine know the mode in which it should run.  The extra comment
-# lines are to pad it out to a reasonable size for a 'raw' disk image.
-#
-cat <<source-config_EOF >source-config.sh
+if [ ! -f source-config.sh ]; then
+	cat <<source-config_EOF >source-config.sh
 #-------------------------------------------------------------------------------
 #-------------------------------------------------------------------------------
 #-------------------------------------------------------------------------------
 #-------------------------------------------------------------------------------
 ZMODE=source
+ZUMADIR=${ZUMADIR}
+ZRUNDIR=${ZRUNDIR}
+TESTVOL=${TESTVOL}
+ZTESTFS=${ZTESTFS}
+ZNETWORK=${ZNETWORK}
+ZSOURCENM=${ZSOURCENM}
+ZSOURCEIP=${ZSOURCEIP}
+ZTARGETNM=${ZTARGETNM}
+ZTARGETIP=${ZTARGETIP}
 #-------------------------------------------------------------------------------
 #-------------------------------------------------------------------------------
 #-------------------------------------------------------------------------------
 #-------------------------------------------------------------------------------
 source-config_EOF
-
-cat <<target-config_EOF >target-config.sh
+	cat <<target-config_EOF >target-config.sh
 #-------------------------------------------------------------------------------
 #-------------------------------------------------------------------------------
 #-------------------------------------------------------------------------------
 #-------------------------------------------------------------------------------
 ZMODE=target
+ZUMADIR=${ZUMADIR}
+ZRUNDIR=${ZRUNDIR}
+TESTVOL=${TESTVOL}
+ZTESTFS=${ZTESTFS}
+ZNETWORK=${ZNETWORK}
+ZSOURCENM=${ZSOURCENM}
+ZSOURCEIP=${ZSOURCEIP}
+ZTARGETNM=${ZTARGETNM}
+ZTARGETIP=${ZTARGETIP}
 #-------------------------------------------------------------------------------
 #-------------------------------------------------------------------------------
 #-------------------------------------------------------------------------------
 #-------------------------------------------------------------------------------
 target-config_EOF
-chmod 444 source-config.sh target-config.sh
-
+	chmod 444 source-config.sh target-config.sh
+fi
 #
 # Build source and target disk images.
 #
 qemu-img create -f qcow2 ${ZUMSRCIMG} 32G
 qemu-img create -f qcow2 ${ZUMTGTIMG} 32G
-#
-# Rename and clone the test disk image for our two virtual machines.
-#
-mv ${TESTIMG} ${SOURCEIMG}
-cp ${SOURCEIMG} ${TARGETIMG}
-#
-# Now start the test.
-#
+# Clone the test disk image for our source instance.
+cp ${TESTIMG} ${SOURCEIMG}
 rm -f qemu-source.pid qemu-target.pid
-# Start the source instance...
-qemu -pidfile qemu-source.pid -no-reboot -serial pty -m 512 -hdd source-config.sh -boot c -net nic,macaddr=00:e0:10:00:00:01 -net socket,vlan=1,listen=:3333 -hdb ${ZUMSRCIMG} ${SOURCEIMG} &
-# ...wait a minute to let the source instance get going...
+# Prepare the tarfile and start the source instance...
+rm -f zmode.sh
+cp source-config.sh zmode.sh
+tar cf zstart-source.tar zumcfg.sh zmode.sh
+qemu --pidfile qemu-source.pid -no-reboot -serial pty -m 512 -hdd zstart-source.tar -boot c -net nic,vlan=1,macaddr=00:e0:10:00:00:01 -net socket,vlan=1,listen=:3333 -hdb ${ZUMSRCIMG} ${SOURCEIMG} &
+# Clone the test disk image for our target instance.
+cp ${TESTIMG} ${TARGETIMG}
+# Wait a minute to let the source instance get going.
 sleep 60
-# ...and start the target instance.
-qemu -pidfile qemu-target.pid -no-reboot -serial pty -m 512 -hdd target-config.sh -boot c -net nic,macaddr=00:e0:10:00:00:02 -net socket,vlan=1,connect=127.0.0.1:3333 -hdb ${ZUMTGTIMG} ${TARGETIMG} &
+# Prepare the tarfile and start the target instance.
+rm -f zmode.sh
+cp target-config.sh zmode.sh
+tar cf zstart-target.tar zumcfg.sh zmode.sh
+qemu -pidfile qemu-target.pid -no-reboot -serial pty -m 512 -hdd zstart-target.tar -boot c -net nic,vlan=1,macaddr=00:e0:10:00:00:02 -net socket,vlan=1,connect=127.0.0.1:3333 -hdb ${ZUMTGTIMG} ${TARGETIMG} &
+rm -f zmode.sh
 
 wait
 exit 0
