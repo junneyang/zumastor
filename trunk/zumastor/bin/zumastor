@@ -227,7 +227,7 @@ function replicate_snapshot {
 
 	log "remote listen for volume '$vol' on '$host:$port' started"
 	# send the changes since the last snapshot via ddsnap transmit
-	ddsnap transmit $server $host:$port -r -g 1 $old_snap $snap -p $send_file
+	ddsnap transmit $server $host:$port -r -g 6 $old_snap $snap -p $send_file
 	if [[ $? -ne 0 ]]; then
 		log "transmit $server $host:$port $old_snap $snap failed"
 		rm $hold_file # !!! FIXME we shouldn't always fall back to full volume
