@@ -230,7 +230,6 @@ function replicate_snapshot {
 	ddsnap transmit $server $host:$port -r -g 6 $old_snap $snap -p $send_file
 	if [[ $? -ne 0 ]]; then
 		log "transmit $server $host:$port $old_snap $snap failed"
-		rm $hold_file # !!! FIXME we shouldn't always fall back to full volume
 		return 1
 	fi
 

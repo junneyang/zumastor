@@ -2707,7 +2707,7 @@ int main(int argc, char *argv[])
 		int sock = create_socket(sockname);
 		int ds_fd = open_socket(hostname, port);
 		if (ds_fd < 0) {
-			fprintf(stderr, "%s %s: unable to connect to downstream server %s port %u\n", argv[0], argv[1], hostname, port);
+			warn("%s %s: unable to connect to downstream server %s port %u: %s", argv[0], argv[1], hostname, port, strerror(errno));
 			free(hostname);
 			return 1;
 		}
