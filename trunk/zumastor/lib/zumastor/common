@@ -279,17 +279,15 @@ function remove_device {
 function get_managed_snapshots {
 	[ $# -eq 1 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
 	local -r vol=$1
-	local kind
-	local snappath
-	local snapshots
+	local kind snappath snapshots snap
 
 	for kind in ${KINDS[@]}; do
 		snappath=$VOLUMES/$vol/master/snapshots/$kind
 		[[ -e $snappath ]] && cat $snappath # !!! find a better way
 	done
 
-	for snappath in $VOLUMES/$vol/targets/*/{hold,send.*} $VOLUMES/$vol/source/{hold,send}; do
-		[[ -e $snappath ]] && cat $snappath # !!! find a better way
+	for snappath in $VOLUMES/$vol/targets/*/{hold,send} $VOLUMES/$vol/source/{hold,send}; do
+		[[ -e $snappath ]] && { read -d" " snap <$snappath; echo $snap }
 	done
 
 	echo 
