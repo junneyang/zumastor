@@ -7,7 +7,9 @@ BUILD_DIR=build # relative to current directory
 LOG=/dev/null
 TIME=`date +%s`
 
-[[ -e $1 ]] || { echo "Usage: $0 <path_to_kernel_config>"; exit 1; }
+[[ -e $1 ]] || { echo "Usage: $0 <path_to_kernel_config> [revision]"; exit 1; }
+
+[[ $# -eq 2 ]] && REV="-r $2"
 
 mkdir $BUILD_DIR 2>/dev/null
 cp $1 $BUILD_DIR/$KERNEL_VERSION.config
@@ -15,9 +17,9 @@ pushd $BUILD_DIR >> $LOG
 
 echo -ne Getting zumastor sources from subversion ...
 if [[ -e zumastor ]]; then
-	svn update zumastor >> $LOG || exit $?
+	svn update $REV zumastor >> $LOG || exit $?
 else
-	svn checkout http://zumastor.googlecode.com/svn/trunk/ zumastor >> $LOG || exit $?
+	svn checkout $REV http://zumastor.googlecode.com/svn/trunk/ zumastor >> $LOG || exit $?
 fi
 SVNREV=`svn info zumastor | grep ^Revision:  | cut -d\  -f2`
 VERSION=`cat zumastor/VERSION` || exit 1

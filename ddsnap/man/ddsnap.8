@@ -46,7 +46,7 @@ ddsnap \- block level snapshot and replication
 .I deltafile_name snapshot_device_stem
 .br
 .B ddsnap transmit
-[-o|--overwrite] [-d|--difference] [-b|--best] [-z|--zip \fIcompression_level\fP] 
+[-o|--overwrite] [-d|--difference] [-b|--best] [-z|--zip \fIcompression_level\fP] [-p|--progress \fIprogress_file\fP]
 \fIsocket_name host\fP[\fI:port\fP] [\fIfromsnap\fP] \fItosnap
 .br
 .B ddsnap delta listen
@@ -161,12 +161,11 @@ Creates a deltafile from the given \fIchangelist\fP and snapshot device stem wit
 .I deltafile_name snapshot_device_stem
 .br
 Applies the deltafile to the given device.
-.IP \fBdelta\ \fBsend\fP 
+.IP \fBtransmit\fP 
 [-o|--overwrite] [-d|--difference] [-b|--best] [-z|--zip \fIcompression_level\fP] 
-.I socket_name snapshot1 snapshot2 snapshot_device_stem remote_snapshot
-\fIhost\fP[\fI:port\fP]
+.I socket_name host\fP[\fI:port\fP] [\fIfromsnap\fP] \fItosnap
 .br
-Sends a deltafile to a downstream server.
+Streams a delta from snapshot \fIfromsnap\fP to snapshot \fItosnap\fP to downstream server \fIhost\fP.  If \fIfromsnap\fP is omitted, the full volume, as it existed at \fItosnap\fP is sent. If \fIprogress_file\fP is specified, it is updated once a second with replication progress data.
 .IP \fBdelta\ \fBlisten\fP 
 [\-f|--foreground] [-l|--logfile \fIstring\fP] [-p|--pidfile \fIstring\fP] \fIsnapshot_device_stem\fP [\fIhost\fP[\fI:port\fP]]
 .br
