@@ -5,10 +5,10 @@ zumastor \- block level snapshot and replication
 \fB
 .SH SYNOPSIS
 .B zumastor define volume
-.I volume_name snapshot_device origin_device \fP[\fImetadata_device\fP] [\fBnosnap\fP|\fBnoinit\fP]
+.I volume_name snapshot_device origin_device \fP[\fB-i\fP|\fB--initialize\fP] \fP[\fB-m\fP|\fB--metadev\fP \fImetadata_device\fP] [\fB-b\fP|\fB--blocksize\fP \fIblocksize\fP] [\fB-c\fP|\fB--chunksize\fP \fIchunksize\fP]
 .br
 .B zumastor define master
-.I volume_name \fP\fBhourly\fP|\fBdaily\fP|\fBweekly\fP|\fBmonthly \fIn
+.I volume_name \fP[\fB-h\fP|\fB--hourly\fP \fIsnapshots\fP] [\fB-d\fP|\fB--daily\fP \fIsnapshots\fP] [\fB-w\fP|\fB--weekly\fP \fIsnapshots\fP] [\fB-m\fP|\fB--monthly\fP \fIsnapshots\fP] 
 .br
 .B zumastor define source
 .I volume_name \fP\fIhost\fP [\fIinterval\fP]
@@ -27,7 +27,7 @@ zumastor \- block level snapshot and replication
 .br
 .br
 .B zumastor replicate
-.I volume_name host \fP[\fIsnap\fP]
+.I volume_name host \fP[\fB-s\fP|\fB--snapnum\fP \fIsnap\fP] [\fB-d\fP|\fB--delay\fP \fIseconds\fP]
 .br
 .B zumastor status
 [\fIvolume_name\fP [\fIsnap\fP]]
@@ -44,9 +44,9 @@ zumastor \- block level snapshot and replication
 
 .SH COMMANDS
 .IP \fBdefine\ \fBvolume\fP 
-.I volume_name snapshot_device origin_device \fP[\fImetadata_device\fP] [\fBnosnap\fP|\fBnoinit\fP]
+.I volume_name snapshot_device origin_device \fP[\fB-i\fP|\fB--initialize\fP] [\fB-m\fP|\fB--metadev\fP \fImetadata_device\fP] [\fB-b\fP|\fB--blocksize\fP \fIblocksize\fP] [\fB-c\fP|\fB--chunksize\fP \fIchunksize\fP]
 .br
-Define a new zumastor volume named \fIvolume_name\fP based on the underlying volumes \fIorigin_device\fP and \fIsnapshot_device\fP.  If specified, the \fImetadata_device\fP will be used for snapshot metadata storage.  The \fIsnapshot_device\fP will be initialized using ddsnap initialize, and all data will be overwritten with zeros on the origin device, unless the \fBnoinit\fP option is passed.  An initial snapshot 0 is taken to allow replication to be configured downstream unless the \fBnosnap\fP option is specified.
+Define a new zumastor volume named \fIvolume_name\fP based on the underlying volumes \fIorigin_device\fP and \fIsnapshot_device\fP.  If specified, the \fImetadata_device\fP will be used for snapshot metadata storage (especially useful for NVRAM acceleration). If the \fBinitialize\fP option is used, the newly created volume data will be overwritten with zeros, overwriting all data on the origin device. The snapshot block and chunk sizes can be specified with the \fBblocksize\fP and \fBchunksize\fP options, respectively. They may only diff if separate metadata and snapshot devices are specified.
 .IP \fBdefine\ \fBmaster\fP
 .I volume_name \fP\fBhourly\fP|\fBdaily\fP|\fBweekly\fP|\fBmonthly \fIn
 .br
@@ -73,9 +73,9 @@ Stop automatic replication for a volume target and remove the target from the \f
 .br
 Explicitly initiate a volume snapshot within the specified snapshot rotation.
 .IP \fBreplicate\fP
-.I volume_name host \fP[\fIsnap\fP]
+.I volume_name host \fP[\fB-s\fP|\fB--snapnum\fP \fIsnap\fP] [\fB-d\fP|\fB--delay\fP \fIseconds\fP]
 .br
-Explicitly initiate a volume replication cycle to the specified host. If \fIsnap\fP is specified then the snapshot with id \fIsnap\fP will be replicated, unless a more recent snapshot has already been replicated. If \fIsnap\fP is omitted then the most recent volume snapshot will be replicated.
+Explicitly initiate a volume replication cycle to the specified host. If \fIsnap\fP is specified then the snapshot with id \fIsnap\fP will be replicated, unless a more recent snapshot has already been replicated. If \fIsnap\fP is omitted then the most recent volume snapshot will be replicated. If \fIseconds\fP is specified, the script will sleep for the specified number of seconds before triggering a replication cycle. This is used internally to support periodic replication. The default is 0, meaning immediately.
 .IP \fBstatus\fP
 [\fIvolume_name\fP [\fIsnap\fP]]
 .br
@@ -90,7 +90,7 @@ Display the status of all the volumes if given no arguments.  If a \fIvolume_nam
 # Creating a snapshot schedule that will keep the last 5 hours as snapshots
 .TP
 .B
-\fBzumastor\fP \fIdefine master\fP test hourly 5
+\fBzumastor\fP \fIdefine master\fP test -h 24 -d 7
 .PP
 
 .SH TERMINOLOGY

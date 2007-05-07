@@ -29,7 +29,7 @@ ddsnap \- block level snapshot and replication
 .I socket_name snap_tag new_priority_value
 .br
 .B ddsnap usecount
-.I socket_name snap_tag [diff_amount]
+.I socket_name snap_tag \fP[\fIdiff_amount\fP]
 .br
 .B ddsnap status
 [\-v|--verbose] \fIsocket_name\fP [\fIsnapshot\fP]
@@ -45,10 +45,9 @@ ddsnap \- block level snapshot and replication
 .B ddsnap delta apply 
 .I deltafile_name snapshot_device_stem
 .br
-.B ddsnap delta send
+.B ddsnap transmit
 [-o|--overwrite] [-d|--difference] [-b|--best] [-z|--zip \fIcompression_level\fP] 
-.I socket_name snapshot1 snapshot2 snapshot_device_stem remote_snapshot
-\fIhost\fP[\fI:port\fP]
+\fIsocket_name host\fP[\fI:port\fP] [\fIfromsnap\fP] \fItosnap
 .br
 .B ddsnap delta listen
 [\-f|--foreground] [-l|--logfile \fIfile_name\fP] [-p|--pidfile \fIfile_name\fP] \fIsnapshot_device_stem\fP [\fIhost\fP[\fI:port\fP]]
