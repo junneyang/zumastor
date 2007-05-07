@@ -139,7 +139,6 @@ function new_target_snapshot {
 	local -r target_fifo=$VOLUMES/$vol/targets/$hostname/trigger
 	local -r sock=${SERVERS}/$vol
 	local -r master=$VOLUMES/$vol/master
-	local send_file send
 
 	[ -e $target_fifo ] || { log "target trigger for $hostname does not exist"; return 1; }
 
@@ -149,17 +148,6 @@ function new_target_snapshot {
 	next=$(read_and_inc $master/next) || { log "ssn error: $master/next"; return 1; }
 
 	log "new snapshot will be '$next'"
-
-	# record the snapshot to be created first so that we remember to remove it properly during zumastor stop
-	#send_file=$VOLUMES/$vol/targets/$hostname/send
-	#if [[ -e $send_file ]]; then
-	#	log "$send_file exists, cleaning up previous replication cycle"
-	#	read -d' ' send <$send_file
-	#	[[ -z $send ]] || drop_snapshot $vol $send
-	#	rm $send_file
-	#fi
-	#echo $next > $send_file || { log "error writing snapshot id '$next' to '$send_file'"; \
-	#	rm $send_file; drop_snapshot $vol $next; return 1; }
 
 	# need to create the device in order for ddsnap transmit to work
 	create_snapshot $vol $next
@@ -223,7 +211,7 @@ function replicate_snapshot {
 	if [[ $status -eq 7 ]]; then # held snapshot mismatch
 		if verify_existing_snap $vol $output; then
 			log "downstream holding valid snapshot '$output', using it instead of '$old_snap'"
-			run_remote $host "zumastor receive start $vol $port $old_snap"
+			run_remote $host "zumastor receive start $vol $port $output"
 			status=$?
 			[[ $status -eq 0 ]] && drop_snapshot $vol $old_snap
 			old_snap=$output
