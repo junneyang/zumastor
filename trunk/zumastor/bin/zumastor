@@ -471,10 +471,9 @@ function forget_volume {
 
 	local id host targets
 
-	pushd $VOLUMES/$vol/targets > /dev/null && \
-	targets=`echo *` && \
-	popd > /dev/null
-	for host in $targets; do
+	for host in $VOLUMES/$vol/targets/*; do
+		host=${host/*\//} # basename without a subshell
+		[[ $host == "*" ]] && continue # in case it didn't expand
 		forget_target $vol $host
 	done
 
