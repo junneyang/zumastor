@@ -360,12 +360,11 @@ static struct buffer *snapread(struct superblock const *sb, sector_t sector)
 	return bread(sb->metadev, sector, sb->metadata.allocsize);
 }
 
-/* Maybe somebody should implement a log(n) version */
-static int bitcount(long long n)
+static int bytebits(unsigned char c)
 {
 	unsigned count = 0;
-	for (; n; n >>= 1)
-		count += n & 1;
+	for (; c; c >>= 1)
+		count += c & 1;
 	return count;
 }
 
@@ -375,7 +374,7 @@ static chunk_t count_free(struct superblock *sb, struct allocspace *alloc)
 	unsigned char zeroes[256];
 	unsigned i;
 	for (i = 0; i < 256; i++)
-		zeroes[i] = bitcount(~i & 0xff);
+		zeroes[i] = bytebits(~i);
 	chunk_t count = 0, block = 0, bytes = (alloc->asi->chunks + 7) >> 3;
 	while (bytes) {
 		struct buffer *buffer = snapread(sb, alloc->asi->bitmap_base + (block << sb->metadata.chunk_sectors_bits));
@@ -2653,20 +2652,38 @@ next:
 
 #endif
 
-static inline chunk_t *sharetable(chunk_t *table, unsigned which, unsigned count)
+/* A very simple-minded implementation.  You can do it in very
+ * few operations with whole-register bit twiddling but I assume
+ * that we can juse find a macro somewhere which works.
+ *  AKA hamming weight, sideways add
+ */
+static unsigned int bit_count(u64 num)
 {
-	return table + which * MAX_SNAPSHOTS + count;
+	unsigned count = 0;
+
+	for (; num; num >>= 1)
+		if (num & 1)
+			count++;
+
+	return count;
 }
 
 static void calc_sharing(struct superblock *sb, struct eleaf *leaf, void *data)
 {
-	for (int i = 0; i < leaf->count; i++)
-		for (struct exception *p = emap(leaf, i); p < emap(leaf, i+1); p++) {
+	uint64_t *share_table = data;
+	struct exception const *p;
+	unsigned bit;
+	unsigned int share_count;
+	int i;
+
+	for (i = 0; i < leaf->count; i++)
+		for (p = emap(leaf, i); p < emap(leaf, i+1); p++) {
 			assert(p->share); // belongs in check leaf function
-			unsigned shared = bitcount(p->share) - 1;
-			for (unsigned bit = 0; bit < MAX_SNAPSHOTS; bit++)
+			share_count = bit_count(p->share) - 1;
+
+			for (bit = 0; bit < MAX_SNAPSHOTS; bit++)
 				if (p->share & (1ULL << (u64)bit))
-					(*sharetable(data, bit, shared))++;
+					share_table[MAX_SNAPSHOTS * bit + share_count]++;
 		}
 }
 
@@ -3163,41 +3180,73 @@ static int incoming(struct superblock *sb, struct client *client)
 
 		/* allocate reply */
 
-		unsigned snapshots = sb->image.snapshots;
-		unsigned rowsize = (sizeof(struct status) + snapshots * sizeof(chunk_t));
-		unsigned int reply_len = sizeof(struct status_message) + snapshots * rowsize;
-
-		uint64_t table[MAX_SNAPSHOTS * MAX_SNAPSHOTS];
-		memset(table, 0, sizeof(table));
-		traverse_tree_chunks(sb, calc_sharing, NULL, table);
-
+		unsigned num_rows = sb->image.snapshots;
+		unsigned num_columns = num_rows, status_count = sb->image.snapshots;
+		unsigned rowsize = (sizeof(struct status) + num_columns * sizeof(chunk_t));
+		unsigned int reply_len = sizeof(struct status_message) + status_count * rowsize;
 		struct status_message *reply = calloc(reply_len, 1);
+
+		/* calculate the usage statistics */
+
+		uint64_t share_array[MAX_SNAPSHOTS * MAX_SNAPSHOTS];
+		memset(share_array, 0, sizeof(share_array));
+
+		traverse_tree_chunks(sb, calc_sharing, NULL, share_array);
+
+#ifdef DEBUG_STATUS
+		{
+			printf("num_rows=%u num_columns=%u status_count=%u\n", num_rows, num_columns, status_count);
+
+			printf("snapshots:\n");
+			for (int snapslot = 0; snapslot < sb->image.snapshots; snapslot++)
+				printf(" %2u: bit=%d, idtag=%u\n", snapslot, sb->image.snaplist[snapslot].bit, sb->image.snaplist[snapslot].tag);
+			printf("\n");
+
+			for (int row = 0; row < num_rows; row++) {
+				printf("%2d: ", row);
+				for (int col = 0; col < num_columns; col++)
+					printf(" %2llu", share_array[row][col]);
+				printf("\n");
+			}
+			printf("\n");
+		}
+#endif
+
+		/* fill in reply structure */
+
 		reply->ctime = sb->image.create_time;
+
+		// don't always count here!!!
+//		sb->metadata.chunks_used = count_free(sb, &sb->metadata);
+//		sb->snapdata.chunks_used = count_free(sb, &sb->snapdata);
 		reply->meta.chunksize_bits = sb->metadata.asi->allocsize_bits;
 		reply->meta.used = sb->metadata.chunks_used;
 		reply->meta.free = sb->metadata.asi->chunks - sb->metadata.chunks_used;
 		reply->store.used = sb->snapdata.chunks_used;
 		reply->store.chunksize_bits = sb->snapdata.asi->allocsize_bits;
+
 		if (combined(sb))
 			reply->meta.free -= sb->snapdata.chunks_used;
 		else
 			reply->store.free = sb->snapdata.asi->chunks - sb->snapdata.chunks_used;
+
 		reply->write_density = 0;
-		reply->snapshots = reply->num_columns = snapshots; // why even have num_columns???
+		reply->status_count = status_count;
+		reply->num_columns = num_columns;
 
 		for (int row  = 0; row < sb->image.snapshots; row++) {
-			struct status *statusrow = (struct status *)(reply->status_data + row * rowsize);
-			struct snapshot const *snap = snaplist + row;
+			struct status *snap_status = (struct status *)(reply->status_data + row * rowsize );
 
-			*statusrow = (typeof(*statusrow)){ .ctime = snap->ctime, .tag = snap->tag };
+			snap_status->ctime = snaplist[row].ctime;
+			snap_status->snap = snaplist[row].tag;
 
 			if (is_squashed(&snaplist[row])) {
-				statusrow->chunk_count[0] = -1; // !!! clear rest of row to zero
+				snap_status->chunk_count[0] = -1;
 				continue;
 			}
 
-			for (int col = 0; col < snapshots; col++)
-				statusrow->chunk_count[col] = *sharetable(table, snap->bit, col);
+			for (int col = 0; col < num_columns; col++)
+				snap_status->chunk_count[col] = share_array[snaplist[row].bit * col];
 		}
 
 		if (outhead(sock, STATUS_OK, reply_len) < 0 || writepipe(sock, reply, reply_len) < 0)
