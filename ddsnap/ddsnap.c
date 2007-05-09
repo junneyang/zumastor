@@ -615,8 +615,8 @@ static struct status_message * generate_status(int serv_fd, u32 snaptag)
 		return NULL;
 	}
 
-	if (reply->status_count > reply->num_columns) {
-		warn("mismatched snapshot status count (%u) and the number of columns (%u)", reply->status_count, reply->num_columns);
+	if (reply->snapshots > reply->num_columns) { // !!! so why even have num_columns?
+		warn("mismatched snapshot status count (%u) and the number of columns (%u)", reply->snapshots, reply->num_columns);
 		free(reply);
 		return NULL;
 	}
@@ -1846,10 +1846,10 @@ static int ddsnap_get_status(int serv_fd, u32 snaptag, int verbose)
 
 	struct status *snap_status;
 
-	for (row = 0; row < reply->status_count; row++) {
+	for (row = 0; row < reply->snapshots; row++) {
 		snap_status = get_snap_status(reply, row);
 
-		printf("%6u", snap_status->snap);
+		printf("%6u", snap_status->tag);
 
 		snaptime = (time_t)snap_status->ctime;
 		ctime_str = ctime(&snaptime);
@@ -1896,7 +1896,7 @@ static int ddsnap_get_status(int serv_fd, u32 snaptag, int verbose)
 		total_chunks = 0;
 		for (col = 0; col < reply->num_columns; col++) {
 			column_totals[col] = 0;
-			for (row = 0; row < reply->status_count; row++) {
+			for (row = 0; row < reply->snapshots; row++) {
 				snap_status = get_snap_status(reply, row);
 				if (snap_status->chunk_count[0] == -1)
 					continue;
