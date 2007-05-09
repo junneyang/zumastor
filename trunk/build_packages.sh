@@ -22,7 +22,7 @@ else
 	svn checkout $REV http://zumastor.googlecode.com/svn/trunk/ zumastor >> $LOG || exit $?
 fi
 SVNREV=`svn info zumastor | grep ^Revision:  | cut -d\  -f2`
-VERSION=`cat zumastor/VERSION` || exit 1
+VERSION=`cat zumastor/Version` || exit 1
 echo -e "done.\n"
 
 echo -n Getting kernel sources from kernel.org ...
