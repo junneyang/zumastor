@@ -9,7 +9,7 @@
 
     This document describes how to get a basic zumastor master node
     with snapshots running on Debian or Ubuntu, and then how to
-    replicate that to a second slace server.  Actual deployments may
+    replicate that to a second slave server.  Actual deployments may
     be more complex - the goal here is simplicity to get started.
 
     <h2>Common node setup</h2>
@@ -176,6 +176,104 @@ RUN STATUS:
       <code>
 	zumastor snapshot testvol hourly
       </code>
+
+    <h2>Remote replication</h2>
+
+    Install both an origin and a slave node.  These will be
+    <tt>lab1</tt> and <tt>lab2</tt> below.
+
+    <h3>ssh authorization</h3>
+
+    On each machine, run <code>ssh-keygen</code> as root.  Copy the
+    .ssh/id_dsa.pub file from each account to .ssh/authorized_keys on
+    the other.  This authorizes root on each machine to connect
+    without a password to the other.  More restricted access may be
+    used in actual deployment.
+
+    <h3>Define target on master</h3>
+
+    root@lab1:~#
+    <code>zumastor define target testvol lab2.example.com:11235 30</code>
+
+    <p>
+      This tells lab1 to replicate to port 11235 on lab2 every 30 seconds.
+If the period is omitted, replication will not occur.
+
+    <p> zumastor status
+    <pre>
+...
+`-- targets/
+    `-- gsdlab2.corp.google.com/
+        |-- period
+        |-- port
+        `-- trigger|
+...
+    </pre>
+
+    <h3>Define volume and configure source on target</h3>
+
+    root@lab2:~#
+    <code>
+zumastor define volume testvol /dev/sysvg/test /dev/sysvg/test_snap --initialize
+    </code>
+    <p>
+root@lab2:~#
+      <code>
+	zumastor define source testvol lab1.example.com 600
+      </code>
+
+     <p>zumastor status
+    <pre>
+VOLUME testvol:
+Data chunk size: 16384
+Used data: 0
+Free data: 0
+Metadata chunk size: 16384
+Used metadata: 56
+Free metadata: 2621384
+Origin size: 21474836480
+Write density: 0
+Creation time: Wed May 16 10:28:27 2007
+  Snap            Creation time   Chunks Unshared   Shared
+totals                                 0        0        0
+Status: running
+Configuration:
+/var/lib/zumastor/volumes/testvol
+|-- device/
+|   |-- origin -> /dev/sysvg/test
+|   `-- snapstore -> /dev/sysvg/test_snap
+|-- source/
+|   |-- hostname
+|   `-- period
+`-- targets/
+
+RUN STATUS:
+/var/run/zumastor
+|-- agents/
+|   `-- testvol=
+|-- cron/
+|-- mount/
+|-- running
+`-- servers/
+    `-- testvol=
+    </pre>
+
+    <h3>Start replication</h3>
+
+    root@lab2:~#
+    <code>zumastor start source testvol</code>
+
+    <p>
+    Alternatively, you may kick off replication manually each time from the master. <p>
+
+      root@lab1:~#
+      <code>zumastor replicate testvol lab2.example.com</code>
+
+    <p> Once initial replication is started, <code>ddsnap</code>
+    processes should begin consuming CPU cycles and moving tens of
+    megabits per second between the nodes.  Initially, the entire
+    origin device will need to be moved, so wait 15 minutes before
+    looking on the target for snapshots.
 
   </body>
 </html>
