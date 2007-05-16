@@ -273,7 +273,25 @@ RUN STATUS:
     processes should begin consuming CPU cycles and moving tens of
     megabits per second between the nodes.  Initially, the entire
     origin device will need to be moved, so wait 15 minutes before
-    looking on the target for snapshots.
+    looking on the target for snapshots.  When replication is
+    complete, df on the slave should show the same
+    /var/run/zumstor/testvol volume locally mounted.
+
+   <h3>Verify replication</h3>
+      root@lab1:~#
+      <code> date > /var/run/zumastor/mount/testvol/testfile </code>
+
+      <p>
+      Wait 30-60 seconds for next replication cycle to complete.
+
+    <p>
+      root@lab2:~#
+      <code> ls -l /var/run/zumastor/mount/testvol/testfile </code>
+
+    <p>
+      You may need to leave the current directory to see incoming
+      changes.  If the same file is there on the slave (lab2),
+      replication is working.
 
   </body>
 </html>
