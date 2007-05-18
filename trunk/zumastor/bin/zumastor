@@ -17,8 +17,6 @@ function read_and_inc {
 	echo $(( num+1 )) > $filename || return 1
 
 	echo $num
-
-	return 0
 }
 
 function drop_snapshot {
@@ -124,8 +122,6 @@ function send_to_fifo {
 	[[ -w $fifo ]] || { echo "$fifo not writable"; return 1; }
 
 	echo $data > $fifo || { echo "error writing to $fifo"; return 1; }
-
-	return 0
 }
 
 # new_target_snapshot <volume> <hostname>
@@ -201,8 +197,11 @@ function replicate_snapshot {
 
 	log "replication beginning from snapshot '$old_snap' to '$snap' on volume '$vol' for '$host'"
 
-	run_remote $host "cat $VOLUMES/$vol/source/hostname"
-	[[ $? -ne 0 ]] && { log "set '$MYHOSTNAME' as source for '$vol' on '$host' first!"; return 1; }
+	output=$(run_remote $host "cat $VOLUMES/$vol/source/hostname")
+	if [[ $? -ne 0 ]] || [[ $output != $MYHOSTNAME ]]; then
+		log "set '$MYHOSTNAME' as source for '$vol' on '$host' first!"
+		return 1
+	fi
 
 	read port <$port_file || { log "error reading port from '$port_file'"; return 1; }
 
@@ -228,7 +227,7 @@ function replicate_snapshot {
 
 	echo $snap > $send_file
 
-	log "remote listen for volume '$vol' on '$host:$port' started"
+	log "remote listen started on port $port, transmitting snapshot $snap"
 	# send the changes since the last snapshot via ddsnap transmit
 	ddsnap transmit $server $host:$port -r -g 6 $old_snap $snap -p $send_file
 	if [[ $? -ne 0 ]]; then
@@ -236,17 +235,17 @@ function replicate_snapshot {
 		return 1
 	fi
 
+	log "sending snapshot complete, notifying downstream host"
 	run_remote $host "zumastor receive done $vol $port $snap"
 	[[ $? -ne 0 ]] && { log "zumastor receive done $vol $port $snap failed"; return 1; }
 
 	#[[ $snap -eq 5 ]] && restart_plug
 	# !!! FIXME TODO this is racy, we should save state by journaling
+	log "setting hold snapshot to $snap"
 	mv $send_file $hold_file
 	echo $snap > $hold_file # to remove progress status
 
 	[[ $old_snap ]] && drop_snapshot $vol $old_snap
-
-	return 0
 }
 
 function restart_plug {
@@ -454,11 +453,9 @@ function define_volume {
 	[ -z $mdev ] || ln -sf $mdev $path/device/meta || return 1
 	mkdir $path/targets || return 1
 
-	start_volume $vol || { echo start failed ;return 1; }
+	start_volume $vol || { echo start failed; return 1; }
 
-	create_device $vol -1 || { echo create failed;return 1; }
-
-	return 0
+	create_device $vol -1 || { echo create failed; return 1; }
 }
 
 function forget_volume {
@@ -567,7 +564,6 @@ function forget_source {
 	[[ $hold != "" ]] && drop_snapshot $vol $hold
 
 	rm -rf $VOLUMES/$vol/source || return 1
-	return 0
 }
 
 function define_master {
