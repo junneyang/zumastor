@@ -266,7 +266,7 @@ function run_master {
 	touch ${CRONS}/$vol || return 1
 
 	# daemonize (close stdin, stdout, stderr)
-	#exec 0</dev/null 1>/dev/null 2>/dev/null
+	exec 0</dev/null 1>/dev/null 2>/dev/null
 
 	mount_device $vol -1 rw
 
@@ -428,7 +428,7 @@ function init_define_volume {
 
 	log "initializing volume '$vol', origindev '$odev', snapdev '$sdev'" $log
 	# FIXME TODO -b $blocksize is not passed because it requires metadev
-	ddsnap initialize -c $chunksize $sdev $odev $mdev 2>>$log || { echo init failed; return 1; }
+	ddsnap initialize --yes -c $chunksize $sdev $odev $mdev 2>>$log || { echo init failed; return 1; }
 
 	start_volume $vol || { echo start failed ;return 1; }
 
