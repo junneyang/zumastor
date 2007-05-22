@@ -1,6 +1,6 @@
-diff -purN linux-2.6.19.1/drivers/md/Kconfig linux-2.6.19.1-zuma/drivers/md/Kconfig
---- linux-2.6.19.1/drivers/md/Kconfig	2006-12-11 11:32:53.000000000 -0800
-+++ linux-2.6.19.1-zuma/drivers/md/Kconfig	2007-03-15 17:44:44.000000000 -0700
+diff -ruNp ../orig/linux-2.6.19.1/drivers/md/Kconfig linux-2.6.19.1/drivers/md/Kconfig
+--- ../orig/linux-2.6.19.1/drivers/md/Kconfig	2006-12-11 11:32:53.000000000 -0800
++++ linux-2.6.19.1/drivers/md/Kconfig	2007-05-21 17:13:35.000000000 -0700
 @@ -261,6 +261,22 @@ config DM_MULTIPATH_EMC
  	---help---
  	  Multipath support for EMC CX/AX series hardware.
@@ -24,9 +24,9 @@ diff -purN linux-2.6.19.1/drivers/md/Kconfig linux-2.6.19.1-zuma/drivers/md/Kcon
  endmenu
  
  endif
-diff -purN linux-2.6.19.1/drivers/md/Makefile linux-2.6.19.1-zuma/drivers/md/Makefile
---- linux-2.6.19.1/drivers/md/Makefile	2006-12-11 11:32:53.000000000 -0800
-+++ linux-2.6.19.1-zuma/drivers/md/Makefile	2007-03-15 17:44:44.000000000 -0700
+diff -ruNp ../orig/linux-2.6.19.1/drivers/md/Makefile linux-2.6.19.1/drivers/md/Makefile
+--- ../orig/linux-2.6.19.1/drivers/md/Makefile	2006-12-11 11:32:53.000000000 -0800
++++ linux-2.6.19.1/drivers/md/Makefile	2007-05-21 17:13:35.000000000 -0700
 @@ -36,6 +36,8 @@ obj-$(CONFIG_DM_MULTIPATH_EMC)	+= dm-emc
  obj-$(CONFIG_DM_SNAPSHOT)	+= dm-snapshot.o
  obj-$(CONFIG_DM_MIRROR)		+= dm-mirror.o
@@ -36,9 +36,9 @@ diff -purN linux-2.6.19.1/drivers/md/Makefile linux-2.6.19.1-zuma/drivers/md/Mak
  
  quiet_cmd_unroll = UNROLL  $@
        cmd_unroll = $(PERL) $(srctree)/$(src)/unroll.pl $(UNROLL) \
-diff -purN linux-2.6.19.1/drivers/md/dm-ddraid.c linux-2.6.19.1-zuma/drivers/md/dm-ddraid.c
---- linux-2.6.19.1/drivers/md/dm-ddraid.c	1969-12-31 16:00:00.000000000 -0800
-+++ linux-2.6.19.1-zuma/drivers/md/dm-ddraid.c	2007-03-15 17:44:44.000000000 -0700
+diff -ruNp ../orig/linux-2.6.19.1/drivers/md/dm-ddraid.c linux-2.6.19.1/drivers/md/dm-ddraid.c
+--- ../orig/linux-2.6.19.1/drivers/md/dm-ddraid.c	1969-12-31 16:00:00.000000000 -0800
++++ linux-2.6.19.1/drivers/md/dm-ddraid.c	2007-05-21 17:13:35.000000000 -0700
 @@ -0,0 +1,1621 @@
 +#include <linux/fs.h>
 +#include <linux/slab.h>
@@ -1661,9 +1661,9 @@ diff -purN linux-2.6.19.1/drivers/md/dm-ddraid.c linux-2.6.19.1-zuma/drivers/md/
 +
 +module_init(dm_ddraid_init);
 +module_exit(dm_ddraid_exit);
-diff -purN linux-2.6.19.1/drivers/md/dm-ddraid.h linux-2.6.19.1-zuma/drivers/md/dm-ddraid.h
---- linux-2.6.19.1/drivers/md/dm-ddraid.h	1969-12-31 16:00:00.000000000 -0800
-+++ linux-2.6.19.1-zuma/drivers/md/dm-ddraid.h	2007-03-15 17:44:44.000000000 -0700
+diff -ruNp ../orig/linux-2.6.19.1/drivers/md/dm-ddraid.h linux-2.6.19.1/drivers/md/dm-ddraid.h
+--- ../orig/linux-2.6.19.1/drivers/md/dm-ddraid.h	1969-12-31 16:00:00.000000000 -0800
++++ linux-2.6.19.1/drivers/md/dm-ddraid.h	2007-05-21 17:13:35.000000000 -0700
 @@ -0,0 +1,47 @@
 +#define PACKED __attribute__ ((packed))
 +
@@ -1712,10 +1712,10 @@ diff -purN linux-2.6.19.1/drivers/md/dm-ddraid.h linux-2.6.19.1-zuma/drivers/md/
 +
 +// bios submitted before server arrives must be split conservatively (see "bogus")
 +#define MIN_REGION_BITS 12
-diff -purN linux-2.6.19.1/drivers/md/dm-ddsnap.c linux-2.6.19.1-zuma/drivers/md/dm-ddsnap.c
---- linux-2.6.19.1/drivers/md/dm-ddsnap.c	1969-12-31 16:00:00.000000000 -0800
-+++ linux-2.6.19.1-zuma/drivers/md/dm-ddsnap.c	2007-03-15 17:45:02.000000000 -0700
-@@ -0,0 +1,1438 @@
+diff -ruNp ../orig/linux-2.6.19.1/drivers/md/dm-ddsnap.c linux-2.6.19.1/drivers/md/dm-ddsnap.c
+--- ../orig/linux-2.6.19.1/drivers/md/dm-ddsnap.c	1969-12-31 16:00:00.000000000 -0800
++++ linux-2.6.19.1/drivers/md/dm-ddsnap.c	2007-05-21 17:39:56.000000000 -0700
+@@ -0,0 +1,1463 @@
 +#include <linux/version.h>
 +#include <linux/fs.h>
 +#include <linux/slab.h>
@@ -1902,6 +1902,7 @@ diff -purN linux-2.6.19.1/drivers/md/dm-ddsnap.c linux-2.6.19.1-zuma/drivers/md/
 +	struct semaphore exit1_sem;
 +	struct semaphore exit2_sem;
 +	struct semaphore exit3_sem;
++	struct semaphore identify_sem;
 +	struct list_head pending[NUM_BUCKETS];
 +	struct list_head queries;
 +	struct list_head releases;
@@ -1910,6 +1911,7 @@ diff -purN linux-2.6.19.1/drivers/md/dm-ddsnap.c linux-2.6.19.1-zuma/drivers/md/
 +	spinlock_t end_io_lock;
 +	int dont_switch_lists;
 +	atomic_t inflight;
++	atomic_t bypass;
 +	unsigned capacity; // reporting only
 +	struct semaphore throttle_sem; // does the real throttling
 +};
@@ -1944,6 +1946,10 @@ diff -purN linux-2.6.19.1/drivers/md/dm-ddsnap.c linux-2.6.19.1-zuma/drivers/md/
 +	unsigned consume = bio->bi_vcnt;
 +
 +	atomic_add(consume, &info->inflight);
++	if (current->flags & PF_MEMALLOC) {
++		atomic_add(consume, &info->bypass);
++		return;
++	}
 +	while (consume--)
 +		down(&info->throttle_sem);
 +}
@@ -1953,8 +1959,12 @@ diff -purN linux-2.6.19.1/drivers/md/dm-ddsnap.c linux-2.6.19.1-zuma/drivers/md/
 +	unsigned consumed = bio->bi_vcnt;
 +
 +	atomic_sub(consumed, &info->inflight);
-+	while (consumed--)
-+		up(&info->throttle_sem);
++	while (consumed--) {
++		if (atomic_read(&info->bypass))
++			atomic_dec(&info->bypass);
++		else
++			up(&info->throttle_sem);
++	}
 +}
 +
 +/* Static caches, shared by all ddsnap instances */
@@ -2322,6 +2332,7 @@ diff -purN linux-2.6.19.1/drivers/md/dm-ddsnap.c linux-2.6.19.1-zuma/drivers/md/
 +			up(&info->server_out_sem);
 +			if (outbead(info->control_socket, CONNECT_SERVER_OK, struct { }) < 0)
 +				warn("unable to send CONNECT_SERVER_OK message to agent");
++			up(&info->identify_sem);
 +			continue;
 +			
 +		case IDENTIFY_ERROR:
@@ -2341,6 +2352,7 @@ diff -purN linux-2.6.19.1/drivers/md/dm-ddsnap.c linux-2.6.19.1-zuma/drivers/md/
 +				warn("can't send out err");
 +			if (writepipe(info->control_socket, err_msg, length) < 0)
 +				warn("unable to send message CONNECT_SERVER_ERROR to agent");
++			up(&info->identify_sem);
 +			continue;
 +			
 +		case PROTOCOL_ERROR:
@@ -2373,6 +2385,8 @@ diff -purN linux-2.6.19.1/drivers/md/dm-ddsnap.c linux-2.6.19.1-zuma/drivers/md/
 +	}
 +out:
 +	warn("%s exiting for snapshot %d", task->comm, info->snap);
++	if (sock)
++		fput(sock);
 +	up(&info->exit2_sem); /* !!! will crash if module unloaded before ret executes */
 +	return 0;
 +message_too_long:
@@ -2679,6 +2693,8 @@ diff -purN linux-2.6.19.1/drivers/md/dm-ddsnap.c linux-2.6.19.1-zuma/drivers/md/
 +	}
 +out:
 +	warn("%s exiting for snapshot %d", task->comm, info->snap);
++	if (sock)
++		fput(sock);
 +	up(&info->exit3_sem); /* !!! will crash if module unloaded before ret executes */
 +	return 0;
 +message_too_long:
@@ -3006,6 +3022,7 @@ diff -purN linux-2.6.19.1/drivers/md/dm-ddsnap.c linux-2.6.19.1-zuma/drivers/md/
 +	sema_init(&info->exit2_sem, 1);
 +	sema_init(&info->exit3_sem, 1);
 +	sema_init(&info->more_work_sem, 0);
++	sema_init(&info->identify_sem, 0);
 +	spin_lock_init(&info->pending_lock);
 +	spin_lock_init(&info->end_io_lock);
 +	INIT_LIST_HEAD(&info->queries);
@@ -3048,6 +3065,14 @@ diff -purN linux-2.6.19.1/drivers/md/dm-ddsnap.c linux-2.6.19.1-zuma/drivers/md/
 +		goto eek;
 +	warn("Created snapshot device snapstore=%s origin=%s socket=%s snapshot=%i", argv[0], argv[1], argv[2], snap);
 +	ddsnap_add_proc(argv[3], target); // use snapshot number as file name
++	while (down_interruptible(&info->identify_sem))
++		;
++	if (!(info->flags & READY_FLAG)) {
++			warn("snapshot device %d failed to be identified", info->snap);
++			error = "Can't identify snapshot";
++			err = -EINVAL;
++			goto eek;
++	}
 +	return 0;
 +
 +eek:	warn("Virtual device create error %i: %s!", err, error);
@@ -3154,9 +3179,9 @@ diff -purN linux-2.6.19.1/drivers/md/dm-ddsnap.c linux-2.6.19.1-zuma/drivers/md/
 +module_exit(dm_ddsnap_exit);
 +
 +MODULE_LICENSE("GPL");
-diff -purN linux-2.6.19.1/drivers/md/dm-ddsnap.h linux-2.6.19.1-zuma/drivers/md/dm-ddsnap.h
---- linux-2.6.19.1/drivers/md/dm-ddsnap.h	1969-12-31 16:00:00.000000000 -0800
-+++ linux-2.6.19.1-zuma/drivers/md/dm-ddsnap.h	2007-03-15 17:45:02.000000000 -0700
+diff -ruNp ../orig/linux-2.6.19.1/drivers/md/dm-ddsnap.h linux-2.6.19.1/drivers/md/dm-ddsnap.h
+--- ../orig/linux-2.6.19.1/drivers/md/dm-ddsnap.h	1969-12-31 16:00:00.000000000 -0800
++++ linux-2.6.19.1/drivers/md/dm-ddsnap.h	2007-05-21 17:13:35.000000000 -0700
 @@ -0,0 +1,136 @@
 +#define PACKED __attribute__ ((packed))
 +#define MAGIC  0xadbe
@@ -3294,9 +3319,9 @@ diff -purN linux-2.6.19.1/drivers/md/dm-ddsnap.h linux-2.6.19.1-zuma/drivers/md/
 +struct rwmessage { struct head head; struct rw_request body; };
 +struct messagebuf { struct head head; char body[maxbody]; };
 +/* ...decruft me */
-diff -purN linux-2.6.19.1/include/linux/prctl.h linux-2.6.19.1-zuma/include/linux/prctl.h
---- linux-2.6.19.1/include/linux/prctl.h	2006-12-11 11:32:53.000000000 -0800
-+++ linux-2.6.19.1-zuma/include/linux/prctl.h	2007-03-15 17:44:44.000000000 -0700
+diff -ruNp ../orig/linux-2.6.19.1/include/linux/prctl.h linux-2.6.19.1/include/linux/prctl.h
+--- ../orig/linux-2.6.19.1/include/linux/prctl.h	2006-12-11 11:32:53.000000000 -0800
++++ linux-2.6.19.1/include/linux/prctl.h	2007-05-21 17:13:35.000000000 -0700
 @@ -59,4 +59,7 @@
  # define PR_ENDIAN_LITTLE	1	/* True little endian mode */
  # define PR_ENDIAN_PPC_LITTLE	2	/* "PowerPC" pseudo little endian */
@@ -3305,9 +3330,9 @@ diff -purN linux-2.6.19.1/include/linux/prctl.h linux-2.6.19.1-zuma/include/linu
 +#define PR_SET_LESS_THROTTLE           21
 +
  #endif /* _LINUX_PRCTL_H */
-diff -purN linux-2.6.19.1/kernel/sys.c linux-2.6.19.1-zuma/kernel/sys.c
---- linux-2.6.19.1/kernel/sys.c	2006-12-11 11:32:53.000000000 -0800
-+++ linux-2.6.19.1-zuma/kernel/sys.c	2007-03-15 17:44:44.000000000 -0700
+diff -ruNp ../orig/linux-2.6.19.1/kernel/sys.c linux-2.6.19.1/kernel/sys.c
+--- ../orig/linux-2.6.19.1/kernel/sys.c	2006-12-11 11:32:53.000000000 -0800
++++ linux-2.6.19.1/kernel/sys.c	2007-05-21 17:13:35.000000000 -0700
 @@ -2158,7 +2158,11 @@ asmlinkage long sys_prctl(int option, un
  		case PR_SET_ENDIAN:
  			error = SET_ENDIAN(current, arg2);
@@ -3321,9 +3346,9 @@ diff -purN linux-2.6.19.1/kernel/sys.c linux-2.6.19.1-zuma/kernel/sys.c
  		default:
  			error = -EINVAL;
  			break;
-diff -purN linux-2.6.19.1/net/socket.c linux-2.6.19.1-zuma/net/socket.c
---- linux-2.6.19.1/net/socket.c	2006-12-11 11:32:53.000000000 -0800
-+++ linux-2.6.19.1-zuma/net/socket.c	2007-03-15 17:44:44.000000000 -0700
+diff -ruNp ../orig/linux-2.6.19.1/net/socket.c linux-2.6.19.1/net/socket.c
+--- ../orig/linux-2.6.19.1/net/socket.c	2006-12-11 11:32:53.000000000 -0800
++++ linux-2.6.19.1/net/socket.c	2007-05-21 17:13:35.000000000 -0700
 @@ -2252,6 +2252,12 @@ int kernel_sock_ioctl(struct socket *soc
  	return err;
  }
