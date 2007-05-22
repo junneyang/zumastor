@@ -217,6 +217,7 @@ function replicate_snapshot {
 		else
 			log "downstream holding invalid snapshot '$output', falling back to full volume"
 			run_remote $host "zumastor receive start $vol $port"
+			status=$?
 			old_snap=
 		fi
 	fi
