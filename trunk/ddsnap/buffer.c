@@ -47,14 +47,14 @@ static unsigned max_free_buffers = 1000; /* free 10 percent of the buffers */
 
 void set_buffer_dirty(struct buffer *buffer)
 {
-	buftrace(printf("set_buffer_dirty %llx state=%u\n", buffer->sector, buffer->flags & BUFFER_STATE_MASK););
-	if (!buffer_dirty(buffer)) {
-		assert(!buffer->dirty_list.next);
-		assert(!buffer->dirty_list.prev);
-		list_add_tail(&buffer->dirty_list, &dirty_buffers);
-		dirty_buffer_count++;
-	}
-	buffer->flags = BUFFER_STATE_DIRTY;
+	buftrace(printf("set_buffer_dirty %llx state=%u\n", buffer->sector, buffer->state););
+	if (buffer_dirty(buffer))
+		return;
+	assert(!buffer->dirty_list.next);
+	assert(!buffer->dirty_list.prev);
+	list_add_tail(&buffer->dirty_list, &dirty_buffers);
+	buffer->state = BUFFER_STATE_DIRTY;
+	dirty_buffer_count++;
 }
 
 void set_buffer_uptodate(struct buffer *buffer)
@@ -63,7 +63,7 @@ void set_buffer_uptodate(struct buffer *buffer)
 		list_del(&buffer->dirty_list);
 		dirty_buffer_count--;
 	}
-	buffer->flags = BUFFER_STATE_CLEAN;
+	buffer->state = BUFFER_STATE_CLEAN;
 }
 
 void brelse(struct buffer *buffer)
@@ -207,7 +207,7 @@ alloc_buffer:
 	}
 
 	buffer->count = 1;
-	buffer->flags = 0;
+	buffer->state = BUFFER_STATE_INVAL;
 	buffer->size = size;
 	buffer->sector = sector;
 	/* insert into LRU list */
