@@ -7,7 +7,6 @@
 #define BUFFER_STATE_INVAL 0
 #define BUFFER_STATE_CLEAN 1
 #define BUFFER_STATE_DIRTY 2
-#define BUFFER_STATE_MASK 3
 #define BUFFER_BUCKETS 9999
 
 #include "list.h"
@@ -21,7 +20,7 @@ struct buffer
 	struct list_head dirty_list;
 	struct list_head list; /* used for LRU list and the free list */
 	unsigned count; // should be atomic_t
-	unsigned flags;
+	unsigned state;
 	unsigned size;
 	sector_t sector;
 	unsigned char *data;
@@ -53,12 +52,12 @@ void init_buffers(unsigned bufsize, unsigned mem_pool_size);
 
 static inline int buffer_dirty(struct buffer *buffer)
 {
-	return (buffer->flags & BUFFER_STATE_MASK) == BUFFER_STATE_DIRTY;
+	return buffer->state == BUFFER_STATE_DIRTY;
 }
 
 static inline int buffer_uptodate(struct buffer *buffer)
 {
-	return (buffer->flags & BUFFER_STATE_MASK) == BUFFER_STATE_CLEAN;
+	return buffer->state == BUFFER_STATE_CLEAN;
 }
 
 static inline void *malloc_aligned(size_t size, unsigned binalign)
