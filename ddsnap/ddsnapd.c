@@ -429,6 +429,7 @@ static void commit_transaction(struct superblock *sb)
 		return;
 
 	struct list_head *list;
+	int safety = dirty_buffer_count;
 
 	list_for_each(list, &dirty_buffers) {
 		struct buffer *buffer = list_entry(list, struct buffer, dirty_list);
@@ -437,7 +438,9 @@ static void commit_transaction(struct superblock *sb)
 		assert(buffer_dirty(buffer));
 		if (write_buffer_to(buffer, journal_sector(sb, pos)))
 			jtrace(warn("unable to write dirty blocks to journal"););
+		assert(safety--);
 	}
+	assert(!safety);
 
 	unsigned pos = next_journal_block(sb);
 	struct buffer *commit_buffer = jgetblk(sb, pos);
