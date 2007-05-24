@@ -49,6 +49,8 @@ void set_buffer_dirty(struct buffer *buffer)
 {
 	buftrace(printf("set_buffer_dirty %llx state=%u\n", buffer->sector, buffer->flags & BUFFER_STATE_MASK););
 	if (!buffer_dirty(buffer)) {
+		assert(!buffer->dirty_list.next);
+		assert(!buffer->dirty_list.prev);
 		list_add_tail(&buffer->dirty_list, &dirty_buffers);
 		dirty_buffer_count++;
 	}
