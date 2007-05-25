@@ -1,5 +1,5 @@
-diff -ruNp ../orig/linux-2.6.19.1/drivers/md/Kconfig linux-2.6.19.1/drivers/md/Kconfig
---- ../orig/linux-2.6.19.1/drivers/md/Kconfig	2006-12-11 11:32:53.000000000 -0800
+diff -ruNp linux-2.6.19.1.orig/drivers/md/Kconfig linux-2.6.19.1/drivers/md/Kconfig
+--- linux-2.6.19.1.orig/drivers/md/Kconfig	2006-12-11 11:32:53.000000000 -0800
 +++ linux-2.6.19.1/drivers/md/Kconfig	2007-05-21 17:13:35.000000000 -0700
 @@ -261,6 +261,22 @@ config DM_MULTIPATH_EMC
  	---help---
@@ -24,8 +24,8 @@ diff -ruNp ../orig/linux-2.6.19.1/drivers/md/Kconfig linux-2.6.19.1/drivers/md/K
  endmenu
  
  endif
-diff -ruNp ../orig/linux-2.6.19.1/drivers/md/Makefile linux-2.6.19.1/drivers/md/Makefile
---- ../orig/linux-2.6.19.1/drivers/md/Makefile	2006-12-11 11:32:53.000000000 -0800
+diff -ruNp linux-2.6.19.1.orig/drivers/md/Makefile linux-2.6.19.1/drivers/md/Makefile
+--- linux-2.6.19.1.orig/drivers/md/Makefile	2006-12-11 11:32:53.000000000 -0800
 +++ linux-2.6.19.1/drivers/md/Makefile	2007-05-21 17:13:35.000000000 -0700
 @@ -36,6 +36,8 @@ obj-$(CONFIG_DM_MULTIPATH_EMC)	+= dm-emc
  obj-$(CONFIG_DM_SNAPSHOT)	+= dm-snapshot.o
@@ -36,9 +36,9 @@ diff -ruNp ../orig/linux-2.6.19.1/drivers/md/Makefile linux-2.6.19.1/drivers/md/
  
  quiet_cmd_unroll = UNROLL  $@
        cmd_unroll = $(PERL) $(srctree)/$(src)/unroll.pl $(UNROLL) \
-diff -ruNp ../orig/linux-2.6.19.1/drivers/md/dm-ddraid.c linux-2.6.19.1/drivers/md/dm-ddraid.c
---- ../orig/linux-2.6.19.1/drivers/md/dm-ddraid.c	1969-12-31 16:00:00.000000000 -0800
-+++ linux-2.6.19.1/drivers/md/dm-ddraid.c	2007-05-21 17:13:35.000000000 -0700
+diff -ruNp linux-2.6.19.1.orig/drivers/md/dm-ddraid.c linux-2.6.19.1/drivers/md/dm-ddraid.c
+--- linux-2.6.19.1.orig/drivers/md/dm-ddraid.c	1969-12-31 16:00:00.000000000 -0800
++++ linux-2.6.19.1/drivers/md/dm-ddraid.c	2007-05-24 17:17:11.000000000 -0700
 @@ -0,0 +1,1621 @@
 +#include <linux/fs.h>
 +#include <linux/slab.h>
@@ -1661,8 +1661,8 @@ diff -ruNp ../orig/linux-2.6.19.1/drivers/md/dm-ddraid.c linux-2.6.19.1/drivers/
 +
 +module_init(dm_ddraid_init);
 +module_exit(dm_ddraid_exit);
-diff -ruNp ../orig/linux-2.6.19.1/drivers/md/dm-ddraid.h linux-2.6.19.1/drivers/md/dm-ddraid.h
---- ../orig/linux-2.6.19.1/drivers/md/dm-ddraid.h	1969-12-31 16:00:00.000000000 -0800
+diff -ruNp linux-2.6.19.1.orig/drivers/md/dm-ddraid.h linux-2.6.19.1/drivers/md/dm-ddraid.h
+--- linux-2.6.19.1.orig/drivers/md/dm-ddraid.h	1969-12-31 16:00:00.000000000 -0800
 +++ linux-2.6.19.1/drivers/md/dm-ddraid.h	2007-05-21 17:13:35.000000000 -0700
 @@ -0,0 +1,47 @@
 +#define PACKED __attribute__ ((packed))
@@ -1712,10 +1712,10 @@ diff -ruNp ../orig/linux-2.6.19.1/drivers/md/dm-ddraid.h linux-2.6.19.1/drivers/
 +
 +// bios submitted before server arrives must be split conservatively (see "bogus")
 +#define MIN_REGION_BITS 12
-diff -ruNp ../orig/linux-2.6.19.1/drivers/md/dm-ddsnap.c linux-2.6.19.1/drivers/md/dm-ddsnap.c
---- ../orig/linux-2.6.19.1/drivers/md/dm-ddsnap.c	1969-12-31 16:00:00.000000000 -0800
-+++ linux-2.6.19.1/drivers/md/dm-ddsnap.c	2007-05-21 17:39:56.000000000 -0700
-@@ -0,0 +1,1463 @@
+diff -ruNp linux-2.6.19.1.orig/drivers/md/dm-ddsnap.c linux-2.6.19.1/drivers/md/dm-ddsnap.c
+--- linux-2.6.19.1.orig/drivers/md/dm-ddsnap.c	1969-12-31 16:00:00.000000000 -0800
++++ linux-2.6.19.1/drivers/md/dm-ddsnap.c	2007-05-24 17:23:15.000000000 -0700
+@@ -0,0 +1,1450 @@
 +#include <linux/version.h>
 +#include <linux/fs.h>
 +#include <linux/slab.h>
@@ -2186,20 +2186,6 @@ diff -ruNp ../orig/linux-2.6.19.1/drivers/md/dm-ddsnap.c linux-2.6.19.1/drivers/
 +	return 0;
 +}
 +
-+/* daemonize code for kernel threads */
-+static void daemonize_properly(char const *name, int snap)
-+{
-+	struct file_struct *files = current->files;
-+
-+	atomic_inc(&current->files->count); /* a ref count of files */
-+	daemonize("%s %d", name, snap);
-+	put_files_struct(current->files);   /* decrement the init files */
-+	task_lock(current);
-+	current->files = files;	/* re-assign file struct */
-+	task_unlock(current);
-+}
-+
-+
 +/*
 + * There happen to be four flavors of server replies to rw queries, two
 + * write and two read, but the symmetry ends there.  Only one flavor
@@ -2262,7 +2248,7 @@ diff -ruNp ../orig/linux-2.6.19.1/drivers/md/dm-ddsnap.c linux-2.6.19.1/drivers/
 +	char *err_msg;
 +	u32 chunksize_bits;
 +
-+	daemonize_properly("ddsnap-clnt", info->snap);
++	daemonize("%s %d", "ddsnap-clnt", info->snap);
 +	while (down_interruptible(&info->exit2_sem))
 +		;
 +	trace_on(warn("Client thread started, pid=%i for snapshot %d", current->pid, info->snap);)
@@ -2327,7 +2313,8 @@ diff -ruNp ../orig/linux-2.6.19.1/drivers/md/dm-ddsnap.c linux-2.6.19.1/drivers/
 +			info->flags |= READY_FLAG;
 +			info->chunksize_bits = chunksize_bits;
 +			info->chunkshift     = chunksize_bits - SECTOR_SHIFT;
-+			target->split_io = 1 << info->chunkshift; // !!! lose this as soon as possible
++			if (is_snapshot(info)) // multiple chunks should work ok for origin
++				target->split_io = 1 << info->chunkshift; // not yet implemented for snapshot!!!
 +
 +			up(&info->server_out_sem);
 +			if (outbead(info->control_socket, CONNECT_SERVER_OK, struct { }) < 0)
@@ -2503,7 +2490,7 @@ diff -ruNp ../orig/linux-2.6.19.1/drivers/md/dm-ddsnap.c linux-2.6.19.1/drivers/
 +	struct task_struct *task = current;
 +	int err;
 +
-+	daemonize_properly("ddsnap-wrkr", info->snap);
++	daemonize("%s %d", "ddsnap-wrkr", info->snap);
 +	current->flags |= PF_LESS_THROTTLE;
 +	trace_on(warn("Worker thread started, pid=%i for snapshot %d", current->pid, info->snap);)
 +	while (down_interruptible(&info->exit1_sem))
@@ -2615,7 +2602,7 @@ diff -ruNp ../orig/linux-2.6.19.1/drivers/md/dm-ddsnap.c linux-2.6.19.1/drivers/
 +	int err, length;
 +	char *err_msg;
 +
-+	daemonize_properly("ddsnap-cntl", info->snap);
++	daemonize("ddsnap-cntl", info->snap);
 +	trace_on(warn("Control thread started, pid=%i for snapshot %d", current->pid, info->snap);)
 +	sock = info->control_socket;
 +	trace(warn("got socket %p", sock);)
@@ -3057,11 +3044,11 @@ diff -ruNp ../orig/linux-2.6.19.1/drivers/md/dm-ddsnap.c linux-2.6.19.1/drivers/
 +#endif
 +
 +	error = "Can't start daemon";
-+	if ((err = kernel_thread((void *)incoming, target, 0)) < 0)
++	if ((err = kernel_thread((void *)incoming, target, CLONE_FILES)) < 0)
 +		goto eek;
-+	if ((err = kernel_thread((void *)worker, target, 0)) < 0)
++	if ((err = kernel_thread((void *)worker, target, CLONE_FILES)) < 0)
 +		goto eek;
-+	if ((err = kernel_thread((void *)control, target, 0)) < 0)
++	if ((err = kernel_thread((void *)control, target, CLONE_FILES)) < 0)
 +		goto eek;
 +	warn("Created snapshot device snapstore=%s origin=%s socket=%s snapshot=%i", argv[0], argv[1], argv[2], snap);
 +	ddsnap_add_proc(argv[3], target); // use snapshot number as file name
@@ -3179,8 +3166,8 @@ diff -ruNp ../orig/linux-2.6.19.1/drivers/md/dm-ddsnap.c linux-2.6.19.1/drivers/
 +module_exit(dm_ddsnap_exit);
 +
 +MODULE_LICENSE("GPL");
-diff -ruNp ../orig/linux-2.6.19.1/drivers/md/dm-ddsnap.h linux-2.6.19.1/drivers/md/dm-ddsnap.h
---- ../orig/linux-2.6.19.1/drivers/md/dm-ddsnap.h	1969-12-31 16:00:00.000000000 -0800
+diff -ruNp linux-2.6.19.1.orig/drivers/md/dm-ddsnap.h linux-2.6.19.1/drivers/md/dm-ddsnap.h
+--- linux-2.6.19.1.orig/drivers/md/dm-ddsnap.h	1969-12-31 16:00:00.000000000 -0800
 +++ linux-2.6.19.1/drivers/md/dm-ddsnap.h	2007-05-21 17:13:35.000000000 -0700
 @@ -0,0 +1,136 @@
 +#define PACKED __attribute__ ((packed))
@@ -3319,8 +3306,8 @@ diff -ruNp ../orig/linux-2.6.19.1/drivers/md/dm-ddsnap.h linux-2.6.19.1/drivers/
 +struct rwmessage { struct head head; struct rw_request body; };
 +struct messagebuf { struct head head; char body[maxbody]; };
 +/* ...decruft me */
-diff -ruNp ../orig/linux-2.6.19.1/include/linux/prctl.h linux-2.6.19.1/include/linux/prctl.h
---- ../orig/linux-2.6.19.1/include/linux/prctl.h	2006-12-11 11:32:53.000000000 -0800
+diff -ruNp linux-2.6.19.1.orig/include/linux/prctl.h linux-2.6.19.1/include/linux/prctl.h
+--- linux-2.6.19.1.orig/include/linux/prctl.h	2006-12-11 11:32:53.000000000 -0800
 +++ linux-2.6.19.1/include/linux/prctl.h	2007-05-21 17:13:35.000000000 -0700
 @@ -59,4 +59,7 @@
  # define PR_ENDIAN_LITTLE	1	/* True little endian mode */
@@ -3330,8 +3317,8 @@ diff -ruNp ../orig/linux-2.6.19.1/include/linux/prctl.h linux-2.6.19.1/include/l
 +#define PR_SET_LESS_THROTTLE           21
 +
  #endif /* _LINUX_PRCTL_H */
-diff -ruNp ../orig/linux-2.6.19.1/kernel/sys.c linux-2.6.19.1/kernel/sys.c
---- ../orig/linux-2.6.19.1/kernel/sys.c	2006-12-11 11:32:53.000000000 -0800
+diff -ruNp linux-2.6.19.1.orig/kernel/sys.c linux-2.6.19.1/kernel/sys.c
+--- linux-2.6.19.1.orig/kernel/sys.c	2006-12-11 11:32:53.000000000 -0800
 +++ linux-2.6.19.1/kernel/sys.c	2007-05-21 17:13:35.000000000 -0700
 @@ -2158,7 +2158,11 @@ asmlinkage long sys_prctl(int option, un
  		case PR_SET_ENDIAN:
@@ -3346,8 +3333,8 @@ diff -ruNp ../orig/linux-2.6.19.1/kernel/sys.c linux-2.6.19.1/kernel/sys.c
  		default:
  			error = -EINVAL;
  			break;
-diff -ruNp ../orig/linux-2.6.19.1/net/socket.c linux-2.6.19.1/net/socket.c
---- ../orig/linux-2.6.19.1/net/socket.c	2006-12-11 11:32:53.000000000 -0800
+diff -ruNp linux-2.6.19.1.orig/net/socket.c linux-2.6.19.1/net/socket.c
+--- linux-2.6.19.1.orig/net/socket.c	2006-12-11 11:32:53.000000000 -0800
 +++ linux-2.6.19.1/net/socket.c	2007-05-21 17:13:35.000000000 -0700
 @@ -2252,6 +2252,12 @@ int kernel_sock_ioctl(struct socket *soc
  	return err;
