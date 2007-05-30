@@ -44,9 +44,36 @@ usage()
 	echo "Where <path> is the directory that contains the Zumastor .deb files."
 }
 
+update_build()
+{
+	mkdir -p build
+	cd build
+	echo -ne Getting zumastor sources from subversion ...
+	if [ -e zumastor -a -f zumastor/build_packages.sh ]; then
+		svn update zumastor >> $LOG || exit $?
+	else
+		svn checkout http://zumastor.googlecode.com/svn/trunk/ zumastor >> $LOG || exit $?
+	fi
+	if [ ! -f zumastor/build_packages.sh ]; then
+		usage
+		echo "No build_packages script found!"
+		exit 1
+	fi
+	if [ ! -f zumastor/testing/config/qemu-config ]; then
+		echo "No qemu kernel config file found!"
+		exit 1
+	fi
+	cd ..
+	sh build/zumastor/build_packages `pwd`/testing/config/qemu-config
+}
+
+#
+# If we didn't get a directory on the command line in which to look for the
+# zumastor .deb files, just check out the latest source, build it and use
+# the .deb files so produced.
+#
 if [ $# -ne 1 ]; then
-	usage
-	exit 1
+	update_build
 fi
 #
 # Extract the installation ISO from the script
@@ -216,7 +243,9 @@ if [ \$? -ne 0 ]; then
 	ifup eth1
 	zumastor status | grep -q "^Status: running"
 	if [ \$? -eq 0 ]; then
-		/etc/init.d/zumastor restart
+		/etc/init.d/zumastor stop
+		sleep 5
+		/etc/init.d/zumastor start
 	fi
 fi
 route add -net ${ZNETWORK}.0/24 dev eth1
