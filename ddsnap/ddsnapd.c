@@ -435,7 +435,12 @@ static void commit_transaction(struct superblock *sb)
 		struct buffer *buffer = list_entry(list, struct buffer, dirty_list);
 		unsigned pos = next_journal_block(sb);
 		jtrace(warn("journal data sector = %Lx [%u]", buffer->sector, pos););
-		assert(buffer_dirty(buffer));
+		if (!buffer_dirty(buffer)) {
+			warn("non-dirty buffer %i of %i found on dirty list, state = %i",
+				dirty_buffer_count - safety + 1, dirty_buffer_count, buffer->state);
+			show_dirty_buffers();
+			die(123);
+		}
 		if (write_buffer_to(buffer, journal_sector(sb, pos)))
 			jtrace(warn("unable to write dirty blocks to journal"););
 		assert(safety--);

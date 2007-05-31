@@ -47,7 +47,7 @@ static unsigned max_free_buffers = 1000; /* free 10 percent of the buffers */
 
 void set_buffer_dirty(struct buffer *buffer)
 {
-	buftrace(printf("set_buffer_dirty %llx state=%u\n", buffer->sector, buffer->state););
+	buftrace(warn("set_buffer_dirty %Lx state=%u", buffer->sector, buffer->state););
 	if (buffer_dirty(buffer))
 		return;
 	assert(!buffer->dirty_list.next);
@@ -68,14 +68,14 @@ void set_buffer_uptodate(struct buffer *buffer)
 
 void brelse(struct buffer *buffer)
 {
-	buftrace(printf("Release buffer %llx\n", buffer->sector););
+	buftrace(warn("Release buffer %Lx", buffer->sector););
 	if (!--buffer->count)
-		trace_off(printf("Free buffer %llx\n", buffer->sector));
+		trace_off(warn("Free buffer %Lx", buffer->sector));
 }
 
 void brelse_dirty(struct buffer *buffer)
 {
-	buftrace(printf("Release dirty buffer %llx\n", buffer->sector););
+	buftrace(warn("Release dirty buffer %Lx", buffer->sector););
 	set_buffer_dirty(buffer);
 	brelse(buffer);
 }
@@ -97,7 +97,7 @@ int write_buffer(struct buffer *buffer)
 
 int read_buffer(struct buffer *buffer)
 {
-	buftrace(warn("read buffer %llx", buffer->sector););
+	buftrace(warn("read buffer %Lx", buffer->sector););
 	int err = diskread(buffer->fd, buffer->data, buffer->size, buffer->sector << SECTOR_BITS);
 
 	if (!err)
@@ -129,11 +129,11 @@ static struct buffer *remove_buffer_hash(struct buffer *buffer)
 	assert(*pbuffer != NULL);
 
 	if (*pbuffer == buffer) { /* head of list */
-		buftrace(printf("buffer is head of list\n"););
+		buftrace(warn("buffer is head of list"););
 		*pbuffer = buffer->hashlist;
 		goto buffer_removed;
 	}
-	buftrace(printf("not the head of the list\n"););
+	buftrace(warn("not the head of the list"););
 	for (pbuffer = &(*pbuffer)->hashlist; *pbuffer; pbuffer = &(*pbuffer)->hashlist) {
 		if (*pbuffer == buffer) {
 			(*prev)->hashlist = buffer->hashlist;
@@ -143,7 +143,7 @@ static struct buffer *remove_buffer_hash(struct buffer *buffer)
 	}
 	return (struct buffer *)NULL;
  buffer_removed:
-	buftrace(printf("Removed buffer for %llx from buffer table\n", buffer->sector););
+	buftrace(warn("Removed buffer for %Lx from buffer table", buffer->sector););
 	buffer->hashlist = NULL;
 	return buffer;
 }
@@ -165,14 +165,14 @@ static struct buffer *remove_buffer_free(void)
 
 struct buffer *new_buffer(sector_t sector, unsigned size)
 {
-	buftrace(printf("Allocate buffer for %llx\n", sector););
+	buftrace(warn("Allocate buffer for %Lx", sector););
 	struct buffer *buffer = NULL;
 
 	/* check if we hit the MAX_BUFFER limit and if there are any free buffers avail */
 	if ( ((buffer = remove_buffer_free()) != NULL) || buffer_count < max_buffers)
 		goto alloc_buffer;
 
-        buftrace(printf("need to purge a buffer from the lru list\n"););
+        buftrace(warn("need to purge a buffer from the lru list"););
         struct list_head *list, *safe;
         int count = 0;
 
@@ -236,7 +236,7 @@ struct buffer *getblk(unsigned fd, sector_t sector, unsigned size)
 
 	for (buffer = *bucket; buffer; buffer = buffer->hashlist)
 		if (buffer->sector == sector) {
-			buftrace(printf("Found buffer for %llx\n", sector););
+			buftrace(warn("Found buffer for %Lx", sector););
 			buffer->count++;
 			list_del(&buffer->list);
 			list_add_tail(&buffer->list, &lru_buffers);
@@ -260,7 +260,7 @@ struct buffer *bread(unsigned fd, sector_t sector, unsigned size)
 	if (buffer_uptodate(buffer) || buffer_dirty(buffer))
 		return buffer;
 	if ((err = read_buffer(buffer))) {
-		warn("error: %s unable to read sector %llx", strerror(-err), sector);
+		warn("error: %s unable to read sector %Lx", strerror(-err), sector);
 		brelse(buffer);
 		return NULL;
 	}
@@ -277,7 +277,7 @@ void evict_buffer(struct buffer *buffer)
 	remove_buffer_lru(buffer);
         if (!remove_buffer_hash(buffer))
 		warn("buffer not found in hashlist");
-	buftrace(printf("Evicted buffer for %llx\n", buffer->sector););
+	buftrace(warn("Evicted buffer for %Lx", buffer->sector););
 	add_buffer_free(buffer);
 }
 
@@ -315,7 +315,7 @@ int flush_buffers(void) // !!! should use lru list
 
 void show_buffer(struct buffer *buffer)
 {
-	printf("%s%llx/%i ",
+	warn("%s%Lx/%i ", // !!! fixme, need a warntext that doesn't print eol
 		buffer_dirty(buffer)? "+": buffer_uptodate(buffer)? "": "?",
 		buffer->sector, buffer->count);
 }
@@ -331,23 +331,23 @@ void show_buffers_(int all)
 		if (!buffer)
 			continue;
 
-		printf("[%i] ", i);
+		warn("[%i] ", i);
 		for (; buffer; buffer = buffer->hashlist)
 			if (all || buffer->count)
 				show_buffer(buffer);
-		printf("\n");
+		warn("");
 	}
 }
 
 void show_active_buffers(void)
 {
-	printf("Active buffers:\n");
+	warn("Active buffers:");
 	show_buffers_(0);
 }
 
 void show_buffers(void)
 {
-	printf("Buffers:\n");
+	warn("Buffers:");
 	show_buffers_(1);
 }
 
@@ -355,12 +355,12 @@ void show_dirty_buffers(void)
 {
 	struct list_head *list;
 
-	printf("Dirty buffers: ");
+	warn("Dirty buffers: ");
 	list_for_each(list, &dirty_buffers) {
 		struct buffer *buffer = list_entry(list, struct buffer, dirty_list);
-		printf("%llx ", buffer->sector);
+		warn("%Lx ", buffer->sector);
 	}
-	printf("\n");
+	warn("");
 }
 
 #if 0
