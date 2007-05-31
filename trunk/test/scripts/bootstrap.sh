@@ -7,6 +7,8 @@ set -x
 #
 # Working directory, where images and ancillary files live.
 WORKDIR=~/local
+# Where the svn output goes.
+SVNLOG=svn.log
 # Name of the main installed Qemu disk image.
 TESTIMG=${WORKDIR}/test.img
 # Names of the working replication source and target disk images.
@@ -50,21 +52,21 @@ update_build()
 	cd build
 	echo -ne Getting zumastor sources from subversion ...
 	if [ -e zumastor -a -f zumastor/build_packages.sh ]; then
-		svn update zumastor >> $LOG || exit $?
+		svn update zumastor >> $SVNLOG || exit $?
 	else
-		svn checkout http://zumastor.googlecode.com/svn/trunk/ zumastor >> $LOG || exit $?
+		svn checkout http://zumastor.googlecode.com/svn/trunk/ zumastor >> $SVNLOG || exit $?
 	fi
 	if [ ! -f zumastor/build_packages.sh ]; then
 		usage
 		echo "No build_packages script found!"
 		exit 1
 	fi
-	if [ ! -f zumastor/testing/config/qemu-config ]; then
+	if [ ! -f zumastor/test/config/qemu-config ]; then
 		echo "No qemu kernel config file found!"
 		exit 1
 	fi
 	cd ..
-	sh build/zumastor/build_packages `pwd`/testing/config/qemu-config
+	sh build/zumastor/build_packages.sh `pwd`/build/zumastor/test/config/qemu-config
 }
 
 #
@@ -74,6 +76,16 @@ update_build()
 #
 if [ $# -ne 1 ]; then
 	update_build
+	PACKAGEDIR=`pwd`/build
+else
+	PACKAGEDIR=$1
+	#
+	# Verify that the package directory actually exists.
+	#
+	if [ ! -d "$PACKAGEDIR" ]; then
+		echo "Package dir ${PACKAGEDIR} doesn't exist!"
+		exit 1
+	fi
 fi
 #
 # Extract the installation ISO from the script
@@ -87,15 +99,6 @@ if [ ! -z "$ISOSTART" ]; then
 else
 	# For testing only
 	instiso=~/cd/test.iso
-fi
-#
-# We get the package directory on the command-line.  Verify that the
-# directory actually exists.
-#
-PACKAGEDIR=$1
-if [ ! -d "$PACKAGEDIR" ]; then
-	usage
-	exit 1
 fi
 #
 # Find the Zumastor packages.
