@@ -2721,7 +2721,7 @@ int main(int argc, char *argv[])
 			ret = 1;
 		} else {
 			/* FIXME: should get device name from ddsnap server instead of assuming the naming style by zumastor */
-			char *devstem = malloc(strlen(DEVMAP_PATH) + strlen(volume));
+			char *devstem = malloc(strlen(DEVMAP_PATH) + strlen(volume) + 1);
 			if (!devstem) {
 				warn ("cannot get volume name from server sockname");
 				ret = 1;

@@ -485,7 +485,7 @@ static void commit_transaction(struct superblock *sb)
 static int recover_journal(struct superblock *sb)
 {
 	struct buffer *buffer;
-	typeof(((struct commit_block *)NULL)->sequence) sequence;
+	typeof(((struct commit_block *)NULL)->sequence) sequence = -1;
 	int scribbled = -1, last_block = -1, newest_block = -1;
 	int data_from_start = 0, data_from_last = 0;
 	int size = sb->image.journal_size;
