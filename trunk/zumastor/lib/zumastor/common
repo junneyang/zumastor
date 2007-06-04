@@ -19,7 +19,7 @@ declare -r CRONS=$RUNPATH/cron
 declare -r DEFAULT_PORT=$(cat $CONFIG/defaultport)
 declare -r SSH_COMMAND=$(cat $CONFIG/ssh_command)
 
-declare -ar KINDS=(hourly daily weekly monthly)
+declare -ar KINDS=(hourly daily weekly monthly custom)
 
 # FIXME TODO - this is where we decide the hostname must be the fqdn of the
 # machine.  This has to be consistent so one machine can identify itself to

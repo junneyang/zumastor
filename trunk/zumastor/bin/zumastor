@@ -858,7 +858,7 @@ define)
 
 		declare name="$0 $1 $2"
 		shift 2
-		args=`getopt -oh:d:w:m: -l help,hourly:,daily:,weekly:,monthly: -n"$name" -- "$@"` || \
+		args=`getopt -oh:d:w:m:c: -l help,hourly:,daily:,weekly:,monthly:,custom: -n"$name" -- "$@"` || \
 			{ echo "usage: $name <vol> [Options]"; exit 2; }
 
 		eval set -- "$args" # remove getopt quotes and set new arguments
@@ -872,11 +872,13 @@ define)
 				echo "  -d, --daily=N     set daily snapshot limit"
 				echo "  -w, --weekly=N    set weekly snapshot limit"
 				echo "  -m, --monthly=N   set monthly snapshot limit"
+				echo "  -c, --custom=N    set custom snapshot limit"
 				exit;;
 			-h|--hourly) kind=hourly;;
 			-d|--daily) kind=daily;;
 			-w|--weekly) kind=weekly;;
 			-m|--monthly) kind=monthly;;
+			-c|--custom) kind=custom;;
 			*) echo whoops; exit 9;;
 			esac
 			verify_valid_number $2 || { echo $2 is not a valid $kind limit; exit 1; }
