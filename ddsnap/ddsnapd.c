@@ -2069,7 +2069,8 @@ static void reply(int sock, struct messagebuf *message)
 	writepipe(sock, &message->head, message->head.length + sizeof(message->head));
 }
 
-#define USING 1
+#define SNAPCLIENT_BIT 1
+
 struct client
 {
 	u64 id;
@@ -2481,7 +2482,8 @@ int init_snapstore(struct superblock *sb, u32 js_bytes, u32 bs_bits, u32 cs_bits
 		commit->sequence = (i + 3) % (sb->image.journal_size);
 #endif
 		commit->checksum = -checksum_block(sb, (void *)commit);
-		brelse_dirty(buffer);
+		write_buffer(buffer);
+		brelse(buffer);
 	}
 #ifdef TEST_JOURNAL
 	show_journal(sb);
@@ -2879,11 +2881,10 @@ static int incoming(struct superblock *sb, struct client *client)
 		err_msg[MAX_ERRMSG_SIZE-1] = '\0';
 		goto identify_error;
 #endif
-		
+
 		client->id = ((struct identify *)message.body)->id;
 		client->snaptag = tag;
-		client->flags = USING;
-		
+
 		trace(warn("got identify request, setting id="U64FMT" snap=%i (tag=%u), sending chunksize_bits=%u\n",
 			client->id, client->snap, tag, sb->snapdata.asi->allocsize_bits););
 		warn("client id %Lx, snaptag %u", client->id, tag);
@@ -2905,7 +2906,8 @@ static int incoming(struct superblock *sb, struct client *client)
 				err = ERROR_USECOUNT;
 				goto identify_error;
 			}
-			
+
+			client->flags |= SNAPCLIENT_BIT;
 			snapshot->usecnt = new_usecnt;
 		}
 
@@ -2921,7 +2923,7 @@ static int incoming(struct superblock *sb, struct client *client)
 			err = ERROR_OFFSET_MISMATCH;
 			goto identify_error;
 		}
-		
+
 		if (outbead(sock, IDENTIFY_OK, struct identify_ok, 
 				 .chunksize_bits = sb->snapdata.asi->allocsize_bits) < 0)
 			warn("unable to reply to IDENTIFY message");
@@ -3541,18 +3543,13 @@ int snap_server(struct superblock *sb, int listenfd, int getsigfd, int agentfd)
 				if ((result = incoming(sb, client)) == -1) {
 					warn("Client %Lx disconnected", client->id);
 
-					if (client->flags == USING) {
-						if (client->snaptag != -1) {
-							struct snapshot *snapshot = client_snap(sb, client);
-							u32 new_usecnt = snapshot->usecnt - 1;
-							if (new_usecnt < 0) {
-								warn("usecount underflow!");
-								new_usecnt = 0;
-							}
-							snapshot->usecnt = new_usecnt;
-						}
+					if ((client->flags & SNAPCLIENT_BIT)) {
+						struct snapshot *snapshot = client_snap(sb, client);
+						if (snapshot->usecnt <= 0)
+							warn("Snapshot %u usecount underflow!", client->snaptag);
+						else
+							snapshot->usecnt--;
 					}
-//close_client:
 					save_state(sb); // !!! just for now
 					close(client->sock);
 					free(client);
