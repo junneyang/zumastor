@@ -2966,7 +2966,7 @@ static int incoming(struct superblock *sb, struct client *client)
 		goto delete_error;
 #endif
 		struct snapshot *snapshot = find_snap(sb, ((struct create_snapshot *)message.body)->snap);
-		if (!snapshot || delete_snap(sb, snapshot))
+		if (!snapshot || snapshot->usecnt || delete_snap(sb, snapshot))
 			goto delete_error;
 		save_state(sb);
 		if (outbead(sock, DELETE_SNAPSHOT_OK, struct { }) < 0)
