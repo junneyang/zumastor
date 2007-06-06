@@ -123,9 +123,7 @@ function verify_existing_snap {
 
 	verify_managed_vol $vol || return 1
 	verify_valid_number $snap || return 1
-	ddsnap status $sock $snap 2>/dev/null | grep -E "^ *$snap " >/dev/null && return 0
-
-	return 1
+	ddsnap status --state $server $snap
 }
 
 function volume_name {

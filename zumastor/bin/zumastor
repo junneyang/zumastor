@@ -225,6 +225,8 @@ function replicate_snapshot {
 		log "starting remote snapshot receive failed"
 		return 1
 	fi
+	# fallback to full volume if we lost the snapshot upstream (deleted manually or squash)
+	[[ $old_snap ]] && { verify_existing_snap $vol $old_snap || old_snap=; }
 
 	echo $snap > $send_file
 
@@ -247,6 +249,7 @@ function replicate_snapshot {
 	echo $snap > $hold_file # to remove progress status
 
 	[[ $old_snap ]] && drop_snapshot $vol $old_snap
+	return 0
 }
 
 function restart_plug {
