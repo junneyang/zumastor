@@ -564,10 +564,10 @@ gen_compstream_error:
 	return err;
 }
 
-static struct status_message * generate_status(int serv_fd, u32 snaptag)
+static struct status_reply *generate_status(int serv_fd, u32 snaptag)
 {
 	int err;
-	struct status_message *reply;
+	struct status_reply *reply;
 
 	if ((err = outbead(serv_fd, STATUS, struct status_request, snaptag))) {
 		warn("unable to send status request: %s", strerror(-err));
@@ -590,8 +590,8 @@ static struct status_message * generate_status(int serv_fd, u32 snaptag)
 		return NULL;
 	}
 
-	if (head.length < sizeof(struct status_message)) {
-		warn("status length mismatch: expected >=%u, actual %u", sizeof(struct status_message), head.length);
+	if (head.length < sizeof(struct status_reply)) {
+		warn("status length mismatch: expected >=%u, actual %u", sizeof(struct status_reply), head.length);
 		return NULL;
 	}
 
@@ -605,12 +605,6 @@ static struct status_message * generate_status(int serv_fd, u32 snaptag)
 	 */
 	if ((err = readpipe(serv_fd, reply, head.length)) < 0) {
 		warn("received incomplete status message: %s", strerror(-err));
-		free(reply);
-		return NULL;
-	}
-
-	if (reply->status_count > reply->num_columns) {
-		warn("mismatched snapshot status count (%u) and the number of columns (%u)", reply->status_count, reply->num_columns);
 		free(reply);
 		return NULL;
 	}
@@ -1009,7 +1003,7 @@ static int ddsnap_replication_send(int serv_fd, u32 src_snap, u32 tgt_snap, char
 		}
 
 		err = -EINVAL;
-		struct status_message *reply;
+		struct status_reply *reply;
 		if (!(reply = generate_status(serv_fd, ~0UL))) {
 			warn("cannot generate status");
 			goto out;
@@ -1767,40 +1761,60 @@ static u32 get_state(int serv_fd, unsigned int snaptag)
 	return reply.state;
 }
 
-static struct status *get_snap_status(struct status_message *message, unsigned int snaptag)
+static struct snapshot_details *snapshot_details(struct status_reply *reply, unsigned row)
 {
-	struct status *status;
+	unsigned rowsize = sizeof(struct snapshot_details) + reply->snapshots * sizeof(reply->details[0]);
+	return (void *)(reply->details + row * rowsize);
+}
 
-	status = (struct status *)(message->status_data +
-					snaptag * (sizeof(struct status) +
-					message->num_columns * sizeof(status->chunk_count[0])));
-
-	return status;
+int commas(char *buf, int len, long long n)
+{
+	int newlen = snprintf(buf, len, "%Lu", n);
+	if (!newlen)
+		return 0;
+	int need = (newlen - 1) / 3;
+	if ((newlen += need) >= len)
+		return 0;
+	char *to = buf + newlen, *from = to - need;
+	*to = 0;
+	while (need) {
+		*--to = *--from;
+		*--to = *--from;
+		*--to = *--from;
+		*--to = ',';
+		need--;
+	}
+	return newlen;
 }
 
 static int ddsnap_get_status(int serv_fd, u32 snaptag, int verbose)
 {
-	struct status_message *reply;
-	reply = generate_status(serv_fd, snaptag);
+	struct status_reply *reply = generate_status(serv_fd, snaptag);
 
 	if (!reply)
 		return 1;
 
-	if (reply->store.chunksize_bits == 0 && reply->store.used == 0 && reply->store.free == 0) {
-		printf("Chunk size: %lu\n", 1UL << reply->meta.chunksize_bits);
-		printf("Used: %Li\n", reply->meta.used);
-		printf("Free: %Li\n", reply->meta.free);
-	} else {
-		printf("Data chunk size: %lu\n", 1UL << reply->store.chunksize_bits);
-		printf("Used data: %Li\n", reply->store.used);
-		printf("Free data: %Li\n", reply->store.free);
+	int separate = !!reply->store.total;
+	char number1[16], number2[16];
 
-		printf("Metadata chunk size: %lu\n", 1UL << reply->meta.chunksize_bits);
-		printf("Used metadata: %Li\n", reply->meta.used);
-		printf("Free metadata: %Li\n", reply->meta.free);
+	commas(number1, sizeof(number1), reply->meta.total);
+	commas(number2, sizeof(number2), reply->meta.free);
+	printf(separate? "Snapshot metadata " : "Snapshot store ");
+	printf("block size = %lu; ", 1UL << reply->meta.chunksize_bits);
+	printf("%s of ", number2);
+	printf("%s chunks free\n", number1);
+
+	if (separate) {
+		commas(number1, sizeof(number1), reply->store.total);
+		commas(number2, sizeof(number2), reply->store.free);
+		printf("Snapshot data store ");
+		printf("chunk size = %lu; ", 1UL << reply->store.chunksize_bits);
+		printf("%s of ", number2);
+		printf("%s chunks free\n", number1);
 	}
 
-	printf("Origin size: %llu\n", get_origin_sectors(serv_fd) << SECTOR_BITS);
+	commas(number1, sizeof(number1), get_origin_sectors(serv_fd) << SECTOR_BITS); // include this in status reply!!
+	printf("Origin size: %s bytes\n", number1);
 	printf("Write density: %g\n", (double)reply->write_density/(double)0xffffffff);
 
 	time_t snaptime = (time_t)reply->ctime;
@@ -1815,7 +1829,7 @@ static int ddsnap_get_status(int serv_fd, u32 snaptag, int verbose)
 	printf("%6s %24s %8s %8s", "Snap", "Creation time", "Chunks", "Unshared");
 
 	if (verbose) {
-		for (col = 1; col < reply->num_columns; col++)
+		for (col = 1; col < reply->snapshots; col++)
 			printf(" %7dX", col);
 	} else {
 		printf(" %8s", "Shared");
@@ -1823,36 +1837,34 @@ static int ddsnap_get_status(int serv_fd, u32 snaptag, int verbose)
 
 	printf("\n");
 
-	struct status *snap_status;
+	for (row = 0; row < reply->snapshots; row++) {
+		struct snapshot_details *details = snapshot_details(reply, row);
 
-	for (row = 0; row < reply->status_count; row++) {
-		snap_status = get_snap_status(reply, row);
+		printf("%6u", details->snap);
 
-		printf("%6u", snap_status->snap);
-
-		snaptime = (time_t)snap_status->ctime;
+		snaptime = (time_t)details->ctime;
 		ctime_str = ctime(&snaptime);
 		if (ctime_str[strlen(ctime_str)-1] == '\n')
 			ctime_str[strlen(ctime_str)-1] = '\0';
 		printf(" %24s", ctime_str);
 
-		if (snap_status->chunk_count[0] == -1) {
+		if (details->sharing[0] == -1) {
 			printf(" %8s %8s %8s\n", "!", "!", "!");
 			continue;
 		}
 
 		total_chunks = 0;
-		for (col = 0; col < reply->num_columns; col++)
-			total_chunks += snap_status->chunk_count[col];
+		for (col = 0; col < reply->snapshots; col++)
+			total_chunks += details->sharing[col];
 
 		printf(" %8llu", total_chunks);
-		printf(" %8llu", snap_status->chunk_count[0]);
+		printf(" %8llu", details->sharing[0]);
 
 		if (verbose)
-			for (col = 1; col < reply->num_columns; col++)
-				printf(" %8llu", snap_status->chunk_count[col]);
+			for (col = 1; col < reply->snapshots; col++)
+				printf(" %8llu", details->sharing[col]);
 		else
-			printf(" %8llu", total_chunks - snap_status->chunk_count[0]);
+			printf(" %8llu", total_chunks - details->sharing[0]);
 
 		printf("\n");
 	}
@@ -1864,7 +1876,7 @@ static int ddsnap_get_status(int serv_fd, u32 snaptag, int verbose)
 	if (snaptag == (u32)~0UL) {
 		u64 *column_totals;
 
-		if (!(column_totals = malloc(sizeof(u64) * reply->num_columns))) {
+		if (!(column_totals = malloc(sizeof(u64) * reply->snapshots))) {
 			warn("unable to allocate array for column totals");
 			free(reply);
 			return 1;
@@ -1873,13 +1885,13 @@ static int ddsnap_get_status(int serv_fd, u32 snaptag, int verbose)
 		/* sum the columns and divide by their share counts */
 
 		total_chunks = 0;
-		for (col = 0; col < reply->num_columns; col++) {
+		for (col = 0; col < reply->snapshots; col++) {
 			column_totals[col] = 0;
-			for (row = 0; row < reply->status_count; row++) {
-				snap_status = get_snap_status(reply, row);
-				if (snap_status->chunk_count[0] == -1)
+			for (row = 0; row < reply->snapshots; row++) {
+				struct snapshot_details *details = snapshot_details(reply, row);
+				if (details->sharing[0] == -1)
 					continue;
-				column_totals[col] += snap_status->chunk_count[col];
+				column_totals[col] += details->sharing[col];
 			}
 			column_totals[col] /= col+1;
 
@@ -1889,15 +1901,15 @@ static int ddsnap_get_status(int serv_fd, u32 snaptag, int verbose)
 		printf("%6s", "totals");
 		printf(" %24s", "");
 		printf(" %8llu", total_chunks);
-		if (reply->num_columns > 0)
+		if (reply->snapshots > 0)
 			printf(" %8llu", column_totals[0]);
 		else
 			printf(" %8d", 0);
 
 		if (verbose)
-			for (col = 1; col < reply->num_columns; col++)
+			for (col = 1; col < reply->snapshots; col++)
 				printf(" %8llu", column_totals[col]);
-		else if (reply->num_columns > 0)
+		else if (reply->snapshots > 0)
 			printf(" %8llu", total_chunks - column_totals[0]);
 		else
 			printf(" %8d", 0);
@@ -2207,7 +2219,7 @@ int main(int argc, char *argv[])
 
 		poptFreeContext(initCon);
 
-		trace_on(printf("js_bytes was %u, bs_bits was %u and cs_bits was %u\n", js_bytes, bs_bits, cs_bits););
+		trace_off(warn("js_bytes was %u, bs_bits was %u and cs_bits was %u", js_bytes, bs_bits, cs_bits););
 
 		if (bs_str != NULL) {
 			bs_bits = strtobits(bs_str);
