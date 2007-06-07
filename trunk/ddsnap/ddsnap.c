@@ -1977,10 +1977,11 @@ int main(int argc, char *argv[])
 	int yes = FALSE;
 	struct poptOption initOptions[] = {
 		{ "yes", 'y', POPT_ARG_NONE, &yes, 0, "Answer yes to all prompts", NULL},
-		{ "journalsize", 'j', POPT_ARG_STRING, &js_str, 0, "User specified journal size, i.e. 400k (default: 100 * chunk_size)", "desired journal size" },
-		{ "blocksize", 'b', POPT_ARG_STRING, &bs_str, 0, "User specified block size, has to be a power of two, i.e. 8k (default: 4k)", "desired block size" },
-		{ "chunksize", 'c', POPT_ARG_STRING, &cs_str, 0, "User specified chunk size, has to be a power of two, i.e. 8k (default: 4k)", "desired chunk size" },
-	     POPT_TABLEEND
+		{ "journalsize", 'j', POPT_ARG_STRING, &js_str, 0, "User specified journal size, i.e. 400k (default: 100 * chunk_size)", "size" },
+		{ "blocksize", 'b', POPT_ARG_STRING, &bs_str, 0, "Snapshot metadata block size (power of two, default = 4K)", "size" },
+		{ "chunksize", 'c', POPT_ARG_STRING, &cs_str, 0, "Snapshot store chunk size (power of two, default = 16K)", "size" },
+		{ "cache", 0, POPT_ARG_STRING, &cs_str, 0, "Preallocated buffer cache size (default = 128M)", "size" },
+		POPT_TABLEEND
 	};
 
 	int nobg = 0;

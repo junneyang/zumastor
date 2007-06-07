@@ -16,7 +16,7 @@ ddsnap_binaries = ddsnap
 binaries =  $(ddsnap_binaries) devspam
 
 includes = $(kernel)
-flags = -g -Wall -std=gnu99 -D_FILE_OFFSET_BITS=64 -D_PRE_ALLOCATE_BUFFERS
+flags = -g -Wall -std=gnu99 -D_FILE_OFFSET_BITS=64
 #flags = -g -Wall -Wno-parentheses -Wbad-function-cast -Wcast-align -Wwrite-strings -Wstrict-prototypes -Wnested-externs -Wredundant-decls -Wendif-labels -Wcast-qual -D_FILE_OFFSET_BITS=64
 
 all: $(binaries) ddsnap.8.gz
