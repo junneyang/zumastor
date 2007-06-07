@@ -49,7 +49,14 @@
 #define SB_BUSY 2
 #define SB_SELFCHECK 4
 #define SB_SECTOR 8
-#define SB_MAGIC { 's', 'n', 'a', 'p', 0xad, 0x07, 0x04, 0x05 } /* date of latest incompatible sb format */
+#define SB_MAGIC { 't', 'e', 's', 't', 0xdd, 0x07, 0x06, 0x04 } /* date of latest incompatible sb format */
+/*
+ * Snapshot store format revision history
+ * !!! always update this for every incompatible change !!!
+ *
+ * 2007-04-05: SB magic added and enforced
+ * 2007-06-04: SB journal commit block used fields replaced by free
+ */
 
 #define DDSNAPD_CLIENT_ERROR -1
 #define DDSNAPD_AGENT_ERROR -2
@@ -63,7 +70,7 @@
 #define MAX_NEW_METACHUNKS 10
 
 #define trace trace_off
-#define jtrace trace_off
+#define jtrace trace_on
 //#define BUSHY // makes btree nodes very small for debugging
 
 #define DIVROUND(N, D) (((N)+(D)-1)/(D))
@@ -243,7 +250,6 @@ struct allocspace { // everything bogus here!!!
 	u32 allocsize;
 	u32 chunk_sectors_bits;
 	u32 alloc_per_node; /* only for metadata */
-	u64 chunks_used;
 };
 
 struct superblock
@@ -277,16 +283,14 @@ static inline int combined(struct superblock *sb)
 	return !sb->image.snapdata.chunks;
 }
 
-static inline chunk_t metafree(struct superblock *sb)
-{
-	chunk_t free = sb->image.metadata.chunks - sb->metadata.chunks_used;
-	return combined(sb) ? free - sb->snapdata.chunks_used : free;
-}
-
 static inline chunk_t snapfree(struct superblock *sb)
 {
-	/* do not call with combined store */
-	return combined(sb) ? 0 : sb->image.snapdata.chunks - sb->snapdata.chunks_used;
+	return sb->image.snapdata.freechunks;
+}
+
+static inline chunk_t metafree(struct superblock *sb)
+{
+	return sb->image.metadata.freechunks;
 }
 
 static inline unsigned chunk_sectors(struct allocspace *space)
@@ -306,8 +310,8 @@ struct commit_block
 	u32 checksum;
 	s32 sequence;
 	u32 entries;
-	u64 snap_used;
-	u64 meta_used;
+	u64 snapfree;
+	u64 metafree;
 	u64 sector[];
 } PACKED;
 
@@ -398,18 +402,24 @@ static void check_freespace(struct superblock *sb)
 		warn("metadata freechunks out of sync with used counts (%Li, %Li)", metafree(sb), sb->metadata.asi->freechunks);
 	chunk_t counted = count_free(sb, &sb->metadata);
 	if (counted != sb->metadata.asi->freechunks) {
-		warn("metadata free chunks count wrong: counted %Li, freechunks %Li", counted, sb->metadata.asi->freechunks);
+		warn("metadata free chunks count wrong: counted %Li, free = %Li", counted, sb->metadata.asi->freechunks);
 		sb->metadata.asi->freechunks = counted;
 	}
-	if (combined(sb))
+	if (combined(sb)) // !!! should be able to lose this now
 		return;
 	if (snapfree(sb) != sb->snapdata.asi->freechunks)
 		warn("snapdata freechunks out of sync with used counts (%Li, %Li)", snapfree(sb), sb->snapdata.asi->freechunks);
 	counted = count_free(sb, &sb->snapdata);
 	if (counted != sb->snapdata.asi->freechunks) {
-		warn("snapdata free chunks count wrong: counted %Li, freechunks %Li", counted, sb->snapdata.asi->freechunks);
+		warn("snapdata free chunks count wrong: counted %Li, free = %Li", counted, sb->snapdata.asi->freechunks);
 		sb->snapdata.asi->freechunks = counted;
 	}
+}
+
+static void selfcheck_freespace(struct superblock *sb)
+{
+	if ((sb->flags & SB_SELFCHECK))
+		check_freespace(sb);
 }
 
 /*
@@ -462,8 +472,8 @@ static void commit_transaction(struct superblock *sb)
 	jtrace(warn("commit journal block [%u]", pos););
 	commit->checksum = 0;
 	commit->checksum = -checksum_block(sb, (void *)commit);
-	commit->snap_used =  sb->snapdata.chunks_used;
-	commit->meta_used = sb->metadata.chunks_used;
+	commit->snapfree = snapfree(sb);
+	commit->metafree = metafree(sb);
 	if (write_buffer_to(commit_buffer, journal_sector(sb, pos)))
 		jtrace(warn("unable to write checksum fro commit block"););
 	brelse(commit_buffer);
@@ -478,11 +488,10 @@ static void commit_transaction(struct superblock *sb)
 		// we hope the order we just listed these is the same as committed above
 	}
 	/* checking free chunks for debugging purpose only,, return before this to skip the checking */
-	if ((sb->flags & SB_SELFCHECK))
-		check_freespace(sb);
+	selfcheck_freespace(sb);
 }
 
-static int recover_journal(struct superblock *sb)
+static int replay_journal(struct superblock *sb)
 {
 	struct buffer *buffer;
 	typeof(((struct commit_block *)NULL)->sequence) sequence = -1;
@@ -491,6 +500,7 @@ static int recover_journal(struct superblock *sb)
 	int size = sb->image.journal_size;
 	char const *why = "";
 	unsigned i;
+	warn("Replaying journal");
 
 	/* Scan full journal, find newest commit */
 	// this replay code is nigh on impossible to read and needs to die
@@ -530,7 +540,7 @@ static int recover_journal(struct superblock *sb)
 			continue;
 		}
 
-		jtrace(warn("[%i] seq=%i", i, block->sequence););
+		jtrace(warn("[%i] seq=%i entries=%i metafree=%Lu snapfree=%Lu", i, block->sequence, block->entries, block->metafree, block->snapfree););
 
 		if (last_block != -1 && block->sequence != sequence + 1) {
 			int delta = sequence - block->sequence;
@@ -587,16 +597,10 @@ static int recover_journal(struct superblock *sb)
 	}
 	sb->image.journal_next = (newest_block + 1 + size) % size;
 	sb->image.sequence = commit->sequence + 1;
-	sb->snapdata.chunks_used = commit->snap_used;
-	sb->metadata.chunks_used = commit->meta_used;
+	sb->image.snapdata.freechunks = commit->snapfree;
+	sb->image.metadata.freechunks = commit->metafree;
 	brelse(buffer);
-
-	sb->metadata.asi->freechunks = sb->metadata.asi->chunks - sb->metadata.chunks_used;
-	if (combined(sb)) {
-		sb->metadata.asi->freechunks -= sb->snapdata.chunks_used;
-		return 0;
-	}
-	sb->snapdata.asi->freechunks = sb->snapdata.asi->chunks - sb->snapdata.chunks_used;
+	check_freespace(sb);
 	return 0;
 
 failed:
@@ -921,64 +925,60 @@ static u64 calc_bitmap_blocks(struct superblock *sb, u64 chunks)
 
 static int init_allocation(struct superblock *sb)
 {
-	int meta_flag = (sb->metadev != sb->snapdev);
 	unsigned meta_bitmap_base_chunk = (SB_SECTOR + 2*chunk_sectors(&sb->metadata) - 1) >> sb->metadata.chunk_sectors_bits;
 	
 	sb->metadata.asi->bitmap_blocks = calc_bitmap_blocks(sb, sb->metadata.asi->chunks); 
-        sb->metadata.asi->bitmap_base = meta_bitmap_base_chunk << sb->metadata.chunk_sectors_bits;
-        sb->metadata.asi->last_alloc = 0;
-	
-	unsigned res = meta_bitmap_base_chunk + sb->metadata.asi->bitmap_blocks + sb->image.journal_size;
-        sb->metadata.asi->freechunks = sb->metadata.asi->chunks - res;
-	sb->metadata.chunks_used += res;
-	
-	if (meta_flag) {
-		u64 snap_bitmap_base_chunk = (sb->metadata.asi->bitmap_base >> sb->metadata.chunk_sectors_bits) + sb->metadata.asi->bitmap_blocks;
-	
+	sb->metadata.asi->bitmap_base = meta_bitmap_base_chunk << sb->metadata.chunk_sectors_bits;
+	sb->metadata.asi->last_alloc = 0;
+
+	unsigned reserved = meta_bitmap_base_chunk + sb->metadata.asi->bitmap_blocks + sb->image.journal_size;
+
+	if (!combined(sb)) {
+		u64 snap_bitmap_base_chunk = (sb->metadata.asi->bitmap_base >> sb->metadata.chunk_sectors_bits) + sb->metadata.asi->bitmap_blocks; // !!! expressing bitmap_base in sectors instead of chunks is brain damage
+
 		sb->snapdata.asi->bitmap_blocks = calc_bitmap_blocks(sb, sb->snapdata.asi->chunks);
 		sb->snapdata.asi->bitmap_base = snap_bitmap_base_chunk << sb->metadata.chunk_sectors_bits;
 		sb->snapdata.asi->freechunks = sb->snapdata.asi->chunks;
-
-		/* need to update freechunks in metadata */
-		sb->metadata.asi->freechunks -= sb->snapdata.asi->bitmap_blocks;
-		sb->metadata.chunks_used += sb->snapdata.asi->bitmap_blocks;
+		reserved += sb->snapdata.asi->bitmap_blocks;
 	}
 
+	sb->metadata.asi->freechunks = sb->metadata.asi->chunks - reserved;
+
+	// !!! express journal_base in chunks, not sectors
 	sb->image.journal_base = sb->metadata.asi->bitmap_base 
-		+ ((sb->metadata.asi->bitmap_blocks + 
-		    (meta_flag ? sb->snapdata.asi->bitmap_blocks : 0)) 
+		+ ((sb->metadata.asi->bitmap_blocks +
+		    (!combined(sb) ? sb->snapdata.asi->bitmap_blocks : 0)) 
 		   << sb->metadata.chunk_sectors_bits);
 	
-	u64 chunks  = sb->metadata.asi->chunks  + (meta_flag ? sb->snapdata.asi->chunks  : 0);
-	unsigned bitmaps = sb->metadata.asi->bitmap_blocks + (meta_flag ? sb->snapdata.asi->bitmap_blocks : 0);
-	if (meta_flag)
+	u64 chunks  = sb->metadata.asi->chunks  + (!combined(sb) ? sb->snapdata.asi->chunks  : 0);
+	unsigned bitmaps = sb->metadata.asi->bitmap_blocks + (!combined(sb) ? sb->snapdata.asi->bitmap_blocks : 0);
+	if (!combined(sb))
 		warn("metadata store size: %Li chunks (%Li sectors)", 
 		     sb->metadata.asi->chunks, sb->metadata.asi->chunks << sb->metadata.chunk_sectors_bits);
 	warn("snapshot store size: %Li chunks (%Li sectors)", 
 	     chunks, chunks << sb->snapdata.chunk_sectors_bits);
-	printf("Initializing %u bitmap blocks... ", bitmaps);
-	
-	unsigned i, reserved = sb->metadata.asi->chunks - sb->metadata.asi->freechunks, 
-		sector = sb->metadata.asi->bitmap_base;
+
+	warn("Initializing %u bitmap block(s)", bitmaps);
+	unsigned i, sector = sb->metadata.asi->bitmap_base;
 	for (i = 0; i < bitmaps; i++, sector += chunk_sectors(&sb->metadata)) {
 		struct buffer *buffer = getblk(sb->metadev, sector, sb->metadata.allocsize);
 		memset(buffer->data, 0, sb->metadata.allocsize);
 		/* Reserve bitmaps and superblock */
 		if (i == 0) {
-			unsigned i;
+			unsigned i; // !!! same index name, bad taste
 			for (i = 0; i < reserved; i++)
 				set_bitmap_bit(buffer->data, i);
 		}
 		/* Suppress overrun allocation in partial last byte */
 		if (i == bitmaps - 1 && (chunks & 7))
 			buffer->data[(chunks >> 3) & (sb->metadata.allocsize - 1)] |= 0xff << (chunks & 7);
-		trace_off(dump_buffer(buffer, 0, 16););
 		brelse_dirty(buffer);
 	}
-	printf("\n");
+	selfcheck_freespace(sb);
 	return 0;
 }
 
+// !!! unusual return codes
 static int free_chunk(struct superblock *sb, struct allocspace *as, chunk_t chunk)
 {
 	unsigned bitmap_shift = sb->metadata.asi->allocsize_bits + 3, bitmap_mask = (1 << bitmap_shift ) - 1;
@@ -1006,14 +1006,12 @@ static int free_chunk(struct superblock *sb, struct allocspace *as, chunk_t chun
 
 static inline void free_block(struct superblock *sb, sector_t address)
 {
-	if (free_chunk(sb, &sb->metadata, address >> sb->metadata.chunk_sectors_bits))
-		sb->metadata.chunks_used--; 
+	free_chunk(sb, &sb->metadata, address >> sb->metadata.chunk_sectors_bits);
 }
 
 static inline void free_exception(struct superblock *sb, chunk_t chunk)
 {
-	if (free_chunk(sb, &sb->snapdata, chunk))
-		sb->snapdata.chunks_used--;
+	free_chunk(sb, &sb->snapdata, chunk); // !!! why even have this?
 }
 
 #ifdef INITDEBUG2
@@ -1618,24 +1616,19 @@ static chunk_t alloc_chunk(struct superblock *sb, struct allocspace *as)
 
 static sector_t alloc_metablock(struct superblock *sb)
 {
-	chunk_t new_block;  
-	if ((new_block = alloc_chunk(sb, &sb->metadata)) != -1)
-		sb->metadata.chunks_used++;	
-	return  new_block == -1? new_block : new_block << sb->metadata.chunk_sectors_bits;
+	chunk_t new_block = alloc_chunk(sb, &sb->metadata);
+	return new_block == -1? : new_block << sb->metadata.chunk_sectors_bits; // !!! store block number in leaf instead of sectors
 }
 
 static u64 alloc_snapblock(struct superblock *sb)
 {
-	chunk_t new_exception;
-	if ((new_exception = alloc_chunk(sb, &sb->snapdata)) != -1)
-		sb->snapdata.chunks_used++;
-	return new_exception;
+	return alloc_chunk(sb, &sb->snapdata);
 }
 
 static struct buffer *new_block(struct superblock *sb)
 {
 	// !!! handle alloc_metablock failure
-	return getblk(sb->metadev, alloc_metablock(sb), sb->metadata.allocsize); // !!! possible null ptr deferenced
+	return getblk(sb->metadev, alloc_metablock(sb), sb->metadata.allocsize);
 }
 
 static struct buffer *new_leaf(struct superblock *sb)
@@ -1884,24 +1877,29 @@ static int ensure_free_chunks(struct superblock *sb, struct allocspace *as, int 
 				goto fail_delete;
 	} while (sb->image.snapshots);
 
-	if (sb->snapdata.chunks_used != 0)
-		warn("nonzero used data chunks %Li (freechunks %Li) after all snapshots are deleted",
-			sb->snapdata.chunks_used, sb->snapdata.asi->freechunks);
-	unsigned meta_bitmap_base_chunk = (SB_SECTOR + 2*chunk_sectors(&sb->metadata) - 1) >> sb->metadata.chunk_sectors_bits;
-	/* reserved meta data + bitmap_blocks + super_block */
-	unsigned res = meta_bitmap_base_chunk + sb->metadata.asi->bitmap_blocks + sb->image.journal_size;
-	res += sb->metadata.asi->bitmap_blocks + 1;
-	if (sb->metadata.asi != sb->snapdata.asi)
-		res += 2*sb->snapdata.asi->bitmap_blocks;
-	if (sb->metadata.chunks_used != res)
-		warn("used metadata chunks %Li (freechunks %Li) are larger than reserved (%u) after all snapshots are deleted",
-			sb->metadata.chunks_used, sb->metadata.asi->freechunks, res);
-	sb->snapdata.chunks_used = 0;
-	sb->metadata.chunks_used = res;
-	return -1; // we deleted all possible snapshots
+	/* All snapshots deleted, check for lost chunks */
+
+	if (sb->image.snapdata.freechunks < sb->image.snapdata.chunks ) {
+		warn("%Li free data chunks after all snapshots deleted", sb->image.snapdata.freechunks);
+		sb->image.snapdata.freechunks = count_free(sb, &sb->snapdata);
+	}
+
+	if (!combined(sb)) {
+		/* reserved meta data + bitmap_blocks + super_block */
+		// !!! this is also used in initialization, make this a common function
+		unsigned meta_bitmap_base_chunk = (SB_SECTOR + 2*chunk_sectors(&sb->metadata) - 1) >> sb->metadata.chunk_sectors_bits;
+		unsigned reserved = meta_bitmap_base_chunk + sb->metadata.asi->bitmap_blocks + sb->image.journal_size
+			+ sb->metadata.asi->bitmap_blocks + 1
+			+ sb->snapdata.asi->bitmap_blocks;
+		if (sb->image.metadata.freechunks + reserved < sb->image.metadata.chunks) {
+			warn("%Li free metadata chunks after all snapshots deleted", sb->image.metadata.freechunks);
+			sb->image.metadata.freechunks = count_free(sb, &sb->metadata);
+		}
+	}
+	return -1;
 
 fail_delete:
-	warn("failed to delete snapshot");
+	warn("snapshot delete failed");
 	return -1;
 }
 
@@ -2405,7 +2403,7 @@ static void load_sb(struct superblock *sb)
 	sb->snapmask = calc_snapmask(sb);
 	trace(printf("Active snapshot mask: %016llx\n", sb->snapmask););
 #if 0
-	// don't always count here !!!
+	// make this a startup option !!!
 	sb->metadata.chunks_used = sb->metadata.asi->chunks - count_free(sb, &sb->metadata);
 	if (combined(sb))
 		return;
@@ -2460,9 +2458,9 @@ int init_snapstore(struct superblock *sb, u32 js_bytes, u32 bs_bits, u32 cs_bits
 	sb->image.create_time = time(NULL);
 	sb->image.orgoffset  = 0; //!!! FIXME: shouldn't always assume offset starts at 0
 
-	trace_on(printf("cs_bits %u\n", sb->snapdata.asi->allocsize_bits););
+	trace_off(warn("cs_bits = %u", sb->snapdata.asi->allocsize_bits););
 	u32 chunk_size = 1 << sb->snapdata.asi->allocsize_bits, js_chunks = DIVROUND(js_bytes, chunk_size);
-	trace_on(printf("chunk_size is %u & js_chunks is %u\n", chunk_size, js_chunks););
+	trace_off(warn("chunk_size = %u, js_chunks = %u", chunk_size, js_chunks););
 
 	sb->image.journal_size = js_chunks;
 	sb->image.journal_next = 0;
@@ -2472,26 +2470,6 @@ int init_snapstore(struct superblock *sb, u32 js_bytes, u32 bs_bits, u32 cs_bits
 		return error;
 	}
 	set_sb_dirty(sb);
-
-	for (i = 0; i < sb->image.journal_size; i++) {
-		struct buffer *buffer = jgetblk(sb, i);
-		memset(buffer->data, 0, sb->metadata.allocsize);
-		struct commit_block *commit = (struct commit_block *)buffer->data;
-		*commit = (struct commit_block){ .magic = JMAGIC, .sequence = i };
-#ifdef TEST_JOURNAL
-		commit->sequence = (i + 3) % (sb->image.journal_size);
-#endif
-		commit->checksum = -checksum_block(sb, (void *)commit);
-		write_buffer(buffer);
-		brelse(buffer);
-	}
-#ifdef TEST_JOURNAL
-	show_journal(sb);
-	show_tree(sb);
-	(void)flush_buffers();
-	recover_journal(sb);
-	show_buffers();
-#endif
 
 #ifdef INITDEBUG1
 	printf("chunk = %Lx\n", alloc_chunk_range(sb, sb->image.chunks - 1, 1));
@@ -2532,6 +2510,7 @@ int init_snapstore(struct superblock *sb, u32 js_bytes, u32 bs_bits, u32 cs_bits
 
 	brelse_dirty(rootbuf);
 	brelse_dirty(leafbuf);
+
 #ifdef INITDEBUG4
 	struct buffer *leafbuf1 = new_leaf(sb);
 	struct buffer *leafbuf2 = new_leaf(sb);
@@ -2548,6 +2527,29 @@ int init_snapstore(struct superblock *sb, u32 js_bytes, u32 bs_bits, u32 cs_bits
 	show_leaf(leaf1);
 	return 0;
 #endif
+
+	chunk_t metafree = sb->image.metadata.freechunks;
+	chunk_t snapfree = sb->image.snapdata.freechunks;
+	for (i = 0; i < sb->image.journal_size; i++) {
+		struct buffer *buffer = jgetblk(sb, i);
+		memset(buffer->data, 0, sb->metadata.allocsize);
+		struct commit_block *commit = (struct commit_block *)buffer->data;
+		*commit = (struct commit_block){ .magic = JMAGIC, .sequence = i, .metafree = metafree, .snapfree = snapfree };
+#ifdef TEST_JOURNAL
+		commit->sequence = (i + 3) % (sb->image.journal_size);
+#endif
+		commit->checksum = -checksum_block(sb, (void *)commit);
+		brelse_dirty(buffer);
+	}
+
+#ifdef TEST_JOURNAL
+	show_journal(sb);
+	show_tree(sb);
+	(void)flush_buffers();
+	replay_journal(sb);
+	show_buffers();
+#endif
+
 #ifdef TEST_JOURNAL
 	show_buffers();
 	show_dirty_buffers();
@@ -2557,7 +2559,7 @@ int init_snapstore(struct superblock *sb, u32 js_bytes, u32 bs_bits, u32 cs_bits
 
 	show_journal(sb);
 	show_tree(sb);
-	recover_journal(sb);
+	replay_journal(sb);
 	(void)flush_buffers();
 	evict_buffers();
 	show_tree(sb);
@@ -2999,7 +3001,7 @@ static int incoming(struct superblock *sb, struct client *client)
 		if (sb->image.flags & SB_BUSY) {
 			warn("Server was not shut down properly");
 			//jtrace(show_journal(sb););
-			recover_journal(sb);
+			replay_journal(sb);
 		} else {
 			sb->image.flags |= SB_BUSY;
 			set_sb_dirty(sb);
@@ -3192,9 +3194,9 @@ static int incoming(struct superblock *sb, struct client *client)
 
 		unsigned num_rows = sb->image.snapshots;
 		unsigned num_columns = num_rows, status_count = sb->image.snapshots;
-		unsigned rowsize = (sizeof(struct status) + num_columns * sizeof(chunk_t));
-		unsigned int reply_len = sizeof(struct status_message) + status_count * rowsize;
-		struct status_message *reply = calloc(reply_len, 1);
+		unsigned rowsize = (sizeof(struct snapshot_details) + num_columns * sizeof(chunk_t));
+		unsigned reply_len = sizeof(struct status_reply) + status_count * rowsize;
+		struct status_reply *reply = calloc(reply_len, 1);
 
 		/* calculate the usage statistics */
 
@@ -3222,48 +3224,36 @@ static int incoming(struct superblock *sb, struct client *client)
 		}
 #endif
 
-		/* fill in reply structure */
-
 		reply->ctime = sb->image.create_time;
-
-		// don't always count here!!!
-//		sb->metadata.chunks_used = count_free(sb, &sb->metadata);
-//		sb->snapdata.chunks_used = count_free(sb, &sb->snapdata);
-		reply->meta.chunksize_bits = sb->metadata.asi->allocsize_bits;
-		reply->meta.used = sb->metadata.chunks_used;
-		reply->meta.free = sb->metadata.asi->chunks - sb->metadata.chunks_used;
-		reply->store.used = sb->snapdata.chunks_used;
-		reply->store.chunksize_bits = sb->snapdata.asi->allocsize_bits;
-
-		if (combined(sb))
-			reply->meta.free -= sb->snapdata.chunks_used;
-		else
-			reply->store.free = sb->snapdata.asi->chunks - sb->snapdata.chunks_used;
-
-		reply->write_density = 0;
-		reply->status_count = status_count;
-		reply->num_columns = num_columns;
+		reply->meta.chunksize_bits = sb->image.metadata.allocsize_bits;
+		reply->meta.total = sb->image.metadata.chunks;
+		reply->meta.free = sb->image.metadata.freechunks;
+		reply->store.chunksize_bits = sb->image.snapdata.allocsize_bits;
+		reply->store.total = sb->image.snapdata.chunks;
+		reply->store.free = sb->image.snapdata.freechunks;
+		reply->write_density = 0; // !!! think about how to compute this
+		reply->snapshots = status_count;
 
 		for (int row  = 0; row < sb->image.snapshots; row++) {
-			struct status *snap_status = (struct status *)(reply->status_data + row * rowsize );
+			struct snapshot_details *details = (void *)(reply->details + row * rowsize );
 
-			snap_status->ctime = snaplist[row].ctime;
-			snap_status->snap = snaplist[row].tag;
+			details->ctime = snaplist[row].ctime;
+			details->snap = snaplist[row].tag;
 
 			if (is_squashed(&snaplist[row])) {
-				snap_status->chunk_count[0] = -1;
+				details->sharing[0] = -1;
 				continue;
 			}
 
 			for (int col = 0; col < num_columns; col++)
-				snap_status->chunk_count[col] = share_array[snaplist[row].bit * col];
+				details->sharing[col] = share_array[snaplist[row].bit * col];
 		}
 
 		if (outhead(sock, STATUS_OK, reply_len) < 0 || writepipe(sock, reply, reply_len) < 0)
 			warn("unable to send status message");
 
 		free(reply);
-		check_freespace(sb);
+		selfcheck_freespace(sb);
 		break;
 
 	status_error:
@@ -3468,7 +3458,7 @@ int snap_server(struct superblock *sb, int listenfd, int getsigfd, int agentfd)
 	signal(SIGPIPE, SIG_IGN);
 
 	if ((err = prctl(PR_SET_LESS_THROTTLE, 0, 0, 0, 0)))
-		warn("can not set process to throttle less, error:i %s", strerror(errno));
+		warn("can not set process to throttle less (error %i, %s)", errno, strerror(errno));
 	
 	while (1) {
 		trace(warn("Waiting for activity"););

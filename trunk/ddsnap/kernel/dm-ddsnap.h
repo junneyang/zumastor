@@ -101,9 +101,17 @@ struct snaplist { uint32_t count; struct snapinfo snapshots[]; } PACKED;
 struct stream_changelist { uint32_t snap1; uint32_t snap2; } PACKED;
 struct changelist_stream { uint64_t chunk_count; uint32_t chunksize_bits; } PACKED;
 struct status_request { uint32_t snap; } PACKED;
-struct overall_status { uint32_t chunksize_bits; uint64_t used; uint64_t free; } PACKED;
-struct status { uint64_t ctime; uint32_t snap; uint64_t chunk_count[]; } PACKED;
-struct status_message { uint64_t ctime; struct overall_status meta; struct overall_status store; uint32_t write_density; uint32_t status_count; uint32_t num_columns; char status_data[]; } PACKED;
+
+struct snapshot_details { uint64_t ctime; uint32_t snap; uint64_t sharing[]; } PACKED;
+
+struct status_reply {
+	uint64_t ctime; 
+	uint32_t write_density;
+	struct { uint32_t chunksize_bits; uint64_t total; uint64_t free; } PACKED meta, store;
+	uint32_t snapshots;
+	char details[]; // struct snapshot_details[snapshots];
+} PACKED;
+
 struct state_message {uint32_t snap; uint32_t state; } PACKED;
 struct origin_sectors { uint64_t count; } PACKED;
 
