@@ -3609,7 +3609,7 @@ int really_init_snapstore(int orgdev, int snapdev, int metadev, unsigned bs_bits
 	for (i = 0; i < 100; i++)
 		make_unique(sb, i, NULL);
 	
-	(void)flush_buffers();
+	flush_buffers();
 	evict_buffers();
 	warn("delete...");
 	delete_tree_range(sb, 1, 0, 5);
@@ -3619,7 +3619,7 @@ int really_init_snapstore(int orgdev, int snapdev, int metadev, unsigned bs_bits
 	return 0;
 #endif
 	unsigned bufsize = 1 << bs_bits;
-	init_buffers(bufsize, (1 << 25)); /* preallocate 32Mb of buffers */
+	init_buffers(bufsize, 0); /* do not preallocate buffers */
 	
 	if (init_snapstore(sb, js_bytes, bs_bits, cs_bits) < 0) 
 		warn("Snapshot storage initiailization failed");
