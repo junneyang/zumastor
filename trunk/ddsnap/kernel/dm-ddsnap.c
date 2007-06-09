@@ -654,8 +654,6 @@ connect:
 	}
 out:
 	warn("%s exiting for snapshot %d", task->comm, info->snap);
-	if (sock)
-		fput(sock);
 	up(&info->exit2_sem); /* !!! will crash if module unloaded before ret executes */
 	return 0;
 message_too_long:
@@ -962,8 +960,6 @@ static int control(struct dm_target *target)
 	}
 out:
 	warn("%s exiting for snapshot %d", task->comm, info->snap);
-	if (sock)
-		fput(sock);
 	up(&info->exit3_sem); /* !!! will crash if module unloaded before ret executes */
 	return 0;
 message_too_long:

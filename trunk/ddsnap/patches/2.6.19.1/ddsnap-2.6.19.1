@@ -1715,7 +1715,7 @@ diff -ruNp linux-2.6.19.1.orig/drivers/md/dm-ddraid.h linux-2.6.19.1/drivers/md/
 diff -ruNp linux-2.6.19.1.orig/drivers/md/dm-ddsnap.c linux-2.6.19.1/drivers/md/dm-ddsnap.c
 --- linux-2.6.19.1.orig/drivers/md/dm-ddsnap.c	1969-12-31 16:00:00.000000000 -0800
 +++ linux-2.6.19.1/drivers/md/dm-ddsnap.c	2007-05-24 17:23:15.000000000 -0700
-@@ -0,0 +1,1450 @@
+@@ -0,0 +1,1446 @@
 +#include <linux/version.h>
 +#include <linux/fs.h>
 +#include <linux/slab.h>
@@ -2372,8 +2372,6 @@ diff -ruNp linux-2.6.19.1.orig/drivers/md/dm-ddsnap.c linux-2.6.19.1/drivers/md/
 +	}
 +out:
 +	warn("%s exiting for snapshot %d", task->comm, info->snap);
-+	if (sock)
-+		fput(sock);
 +	up(&info->exit2_sem); /* !!! will crash if module unloaded before ret executes */
 +	return 0;
 +message_too_long:
@@ -2680,8 +2678,6 @@ diff -ruNp linux-2.6.19.1.orig/drivers/md/dm-ddsnap.c linux-2.6.19.1/drivers/md/
 +	}
 +out:
 +	warn("%s exiting for snapshot %d", task->comm, info->snap);
-+	if (sock)
-+		fput(sock);
 +	up(&info->exit3_sem); /* !!! will crash if module unloaded before ret executes */
 +	return 0;
 +message_too_long:
