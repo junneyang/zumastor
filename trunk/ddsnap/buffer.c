@@ -87,7 +87,7 @@ void show_dirty_buffers(void)
 {
 	struct list_head *list;
 
-	warn("Dirty buffers: ");
+	warn("%i dirty buffers: ", dirty_buffer_count);
 	list_for_each(list, &dirty_buffers) {
 		struct buffer *buffer = list_entry(list, struct buffer, dirty_list);
 		warn("%Lx ", buffer->sector);
@@ -245,7 +245,7 @@ struct buffer *new_buffer(sector_t sector, unsigned size)
 alloc_buffer:
 	buftrace(warn("expand buffer pool");)
 	if (buffer_count == max_buffers) {
-		warn("Maxumim buffer count exceeded (%i)", dirty_buffer_count);
+		warn("Maximum buffer count exceeded (%i)", dirty_buffer_count);
 		return NULL;
 	}
 	buffer = (struct buffer *)malloc(sizeof(struct buffer));

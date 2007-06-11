@@ -972,7 +972,8 @@ static int init_allocation(struct superblock *sb)
 		/* Suppress overrun allocation in partial last byte */
 		if (i == bitmaps - 1 && (chunks & 7))
 			buffer->data[(chunks >> 3) & (sb->metadata.allocsize - 1)] |= 0xff << (chunks & 7);
-		brelse_dirty(buffer);
+		write_buffer(buffer);
+		brelse(buffer);
 	}
 	selfcheck_freespace(sb);
 	return 0;
@@ -2539,7 +2540,8 @@ int init_snapstore(struct superblock *sb, u32 js_bytes, u32 bs_bits, u32 cs_bits
 		commit->sequence = (i + 3) % (sb->image.journal_size);
 #endif
 		commit->checksum = -checksum_block(sb, (void *)commit);
-		brelse_dirty(buffer);
+		write_buffer(buffer);
+		brelse(buffer);
 	}
 
 #ifdef TEST_JOURNAL
