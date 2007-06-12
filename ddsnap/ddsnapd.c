@@ -70,7 +70,7 @@
 #define MAX_NEW_METACHUNKS 10
 
 #define trace trace_off
-#define jtrace trace_on
+#define jtrace trace_off
 //#define BUSHY // makes btree nodes very small for debugging
 
 #define DIVROUND(N, D) (((N)+(D)-1)/(D))
