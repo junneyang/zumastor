@@ -3237,7 +3237,7 @@ static int incoming(struct superblock *sb, struct client *client)
 		reply->snapshots = status_count;
 
 		for (int row  = 0; row < sb->image.snapshots; row++) {
-			struct snapshot_details *details = (void *)(reply->details + row * rowsize );
+			struct snapshot_details *details = (void *)(reply->details + row * rowsize);
 
 			details->ctime = snaplist[row].ctime;
 			details->snap = snaplist[row].tag;
@@ -3246,7 +3246,6 @@ static int incoming(struct superblock *sb, struct client *client)
 				details->sharing[0] = -1;
 				continue;
 			}
-
 			for (int col = 0; col < num_columns; col++)
 				details->sharing[col] = share_array[snaplist[row].bit * col];
 		}
