@@ -1,5 +1,7 @@
 #!/bin/sh
 
+[ -z "$DESTDIR" ] && DESTDIR=/
+
 rm ${DESTDIR}/lib/zumastor >/dev/null 2>&1 # in case of symlink
 rm ${DESTDIR}/var/lib/zumastor >/dev/null 2>&1 # in case of symlink
 rm ${DESTDIR}/var/run/zumastor >/dev/null 2>&1 # in case of symlink
