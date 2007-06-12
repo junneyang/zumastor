@@ -184,11 +184,11 @@ static struct buffer *remove_buffer_hash(struct buffer *buffer)
 	struct buffer **pbuffer = buffer_table + buffer_hash(buffer->sector);
 
 	for (; *pbuffer; pbuffer = &((*pbuffer)->hashlist))
-		if (*pbuffer == buffer)
+		if ((*pbuffer)->hashlist == buffer)
 			goto removed;
 	assert(0); /* buffer not in hash */
 removed:
-	pbuffer = buffer->hashlist;
+	*pbuffer = buffer->hashlist;
 	buffer->hashlist = NULL;
 	return buffer;
 }
@@ -251,7 +251,7 @@ alloc_buffer:
 	buffer = (struct buffer *)malloc(sizeof(struct buffer));
 	if (!buffer)
 		return NULL;
-	*buffer = (struct buffer){ .size = size };
+	*buffer = (struct buffer){ };
 	if ((err = posix_memalign((void **)&(buffer->data), SECTOR_SIZE, size))) {
 		warn("Error: %s unable to expand buffer pool", strerror(err));
 		free(buffer);
@@ -259,6 +259,7 @@ alloc_buffer:
 	}
 
 have_buffer:
+	buffer->size = size;
 	assert(!buffer->count);
 	assert(!buffer->state);
 	buffer->sector = sector;
