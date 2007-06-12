@@ -1763,7 +1763,7 @@ static u32 get_state(int serv_fd, unsigned int snaptag)
 
 static struct snapshot_details *snapshot_details(struct status_reply *reply, unsigned row)
 {
-	unsigned rowsize = sizeof(struct snapshot_details) + reply->snapshots * sizeof(reply->details[0]);
+	unsigned rowsize = sizeof(struct snapshot_details) + reply->snapshots * sizeof(chunk_t);
 	return (void *)(reply->details + row * rowsize);
 }
 
