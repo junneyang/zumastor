@@ -1431,7 +1431,7 @@ static void brelse_free(struct superblock *sb, struct buffer *buffer)
 		return;
 	}
 	free_block(sb, buffer->sector);
-	evict_buffer(buffer);
+	set_buffer_empty(buffer);
 }
 
 static void set_buffer_dirty_check(struct buffer *buffer, struct superblock *sb)
