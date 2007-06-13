@@ -184,7 +184,7 @@ static struct buffer *remove_buffer_hash(struct buffer *buffer)
 	struct buffer **pbuffer = buffer_table + buffer_hash(buffer->sector);
 
 	for (; *pbuffer; pbuffer = &((*pbuffer)->hashlist))
-		if ((*pbuffer)->hashlist == buffer)
+		if (*pbuffer == buffer)
 			goto removed;
 	assert(0); /* buffer not in hash */
 removed:
