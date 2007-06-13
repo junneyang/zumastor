@@ -2724,7 +2724,7 @@ diff -ruNp linux-2.6.19.1.orig/drivers/md/dm-ddsnap.c linux-2.6.19.1/drivers/md/
 +
 +	chunk = bio->bi_sector >> info->chunkshift;
 +	trace(warn("map %Lx/%x, chunk %Lx", (long long)bio->bi_sector, bio->bi_size, chunk);)
-+	assert(bio->bi_size <= 1 << info->chunksize_bits);
++	//assert(bio->bi_size <= 1 << info->chunksize_bits);
 +#ifdef CACHE
 +	if (is_snapshot(info)) { // !!! use page cache for both
 +		struct page *page;

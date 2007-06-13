@@ -1006,7 +1006,7 @@ static int ddsnap_map(struct dm_target *target, struct bio *bio, union map_info 
 
 	chunk = bio->bi_sector >> info->chunkshift;
 	trace(warn("map %Lx/%x, chunk %Lx", (long long)bio->bi_sector, bio->bi_size, chunk);)
-	assert(bio->bi_size <= 1 << info->chunksize_bits);
+	//assert(bio->bi_size <= 1 << info->chunksize_bits);
 #ifdef CACHE
 	if (is_snapshot(info)) { // !!! use page cache for both
 		struct page *page;
