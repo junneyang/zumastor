@@ -4,9 +4,9 @@
 #define SECTOR_SHIFT 9
 #define SECTOR_BITS SECTOR_SHIFT // lose me
 #define SECTOR_SIZE (1 << SECTOR_SHIFT)
-#define BUFFER_STATE_INVAL 0
-#define BUFFER_STATE_CLEAN 1
-#define BUFFER_STATE_DIRTY 2
+#define BUFFER_STATE_INVAL 1
+#define BUFFER_STATE_CLEAN 2
+#define BUFFER_STATE_DIRTY 3
 #define BUFFER_BUCKETS 9999
 
 #include "list.h"
@@ -33,6 +33,7 @@ extern unsigned dirty_buffer_count;
 void show_dirty_buffers(void);
 void set_buffer_dirty(struct buffer *buffer);
 void set_buffer_uptodate(struct buffer *buffer);
+void set_buffer_empty(struct buffer *buffer);
 void brelse(struct buffer *buffer);
 void brelse_dirty(struct buffer *buffer);
 int write_buffer_to(struct buffer *buffer, offset_t pos);
