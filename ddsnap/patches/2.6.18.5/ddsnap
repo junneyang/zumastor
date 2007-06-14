@@ -2746,7 +2746,7 @@ diff -urp 2.6.18.5.clean/drivers/md/dm-ddsnap.c 2.6.18.5/drivers/md/dm-ddsnap.c
 +
 +/* Jiaying: add proc entries to pass stat info to user space.
 + * edit ddsnap_seq_show to add more passed infomation in the snapshot files *
-+ * use ddsnap_add_proc to add a new file in /proc/fs/ddsnap dir */
++ * use ddsnap_add_proc to add a new file in /proc/driver/ddsnap dir */
 +
 +/* ddsnap_pending_queries does the same show_pending includes */
 +static int ddsnap_pending_queries(struct devinfo *info)
@@ -3073,10 +3073,10 @@ diff -urp 2.6.18.5.clean/drivers/md/dm-ddsnap.c 2.6.18.5/drivers/md/dm-ddsnap.c
 +	if (!(snapshot_super = alloc_super()))
 +		goto bad4;
 +#endif
-+	/* Jiaying: register /proc/fs/ddsnap */
-+	ddsnap_proc_root = proc_mkdir("ddsnap", proc_root_fs);
++	/* Jiaying: register /proc/driver/ddsnap */
++	ddsnap_proc_root = proc_mkdir("ddsnap", proc_root_driver);
 +	if (!ddsnap_proc_root) {
-+		printk("cannot create /proc/ddsnap entry\n");
++		printk("cannot create /proc/driver/ddsnap entry\n");
 +#ifdef CACHE
 +		goto bad4;
 +#endif
@@ -3109,7 +3109,7 @@ diff -urp 2.6.18.5.clean/drivers/md/dm-ddsnap.c 2.6.18.5/drivers/md/dm-ddsnap.c
 +	if (end_io_cache)
 +		kmem_cache_destroy(end_io_cache);
 +	kfree(snapshot_super);
-+	remove_proc_entry("ddsnap", proc_root_fs); //Jiaying: remove /proc/fs/ddsnap
++	remove_proc_entry("ddsnap", proc_root_driver); //Jiaying: remove /proc/driver/ddsnap
 +}
 +
 +module_init(dm_ddsnap_init);

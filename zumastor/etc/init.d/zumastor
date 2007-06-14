@@ -15,6 +15,9 @@ function start_zumastor {
 	local host
 	local log
 
+	# see if the kernel is ddsnap enabled
+	[[ -e /proc/driver/ddsnap ]] || { echo "Cannot find dm-ddsnap. Please check if ddsnap kernel package is installed and dm-ddsnap module is loaded."; return 1; }
+
 	# setup directory structure
 	if ! [ -d $RUNPATH ]; then
 		mkdir -p $AGENTS || return 1
