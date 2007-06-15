@@ -2321,7 +2321,7 @@ static void addto_response(struct addto *r, chunk_t chunk)
 			*(r->countp) = (r->nextchunk -  r->firstchunk);
 		} else {
 			trace(warn("alloc new reply"););
-			r->reply = (void *) malloc(sizeof(struct messagebuf));
+			r->reply = (void *) malloc(sizeof(struct messagebuf)); // FIXME TODO - malloc/free in the snapshot read path, bad for performance
 			r->top = (chunk_t *)(((char *)r->reply) + sizeof(struct head) + offsetof(struct rw_request, ranges));
 			r->lim = ((char *)r->reply) + maxbody;
 			r->count++;
@@ -2356,7 +2356,7 @@ static void finish_reply(int sock, struct addto *r, unsigned code, unsigned id)
 		reply(sock, (struct messagebuf *)r->reply);
 		trace(printf("done sending reply\n"););
 	}
-	free(r->reply);
+	free(r->reply); // FIXME TODO - malloc/free in the snapshot read path, bad for performance
 }
 
 /*
