@@ -1154,7 +1154,7 @@ static int apply_delta_extents(int deltafile, u32 chunk_size, u64 chunk_count, c
 		
 		//if the mode is RAW or XDELTA RAW then copy the delta file directly to updated (no uncompression)
 		if (deh.mode == RAW)
-			memcpy(updated, delta_data, extent_size);
+			memcpy(updated, delta_data, extent_size); // !!! FIXME TODO - this has to go, bogus data copy
 		if (!fullvolume && deh.mode == XDELTA) {
 			trace_off(warn("read %llx chunk delta extent data starting at chunk "U64FMT"/offset "U64FMT" from \"%s\"", deh.num_of_chunks, chunk_num, extent_addr, dev1name););
 			int apply_ret = apply_delta_chunk(extent_data, updated, delta_data, extent_size, uncomp_size);
