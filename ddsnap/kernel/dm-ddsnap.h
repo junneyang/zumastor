@@ -1,6 +1,8 @@
 #define PACKED __attribute__ ((packed))
 #define MAGIC  0xadbe
 
+typedef uint64_t chunk_t;
+
 struct head { uint32_t code; uint32_t length; } PACKED;
 
 enum csnap_codes
@@ -63,7 +65,7 @@ enum csnap_codes
 	STATUS_ERROR,
 	REQUEST_SNAPSHOT_STATE,
 	SNAPSHOT_STATE,
-	REQUEST_ORIGIN_SECTORS,
+	REQUEST_ORIGIN_SECTORS, // !!! don't dedicate a whole message type to just this, return some other global stats here (and move me out of kernel)
 	ORIGIN_SECTORS,
 };
 
@@ -100,6 +102,9 @@ struct snapinfo { uint32_t snap; int8_t prio; uint16_t usecnt; char zero[3]; uin
 struct snaplist { uint32_t count; struct snapinfo snapshots[]; } PACKED;
 struct stream_changelist { uint32_t snap1; uint32_t snap2; } PACKED;
 struct changelist_stream { uint64_t chunk_count; uint32_t chunksize_bits; } PACKED;
+
+/* Status retrieval (!!! move me out of kernel !!!) */
+
 struct status_request { uint32_t snap; } PACKED;
 
 struct snapshot_details { uint64_t ctime; uint32_t snap; uint64_t sharing[]; } PACKED;
@@ -111,6 +116,14 @@ struct status_reply {
 	uint32_t snapshots;
 	char details[]; // struct snapshot_details[snapshots];
 } PACKED;
+
+static inline struct snapshot_details *snapshot_details(struct status_reply *reply, unsigned row, unsigned snapshots)
+{
+	unsigned rowsize = sizeof(*reply) + snapshots * sizeof(chunk_t);
+	return (void *)(reply->details + row * rowsize);
+}
+
+/* !!! more things to move out of kernel !!! */
 
 struct state_message {uint32_t snap; uint32_t state; } PACKED;
 struct origin_sectors { uint64_t count; } PACKED;

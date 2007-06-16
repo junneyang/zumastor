@@ -577,7 +577,7 @@ static struct status_reply *generate_status(int serv_fd, u32 snaptag)
 	struct head head;
 
 	if ((err = readpipe(serv_fd, &head, sizeof(head))) < 0) {
-		warn("received incomplete packet header: %s", strerror(-err));
+		warn("could not read message header: %s", strerror(-err));
 		return NULL;
 	}
 
@@ -1761,12 +1761,6 @@ static u32 get_state(int serv_fd, unsigned int snaptag)
 	return reply.state;
 }
 
-static struct snapshot_details *snapshot_details(struct status_reply *reply, unsigned row)
-{
-	unsigned rowsize = sizeof(struct snapshot_details) + reply->snapshots * sizeof(chunk_t);
-	return (void *)(reply->details + row * rowsize);
-}
-
 int commas(char *buf, int len, long long n)
 {
 	int newlen = snprintf(buf, len, "%Lu", n);
@@ -1790,12 +1784,11 @@ int commas(char *buf, int len, long long n)
 static int ddsnap_get_status(int serv_fd, u32 snaptag, int verbose)
 {
 	struct status_reply *reply = generate_status(serv_fd, snaptag);
-
 	if (!reply)
 		return 1;
-
 	int separate = !!reply->store.total;
 	char number1[16], number2[16];
+	unsigned snapshots = reply->snapshots;
 
 	commas(number1, sizeof(number1), reply->meta.total);
 	commas(number2, sizeof(number2), reply->meta.free);
@@ -1829,7 +1822,7 @@ static int ddsnap_get_status(int serv_fd, u32 snaptag, int verbose)
 	printf("%6s %24s %8s %8s", "Snap", "Creation time", "Chunks", "Unshared");
 
 	if (verbose) {
-		for (col = 1; col < reply->snapshots; col++)
+		for (col = 1; col < snapshots; col++)
 			printf(" %7dX", col);
 	} else {
 		printf(" %8s", "Shared");
@@ -1837,8 +1830,8 @@ static int ddsnap_get_status(int serv_fd, u32 snaptag, int verbose)
 
 	printf("\n");
 
-	for (row = 0; row < reply->snapshots; row++) {
-		struct snapshot_details *details = snapshot_details(reply, row);
+	for (row = 0; row < snapshots; row++) {
+		struct snapshot_details *details = snapshot_details(reply, row, snapshots);
 
 		printf("%6u", details->snap);
 
@@ -1854,14 +1847,14 @@ static int ddsnap_get_status(int serv_fd, u32 snaptag, int verbose)
 		}
 
 		total_chunks = 0;
-		for (col = 0; col < reply->snapshots; col++)
+		for (col = 0; col < snapshots; col++)
 			total_chunks += details->sharing[col];
 
 		printf(" %8llu", total_chunks);
 		printf(" %8llu", details->sharing[0]);
 
 		if (verbose)
-			for (col = 1; col < reply->snapshots; col++)
+			for (col = 1; col < snapshots; col++)
 				printf(" %8llu", details->sharing[col]);
 		else
 			printf(" %8llu", total_chunks - details->sharing[0]);
@@ -1876,7 +1869,7 @@ static int ddsnap_get_status(int serv_fd, u32 snaptag, int verbose)
 	if (snaptag == (u32)~0UL) {
 		u64 *column_totals;
 
-		if (!(column_totals = malloc(sizeof(u64) * reply->snapshots))) {
+		if (!(column_totals = malloc(sizeof(u64) * snapshots))) {
 			warn("unable to allocate array for column totals");
 			free(reply);
 			return 1;
@@ -1885,10 +1878,10 @@ static int ddsnap_get_status(int serv_fd, u32 snaptag, int verbose)
 		/* sum the columns and divide by their share counts */
 
 		total_chunks = 0;
-		for (col = 0; col < reply->snapshots; col++) {
+		for (col = 0; col < snapshots; col++) {
 			column_totals[col] = 0;
-			for (row = 0; row < reply->snapshots; row++) {
-				struct snapshot_details *details = snapshot_details(reply, row);
+			for (row = 0; row < snapshots; row++) {
+				struct snapshot_details *details = snapshot_details(reply, row, snapshots);
 				if (details->sharing[0] == -1)
 					continue;
 				column_totals[col] += details->sharing[col];
@@ -1901,15 +1894,15 @@ static int ddsnap_get_status(int serv_fd, u32 snaptag, int verbose)
 		printf("%6s", "totals");
 		printf(" %24s", "");
 		printf(" %8llu", total_chunks);
-		if (reply->snapshots > 0)
+		if (snapshots > 0)
 			printf(" %8llu", column_totals[0]);
 		else
 			printf(" %8d", 0);
 
 		if (verbose)
-			for (col = 1; col < reply->snapshots; col++)
+			for (col = 1; col < snapshots; col++)
 				printf(" %8llu", column_totals[col]);
-		else if (reply->snapshots > 0)
+		else if (snapshots > 0)
 			printf(" %8llu", total_chunks - column_totals[0]);
 		else
 			printf(" %8d", 0);
@@ -2000,7 +1993,7 @@ int main(int argc, char *argv[])
 	char const *logfile = NULL;
 	char const *pidfile = NULL;
 	struct poptOption serverOptions[] = {
-		{ "foreground", 'f', POPT_ARG_NONE, &nobg, 0, "run in foreground. daemonized by default.", NULL },
+		{ "foreground", 'f', POPT_ARG_NONE, &nobg, 0, "run in foreground. daemonized by default.", NULL }, // !!! unusual semantics, we should be foreground by default, and optionally daemonize
 		{ "logfile", 'l', POPT_ARG_STRING, &logfile, 0, "use specified log file", NULL },
 		{ "pidfile", 'p', POPT_ARG_STRING, &pidfile, 0, "use specified process id file", NULL },
 		POPT_TABLEEND

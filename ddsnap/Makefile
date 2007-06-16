@@ -1,8 +1,17 @@
+ifndef prefix
+prefix=
+endif
+
+ifndef bindir
+bindir=sbin
+endif
+
+ifndef mandir
+mandir=usr/share/man
+endif
+
 kernel=./kernel
-
-instdir=/usr/bin
-#instdir=/tmp/ddsnap
-
+instdir=$(prefix)/$(bindir)
 deps = Makefile trace.h diskio.h buffer.h list.h sock.h
 ddsnap_agent_deps = $(deps) ddsnap.agent.h $(kernel)/dm-ddsnap.h
 ddsnapd_deps = $(deps) $(kernel)/dm-ddsnap.h
@@ -65,10 +74,10 @@ clean:
 	rm -f build.h $(binaries) *.o xdelta/*.o a.out ddsnap.8.gz
 .PHONY: clean
 
-install: $(binaries)
+install:
 	mkdir -p $(instdir) || true
 	cp $(binaries) $(instdir)
-	gzip -c ./man/ddsnap.8 > ${DESTDIR}/usr/share/man/man8/ddsnap.8.gz
+	gzip -c ./man/ddsnap.8 > $(prefix)/$(mandir)/man8/ddsnap.8.gz
 .PHONY: install
 
 kernel:
