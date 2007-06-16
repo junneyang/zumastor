@@ -764,7 +764,7 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 				warn("unable to open progress temp file %s: %s", progress_tmpfile, strerror(errno));
 				goto out;
 			}
-			if (fprintf(progress_fs, "%i %Lu\n", tgt_snap, extent_addr) < 0) {
+			if (fprintf(progress_fs, "%i %Lu/%Lu %Lu\n", tgt_snap, chunk_num, cl->count, extent_addr) < 0) {
 				warn("unable write to progress temp file %s: %s", progress_tmpfile, strerror(errno));
 				fclose(progress_fs);
 				goto out;
