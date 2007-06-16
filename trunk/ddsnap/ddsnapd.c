@@ -2035,7 +2035,7 @@ static int create_snapshot(struct superblock *sb, unsigned snaptag)
 	return -EFULL;
 
 create:
-	trace_on(warn("Create snaptag %u (snapbit %i)", snaptag, i););
+	trace_on(warn("Create snapshot tag = %u, bit = %i)", snaptag, i););
 	snapshot = sb->image.snaplist + sb->image.snapshots++;
 	*snapshot = (struct snapshot){ .tag = snaptag, .bit = i, .ctime = time(NULL) };
 	sb->snapmask |= (1ULL << i);
@@ -2062,7 +2062,7 @@ static void show_snapshots(struct superblock *sb)
 
 /* Lock snapshot reads against origin writes */
 
-static void reply(int sock, struct messagebuf *message)
+static void reply(int sock, struct messagebuf *message) // !!! bad name choice, make this send_reply
 {
 	trace(warn("%x/%u", message->head.code, message->head.length););
 	writepipe(sock, &message->head, message->head.length + sizeof(message->head));
@@ -2761,7 +2761,7 @@ static int incoming(struct superblock *sb, struct client *client)
 			if (message.head.length < sizeof(*body))
 				goto message_too_short;
 
-			trace(printf("origin write query, %u ranges\n", body->count););
+			trace(warn("origin write query, %u ranges", body->count););
 			message.head.code = ORIGIN_WRITE_OK;
 			for (i = 0; i < body->count; i++, p++)
 				for (j = 0, chunk = p->chunk; j < p->chunks; j++, chunk++) {
@@ -3176,56 +3176,22 @@ static int incoming(struct superblock *sb, struct client *client)
 	}
 	case STATUS:
 	{
-		struct status_request request;
 		struct snapshot const *snaplist = sb->image.snaplist;
 		char const *err_msg;
 
-#ifdef DEBUG_ERROR
-		err_msg = "Debug mode to test error messages";
-		goto status_error;
-#endif
-
-		if (message.head.length != sizeof(request)) {
+		if (message.head.length != sizeof(struct status_request)) { // maybe we should allow messages to be long and assume zero filled for upward compatibility?
 			err_msg = "status_request has wrong length";
 			goto status_error;
 		}
 
-		memcpy(&request, message.body, sizeof(request));
-
-		/* allocate reply */
-
-		unsigned num_rows = sb->image.snapshots;
-		unsigned num_columns = num_rows, status_count = sb->image.snapshots;
-		unsigned rowsize = (sizeof(struct snapshot_details) + num_columns * sizeof(chunk_t));
-		unsigned reply_len = sizeof(struct status_reply) + status_count * rowsize;
-		struct status_reply *reply = calloc(reply_len, 1);
-
-		/* calculate the usage statistics */
+		unsigned snapshots = sb->image.snapshots;
+		unsigned reply_len = (unsigned)snapshot_details(NULL, snapshots, snapshots);
+		struct status_reply *reply = calloc(reply_len, 1); // !!! error check?
 
 		uint64_t share_array[MAX_SNAPSHOTS * MAX_SNAPSHOTS];
 		memset(share_array, 0, sizeof(share_array));
 
 		traverse_tree_chunks(sb, calc_sharing, NULL, share_array);
-
-#ifdef DEBUG_STATUS
-		{
-			printf("num_rows=%u num_columns=%u status_count=%u\n", num_rows, num_columns, status_count);
-
-			printf("snapshots:\n");
-			for (int snapslot = 0; snapslot < sb->image.snapshots; snapslot++)
-				printf(" %2u: bit=%d, idtag=%u\n", snapslot, sb->image.snaplist[snapslot].bit, sb->image.snaplist[snapslot].tag);
-			printf("\n");
-
-			for (int row = 0; row < num_rows; row++) {
-				printf("%2d: ", row);
-				for (int col = 0; col < num_columns; col++)
-					printf(" %2llu", share_array[row][col]);
-				printf("\n");
-			}
-			printf("\n");
-		}
-#endif
-
 		reply->ctime = sb->image.create_time;
 		reply->meta.chunksize_bits = sb->image.metadata.allocsize_bits;
 		reply->meta.total = sb->image.metadata.chunks;
@@ -3234,19 +3200,18 @@ static int incoming(struct superblock *sb, struct client *client)
 		reply->store.total = sb->image.snapdata.chunks;
 		reply->store.free = sb->image.snapdata.freechunks;
 		reply->write_density = 0; // !!! think about how to compute this
-		reply->snapshots = status_count;
+		reply->snapshots = snapshots;
 
 		for (int row  = 0; row < sb->image.snapshots; row++) {
-			struct snapshot_details *details = (void *)(reply->details + row * rowsize);
+			struct snapshot_details *details = snapshot_details(reply, row, snapshots);
 
 			details->ctime = snaplist[row].ctime;
 			details->snap = snaplist[row].tag;
-
 			if (is_squashed(&snaplist[row])) {
 				details->sharing[0] = -1;
 				continue;
 			}
-			for (int col = 0; col < num_columns; col++)
+			for (int col = 0; col < snapshots; col++)
 				details->sharing[col] = share_array[snaplist[row].bit * col];
 		}
 

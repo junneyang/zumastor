@@ -54,8 +54,6 @@ static inline int writepipe(int fd, void const *buffer, size_t count)
 
 #define outhead(SOCK, CODE, SIZE) writepipe(SOCK, &(struct head){ CODE, SIZE }, sizeof(struct head) )
 
-typedef unsigned long long chunk_t;
-
 struct server { struct server_head { u8 type; u8 length; } header; char *address; } PACKED;
 
 #ifndef HOST_NAME_MAX
