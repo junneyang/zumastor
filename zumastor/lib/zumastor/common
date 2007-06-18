@@ -94,12 +94,8 @@ function verify_managed_vol {
 	[ $# -eq 1 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
 	local -r vol=$1
 
-	# make sure the name is non-empty, doesn't have slashes, etc.,
-	# then make sure that name is in the database
-	verify_valid_volname $vol || return 1
-	[ -d $VOLUMES/$vol ] && return 0
-
-	return 1
+	# make sure the name is in the database
+	[[ -d $VOLUMES/$vol ]]
 }
 
 function verify_existing_target {
