@@ -1,0 +1,96 @@
+#!/bin/sh
+
+set -x
+
+# Volume group containing the origin and snap store.
+VGNAME=sysvg
+# Names of the origin and snap store volumes.
+ORIGVOLNAME=ztestorig
+SNAPVOLNAME=ztestsnap
+# Name of the Zumastor volume.
+TESTVOL=testvol
+
+usage()
+{
+	echo "Usage: $0 [-n <vgname>] [-o <origin name>] [-s <snapshot name>] [-v <test volume>]" 1>&2
+	echo "Where <vgname> is the name of the volume group to use for the volumes,"
+	echo "<origin name> and <snapshot name> are the names of the origin and"
+	echo "snapshot volumes, respectively, and <test volume> is the name of"
+	echo "the volume that will be used for testing."
+	exit 1
+}
+
+while getopts "n:o:s:v:" option ; do
+	case "$option" in
+	n)	VGNAME="$OPTARG";;
+	o)	ORIGVOLNAME="$OPTARG";;
+	s)	SNAPVOLNAME="$OPTARG";;
+	v)	TESTVOL="$OPTARG";;
+	*)	usage;;
+	esac
+done
+shift $(($OPTIND - 1))
+if [ $# -ge 1 ]; then
+	usage
+fi
+
+#
+# If the tet user doesn't exist, die.
+#
+grep tet /etc/passwd
+if [ $? -ne 0 ]; then
+	exit 5
+fi
+
+#
+# Set up the zumastor volume, create a file system on it and start making
+# snapshots.
+#
+zumastor define volume ${TESTVOL} /dev/${VGNAME}/${ORIGVOLNAME} /dev/${VGNAME}/${SNAPVOLNAME} --initialize
+mkfs.ext3 /dev/mapper/${TESTVOL}
+zumastor define master ${TESTVOL} -h 24 -d 7
+zumastor snapshot ${TESTVOL} hourly
+#
+# Set up TET environment, go there and run it.
+#
+PATH=$PATH:/home/tet/TET/bin
+export TET_ROOT=/home/tet/TET
+cd /home/tet/TET
+outfile=/tmp/tcc-out.$$
+#
+# The tests are subdirectories of TETtests, walk that list.
+#
+for TEST in TETtests/*; do
+	#
+	# Build the test set.
+	#
+	tcc -p -b ${TEST} >${outfile}
+	JOURNAL=`grep 'journal file is' ${outfile} | sed -e "s/^.*file is //"`
+	if [ -z "${JOURNAL}" -o ! -f "${JOURNAL}" ]; then
+		echo "TET test build journal ('${JOURNAL}') not found for test set ${TEST}!" >&2
+		exit 6
+	fi
+	grep "make.*error" ${JOURNAL}
+	if [ $? -eq 0 ]; then
+		echo "Error building TET test set ${TEST}, see ${JOURNAL} for details." >&2
+		exit 6
+	fi
+	#
+	# The build must have succeeded, now run the test set.
+	#
+	tcc -p -e ${TEST} >${outfile}
+	JOURNAL=`grep 'journal file is' ${outfile} | sed -e "s/^.*file is //"`
+	if [ -z "${JOURNAL}" -o ! -f "${JOURNAL}" ]; then
+		echo "TET test execution journal ('${JOURNAL}') not found for test set ${TEST}!" >&2
+		exit 6
+	fi
+	echo "Test set ${TEST} run, see ${JOURNAL} for results."
+	#
+	# Run tetreport (if available) to summarize results.
+	#
+	if [ -x bin/tetreport ]; then
+		tetreport -f ${JOURNAL}
+	fi
+done
+
+exit 0
