@@ -19,8 +19,8 @@ TARGETIMG=${WORKDIR}/target.img
 ZUMSRCIMG=${WORKDIR}/zumsource.img
 ZUMTGTIMG=${WORKDIR}/zumtarget.img
 # Name of target Zumastor support directory.  This must match the name in the
-# preseed file!
-ZUMADIR=zuma
+# preseed file!  Note:  No leading "/"!
+ZUMADIR=zinst
 # Where we put the "zumtest" link so it'll be run at boot.
 ZRUNDIR=/etc/rc2.d
 # Name of the zumastor volume we create for testing.
@@ -130,7 +130,7 @@ cd ${WORKDIR}
 #
 # Create the zumastor install script.
 #
-cat <<EOF_zuminstall.sh >zuminstall.sh
+cat <<EOF_zinstall.sh >zinstall.sh
 #!/bin/sh
 
 cd /${ZUMADIR}
@@ -192,8 +192,8 @@ mkdir /root/.ssh
 cat sourcekey.pub targetkey.pub >/root/.ssh/authorized_keys
 
 exit 0
-EOF_zuminstall.sh
-chmod 755 zuminstall.sh
+EOF_zinstall.sh
+chmod 755 zinstall.sh
 #
 # Create the test startup script.  This script runs at boot, sucks in the
 # zumastor test configuration script and runs it.
@@ -279,7 +279,7 @@ if [ ! -f test.img ]; then
 	#
 	# Append scripts and keys to the tarfile.
 	#
-	tar -r -f ${debtar} zuminstall.sh zstartup.sh sourcekey* targetkey*
+	tar -r -f ${debtar} zinstall.sh zstartup.sh sourcekey* targetkey*
 	#
 	# Create the qemu disk image then boot qemu from our iso to do the
 	# install.
@@ -347,11 +347,11 @@ if [ ! -b /dev/mapper/${TESTVOL}1 ]; then
 	lvcreate --size 2g -n origstore3 sysvg >>/zuma/zt.log 2>&1
 	lvcreate --size 8g -n snapstore3 sysvg >>/zuma/zt.log 2>&1
 	echo -n "	Creating ${TESTVOL}1..."
-	zumastor define volume -i ${TESTVOL}1 /dev/sysvg/origstore1 /dev/sysvg/snapstore1 >>/zuma/zt.log 2>&1
+	zumastor define volume ${TESTVOL}1 /dev/sysvg/origstore1 /dev/sysvg/snapstore1 --initialize >>/zuma/zt.log 2>&1
 	echo -n "${TESTVOL}2..."
-	zumastor define volume -i ${TESTVOL}2 /dev/sysvg/origstore2 /dev/sysvg/snapstore2 >>/zuma/zt.log 2>&1
+	zumastor define volume ${TESTVOL}2 /dev/sysvg/origstore2 /dev/sysvg/snapstore2 --initialize >>/zuma/zt.log 2>&1
 	echo -n "${TESTVOL}3..."
-	zumastor define volume -i ${TESTVOL}3 /dev/sysvg/origstore3 /dev/sysvg/snapstore3 >>/zuma/zt.log 2>&1
+	zumastor define volume ${TESTVOL}3 /dev/sysvg/origstore3 /dev/sysvg/snapstore3 --initialize >>/zuma/zt.log 2>&1
 	echo "done."
 	# Wait for things to calm down a bit.
 	sleep 60
@@ -361,9 +361,9 @@ if [ ! -b /dev/mapper/${TESTVOL}1 ]; then
 		mkfs.ext3 /dev/mapper/${TESTVOL}2 >>/zuma/zt.log 2>&1
 		mkfs.ext3 /dev/mapper/${TESTVOL}3 >>/zuma/zt.log 2>&1
 		echo "done."
-		zumastor define master ${TESTVOL}1 -h 5 >>/zuma/zt.log 2>&1
-		zumastor define master ${TESTVOL}2 -h 5 >>/zuma/zt.log 2>&1
-		zumastor define master ${TESTVOL}3 -h 5 >>/zuma/zt.log 2>&1
+		zumastor define master ${TESTVOL}1 -h 24 -d 7 >>/zuma/zt.log 2>&1
+		zumastor define master ${TESTVOL}2 -h 24 -d 7 >>/zuma/zt.log 2>&1
+		zumastor define master ${TESTVOL}3 -h 24 -d 7 >>/zuma/zt.log 2>&1
 		zumastor define target ${TESTVOL}1 ${ZTARGETNM}:11235 30 >>/zuma/zt.log 2>&1
 		zumastor define target ${TESTVOL}2 ${ZTARGETNM}:11236 30 >>/zuma/zt.log 2>&1
 		zumastor define target ${TESTVOL}3 ${ZTARGETNM}:11237 30 >>/zuma/zt.log 2>&1
@@ -461,7 +461,7 @@ if [ -n "${TESTDIR}" -a -d "${TESTDIR}" ]; then
 fi
 # Wait for the test disk image copy to complete.
 wait
-qemu --pidfile qemu-source.pid -no-reboot -serial pty -m 512 -hdd zstart-source.tar -boot c -net nic,vlan=1,macaddr=00:e0:10:00:00:01 -net socket,vlan=1,listen=:3333 -hdb ${ZUMSRCIMG} ${SOURCEIMG} &
+qemu --pidfile qemu-source.pid -no-reboot -serial tcp::4444,server,nowait -m 512 -hdd zstart-source.tar -boot c -net nic,vlan=1,macaddr=00:e0:10:00:00:01 -net socket,vlan=1,listen=:3333 -hdb ${ZUMSRCIMG} ${SOURCEIMG} &
 # Clone the test disk image for our target instance.
 cp ${TESTIMG} ${TARGETIMG}
 # Wait a minute to let the source instance get going.
