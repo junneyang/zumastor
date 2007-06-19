@@ -519,9 +519,7 @@ function define_target {
 	local -r path=$VOLUMES/$vol/targets/$host
 	local new=0
 
-	if [[ -e $path ]]; then
-		echo "$0: '$host' already set as target, updating configuration"
-	else
+	if [[ ! -e $path ]]; then
 		new=1
 		mkdir $path || return 1
 		mkfifo $path/trigger || return 1
@@ -540,7 +538,7 @@ function define_target {
 			
 	fi
 
-	[[ $new == 1 ]] && zumastor start target $vol $host || return 1
+	[[ $new -ne 1 ]] || zumastor start target $vol $host
 }
 
 function forget_target {
