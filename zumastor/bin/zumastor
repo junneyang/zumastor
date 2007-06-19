@@ -553,12 +553,13 @@ function forget_target {
 	zumastor stop target $vol $host
 
 	# clean up the hold snapshot
-	read snap <$holdfile 2>/dev/null
-	[[ $snap != "" ]] && drop_snapshot $vol $snap
+	[[ -r $holdfile ]] && read snap <$holdfile 2>/dev/null
+	[[ $snap ]] && drop_snapshot $vol $snap
 
 	# clean up the send snapshot
-	read snap <$sendfile 2>/dev/null
-	[[ $snap != "" ]] && drop_snapshot $vol $snap
+	snap=""
+	[[ -r $sendfile ]] && read snap <$sendfile 2>/dev/null
+	[[ $snap ]] && drop_snapshot $vol $snap
 
 	rm -rf $path || return 1
 }
