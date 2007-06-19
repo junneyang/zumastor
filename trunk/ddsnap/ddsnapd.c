@@ -2024,9 +2024,9 @@ static int create_snapshot(struct superblock *sb, unsigned snaptag)
 	if (snapshots >= MAX_SNAPSHOTS)
 		return -EFULL;
 
-	/* check tag not already used */
+	/* tag already used? */
 	if (find_snap(sb, snaptag))
-		return -1;
+		return -EEXIST;
 
 	/* Find available snapshot bit */
 	for (i = 0; i < MAX_SNAPSHOTS; i++)
@@ -2709,6 +2709,15 @@ static struct snapshot *client_snap(struct superblock *sb, struct client *client
 	return snapshot;
 }
 
+void outerror(int sock, unsigned code, int err, char *text)
+{
+	unsigned len = sizeof(struct generic_error) + strlen(text) + 1;
+	if (outhead(sock, code, len) < 0 ||
+		writepipe(sock, &err, sizeof(struct generic_error)) < 0 ||
+		writepipe(sock, text, len - sizeof(struct generic_error)) < 0)
+		warn("unable to send error %u", code);
+}
+
 /*
  * Responses to IO requests take two quite different paths through the
  * machinery:
@@ -2928,19 +2937,19 @@ static int incoming(struct superblock *sb, struct client *client)
 			goto identify_error;
 		}
 
-		if (outbead(sock, IDENTIFY_OK, struct identify_ok, 
+		if (outbead(sock, IDENTIFY_OK, struct identify_ok,
 				 .chunksize_bits = sb->snapdata.asi->allocsize_bits) < 0)
 			warn("unable to reply to IDENTIFY message");
 		break;
 
 	identify_error:
-		error_len = sizeof(struct identify_error) + strlen(err_msg) + 1;	  
+		error_len = sizeof(struct identify_error) + strlen(err_msg) + 1;
 		if (outhead(sock, IDENTIFY_ERROR, error_len) < 0 ||
 			writepipe(sock, &err, sizeof(struct identify_error)) < 0 ||
 			writepipe(sock, err_msg, error_len - sizeof(struct identify_error)) < 0)
 			warn("unable to reply to IDENTIFY message with error");
 		break;
-		
+
 	}
 	case UPLOAD_LOCK:
 		break;
@@ -2950,18 +2959,18 @@ static int incoming(struct superblock *sb, struct client *client)
 
 	case CREATE_SNAPSHOT:
 	{
-#ifdef DEBUG_ERROR
-		goto create_error;
-#endif
-		if (create_snapshot(sb, ((struct create_snapshot *)message.body)->snap) < 0)
-			goto create_error;
+		int err = create_snapshot(sb, ((struct create_snapshot *)message.body)->snap);
+		if (err) {
+			char *error =
+				-err == EFULL ? "too many snapshots" :
+				-err == EEXIST ? "snapshot already exists" :
+				"unknown snapshot create error";
+			outerror(sock, USECOUNT_ERROR, err, error);
+			break;
+		}
 		save_state(sb);
 		if (outbead(sock, CREATE_SNAPSHOT_OK, struct { }) < 0)
 			warn("unable to reply to create snapshot message");
-		break;
-	create_error:
-		if (outbead(sock, CREATE_SNAPSHOT_ERROR, struct { }) < 0) //!!! return message
-			warn("unable to send error for create snapshot message");
 		break;
 	}
 	case DELETE_SNAPSHOT:
@@ -2974,10 +2983,10 @@ static int incoming(struct superblock *sb, struct client *client)
 			goto delete_error;
 		save_state(sb);
 		if (outbead(sock, DELETE_SNAPSHOT_OK, struct { }) < 0)
-			warn("unable to reply to delete snapshot message");
+			warn("unable to reply to delete snapshot message"); // !!! return message
 		break;
 	delete_error:
-		if (outbead(sock, DELETE_SNAPSHOT_ERROR, struct {})  < 0) //!!! return message
+		if (outbead(sock, DELETE_SNAPSHOT_ERROR, struct { })  < 0) // !!! return message
 			warn("unable to send error for delete snapshot message");
 		break;
 	}
@@ -3070,10 +3079,9 @@ static int incoming(struct superblock *sb, struct client *client)
 	case USECOUNT:
 	{
 		u32 tag = ((struct usecount_info *)message.body)->snap;
-		int32_t usecnt_dev = ((struct usecount_info *)message.body)->usecnt_dev;
-		int32_t new_usecnt = 0;
-		unsigned int err_len;
-		uint32_t err = 0;
+		int usecnt_dev = ((struct usecount_info *)message.body)->usecnt_dev;
+		unsigned new_usecnt = 0;
+		int err = 0;
 		char err_msg[MAX_ERRMSG_SIZE];
 
 #ifdef DEBUG_ERROR
@@ -3118,11 +3126,7 @@ static int incoming(struct superblock *sb, struct client *client)
 		break;
 
 	usecnt_error:
-		err_len = sizeof(struct usecount_error) + strlen(err_msg) + 1;
-                if (outhead(sock, USECOUNT_ERROR, err_len) < 0 ||
-		    writepipe(sock, &err, sizeof(struct usecount_error)) < 0 ||
-		    writepipe(sock, err_msg, err_len - sizeof(struct usecount_error)) < 0)
-			warn("unable to reply to USECOUNT message with error");
+		outerror(sock, USECOUNT_ERROR, err, err_msg);
 		break;
 	}
 	case STREAM_CHANGELIST:

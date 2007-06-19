@@ -1565,11 +1565,10 @@ static int usecount(int sock, u32 snaptag, int32_t usecnt_dev)
 		if (head.code != USECOUNT_ERROR) {
 			unknown_message_handler(sock, &head);
 			return 1;
-		}	
-		struct usecount_error *usecnt_err = 
-			(struct usecount_error *)get_message(sock, head.length);
+		}
+		struct generic_error *usecnt_err = (void *)get_message(sock, head.length);
 		warn("snapshot server is unable to set usecount for snapshot %u", snaptag);
-		if (!usecnt_err || head.length == sizeof(struct usecount_error))
+		if (!usecnt_err || head.length == sizeof(struct generic_error))
 			return 1;
 		warn("server reason for usecount failure: %s", usecnt_err->msg);
 		free(usecnt_err);

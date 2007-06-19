@@ -86,7 +86,7 @@ enum csnap_error_codes
 struct protocol_error { uint32_t err; uint32_t culprit; char msg[]; } PACKED;
 struct usecount_info { uint32_t snap; int32_t usecnt_dev; } PACKED;
 struct usecount_ok { uint16_t usecount; } PACKED;
-struct usecount_error { uint32_t err; char msg[]; } PACKED;
+struct generic_error { uint32_t err; char msg[]; } PACKED;
 struct priority_info { uint32_t snap; int8_t prio; } PACKED;
 struct priority_ok { int8_t prio; } PACKED;
 struct priority_error { uint32_t err; char msg[]; } PACKED;
