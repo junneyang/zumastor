@@ -401,8 +401,7 @@ function stop_nag {
 	local -r vol=$1
 
 	pkill -f "ddsnap delta listen /dev/mapper/$vol 0.0.0.0"
-	pkill -f "zumastor start source $vol$" || return 1
-	pkill -f "ddsnap delta listen /dev/mapper/$vol 0.0.0.0" || return 1
+	pkill -f "zumastor start source $vol$"
 	sync
 }
 
@@ -558,7 +557,7 @@ function forget_target {
 
 	# clean up the send snapshot
 	snap=""
-	[[ -r $sendfile ]] && read snap <$sendfile 2>/dev/null
+	[[ -r $sendfile ]] && read -d" " snap <$sendfile 2>/dev/null
 	[[ $snap ]] && drop_snapshot $vol $snap
 
 	rm -rf $path || return 1
