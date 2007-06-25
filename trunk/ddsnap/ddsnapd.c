@@ -1914,8 +1914,6 @@ fail_delete:
  */
 static chunk_t make_unique(struct superblock *sb, chunk_t chunk, int snapbit)
 {
-	unsigned levels = sb->image.etree_levels;
-	struct etree_path path[levels + 1];
 	chunk_t exception = 0;
 	int error;
 	trace(warn("chunk %Lx, snapbit %i", chunk, snapbit););
@@ -1931,6 +1929,8 @@ static chunk_t make_unique(struct superblock *sb, chunk_t chunk, int snapbit)
 			return -1;
 	}
 
+	unsigned levels = sb->image.etree_levels;
+	struct etree_path path[levels + 1];
 	struct buffer *leafbuf = probe(sb, chunk, path);
 	if (!leafbuf) 
 		return -1;
