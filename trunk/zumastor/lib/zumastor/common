@@ -26,6 +26,17 @@ declare -ar KINDS=(hourly daily weekly monthly custom)
 # the other.  We do this rather than trying to resolve hostnames.
 declare -r MYHOSTNAME=`uname -n`
 
+declare yes_to_all
+function prompt_continue {
+	[[ $# -eq 1 ]] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
+	local text=$1 input
+
+	[[ $yes_to_all ]] && return 0
+	read -p "$text [n] " input
+	[[ $input = "y" ]] || [[ $input = "yes" ]] || exit 1
+	return 0
+}
+
 # log <filename> <message>
 # uses global variable pid, sets it if its not set
 # allows setting pid when daemonized
