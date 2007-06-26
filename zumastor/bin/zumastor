@@ -580,13 +580,10 @@ function define_master {
 	[ $# -eq 1 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
 	local -r vol=$1
 	local -r path=$VOLUMES/$vol
-	local conv
 
-	if [ -d $path/source ]; then
-		read -p "$vol is currently a downstream volume, convert to master? [n] " conv
-		[[ $conv == "y" ]] || [[ $conv == "yes" ]] || return 1
-
-		rm -rf $path/source
+	if [[ -d $VOLUMES/$vol/source ]]; then
+		prompt_continue "$vol is currently a downstream volume, convert to master?"
+		rm -rf $VOLUMES/$vol/source
 	fi
 
 	mkdir $path/master || return 1
@@ -631,28 +628,20 @@ function set_source {
 	local -r path=$VOLUMES/$vol
 	local -r mysize=$(ddsnap status $SERVERS/$vol --size) || return 1
 	local -r oldhost=$(cat $path/source/hostname 2>/dev/null)
-	local conv rempath new=yes
+	local size rempath new=yes
 
-	if [ -d $path/master ]; then
-		read -p "volume '$vol' is currently a master, convert to a downstream volume? [n] " conv
-		[[ $conv == "y" ]] || [[ $conv == "yes" ]] || return 1
-
+	if [[ -d $path/master ]]; then
+		prompt_continue "volume '$vol' is currently a master, convert to a downstream volume?"
 		forget_master $vol
 	fi
 
 	rempath=$VOLUMES/$vol/targets/$MYHOSTNAME/trigger
-	#conv=$(run_remote $host "ls $rempath 2>/dev/null") && [[ $conv = $rempath ]] || \
-	#	{ echo "setup '$MYHOSTNAME' as target for volume '$vol' on '$host' first!"; return 1; }
-
-	conv=$(run_remote $host "ddsnap status $SERVERS/$vol --size")
-	[[ $conv -gt $mysize ]] && { echo "upstream volume ($conv) is larger than local ($mysize), cannot set source" ; return 1; }
+	size=$(run_remote $host "ddsnap status $SERVERS/$vol --size")
+	[[ $size -gt $mysize ]] && { echo "upstream volume ($size) is larger than local ($mysize), cannot set source" ; return 1; }
 
 	if [[ -e $path/source ]]; then
+		[[ $oldhost != $MYHOSTNAME ]] && prompt_continue "source already set to '$oldhost', change to '$host'"
 		new=no
-		if [[ $oldhost != $MYHOSTNAME ]]; then
-			read -p "source already set to '$oldhost', change to '$host'? [n] " conv
-			[[ $conv == "y" ]] || [[ $conv == "yes" ]] || return 1
-		fi
 	fi
 
 	[[ $new == "yes" ]] && { mkdir -p $path/source || return 1; }
@@ -867,12 +856,13 @@ define)
 
 		declare name="$0 $1 $2"
 		shift 2
-		args=`getopt -oh:d:w:m:c: -l help,hourly:,daily:,weekly:,monthly:,custom: -n"$name" -- "$@"` || \
+		args=`getopt -oh:d:w:m:c:y -l help,hourly:,daily:,weekly:,monthly:,custom:,yes -n"$name" -- "$@"` || \
 			{ echo "usage: $name <vol> [Options]"; exit 2; }
 
 		eval set -- "$args" # remove getopt quotes and set new arguments
 
-		until [[ $1 = -- ]] ; do
+		until [[ $1 = -- ]]; do
+			kind=
 			case "$1" in
 			--help)
 				echo "usage: $name <vol> [Options]"
@@ -882,12 +872,14 @@ define)
 				echo "  -w, --weekly=N    set weekly snapshot limit"
 				echo "  -m, --monthly=N   set monthly snapshot limit"
 				echo "  -c, --custom=N    set custom snapshot limit"
+				echo "  -y, --yes         answer yes to all prompts"
 				exit;;
 			-h|--hourly) kind=hourly;;
 			-d|--daily) kind=daily;;
 			-w|--weekly) kind=weekly;;
 			-m|--monthly) kind=monthly;;
 			-c|--custom) kind=custom;;
+			-y|--yes) yes_to_all=1; shift 1; continue;;
 			*) echo whoops; exit 9;;
 			esac
 			verify_valid_number $2 || { echo $2 is not a valid $kind limit; exit 1; }
@@ -913,13 +905,29 @@ define)
 
 		exit 0 ;;
 	source)
-		[[ $# -eq 4 ]] || [[ $# -eq 5 ]] || { echo "usage: $0 define source <vol> <host> [period]"; exit 2; }
-		declare vol=$3
-		declare host=$4
-		declare period=$5
+		declare usage="usage: $name <vol> <host> [-p|--period <period>] [-y|--yes]"
+		declare period args name="$0 $1 $2"
+		shift 2
+		args=`getopt -op:y -l help,period:,yes -n"$name" -- "$@"` || \
+			{ echo $usage; exit 2; }
+		eval set -- "$args"  # remove getopt quotes and set new arguments
+		until [[ $1 = -- ]]; do
+			case "$1" in
+			--help) echo $usage; exit;;
+			-p|--period)
+				verify_valid_number $2 || { echo "$name: error '$2' is not a valid period"; exit 3; }
+				period=$2;;
+			-y|--yes) yes_to_all=1;;
+			*) echo whoops2; exit 9;;
+			esac
+			shift 1
+		done
+		shift # remove --
+		[[ $# -eq 2 ]] || { echo $usage; exit 6; }
+		declare vol=$1 host=$2
 
-		verify_managed_vol $vol || { echo "$0: volume '$vol' is not a managed volume"; exit 1; }
-		verify_valid_host $host || { echo "$0: invalid host '$host'"; exit 1; }
+		verify_managed_vol $vol || { echo "$name: volume '$vol' is not a managed volume"; exit 4; }
+		verify_valid_host $host || { echo "$name: invalid host '$host'"; exit 5; }
 
 		set_source $vol $host $period
 		exit $? ;;
