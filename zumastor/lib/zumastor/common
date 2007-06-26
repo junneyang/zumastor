@@ -308,10 +308,7 @@ function set_priority {
 	local -r priority=$3
 	local -r server=${SERVERS}/$vol
 
-	if [[ $id -lt 0 || $id -gt 64 ]]; then
-		echo "invalid snapshot id '$id' for set priority"
-		return 1;
-	fi
+	verify_valid_number $id || { echo "invalid snapshot id $id"; return 1; }
 
 	if [[ $priority -lt -128 || $priority -gt 127 ]]; then
 		echo "refusing to set invalid priority '$priority' for '$vol($id)'"
