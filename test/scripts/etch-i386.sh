@@ -34,6 +34,8 @@ if [ ! -f ${diskimg} ] ; then
   tmpdir=`mktemp -d`
   mkdir ${tmpdir}/initrd
   cp etch.cfg ${tmpdir}/initrd/preseed.cfg
+  cp etch-early.sh ${tmpdir}/initrd/early.sh
+  cp etch-late.sh ${tmpdir}/initrd/late.sh
   passwd=`pwgen 8 1`
   pwhash=`echo ${passwd} | mkpasswd -s --hash=md5`
   cat >>${tmpdir}/initrd/preseed.cfg <<EOF
@@ -41,7 +43,7 @@ d-i     passwd/root-password-crypted    password ${pwhash}
 d-i     passwd/user-password-crypted    password ${pwhash}
 d-i	passwd/user-fullname            string ${USER}
 d-i	passwd/username                 string ${USER}
-d-i	preseed/late_command string mkdir /target/root/.ssh /target/home/${USER}/.ssh ; cp /authorized_keys /target/root/.ssh ; cp /authorized_keys /target/home/${USER}/.ssh/ ; in-target chown -R ${USER}:${USER} /home/${USER} ; in-target apt-get install openssh-server
+# I really don't know why eth0 becomes eth1 on second boot.
 EOF
 
   cat ~/.ssh/*.pub > ${tmpdir}/initrd/authorized_keys
@@ -52,7 +54,6 @@ zcat ${tftpdir}/debian-installer/i386/initrd.gz | cpio -i
 find . -print0 | cpio -0 -o -H newc | gzip -9 > ${tftpdir}/${USER}/debian-installer/i386/initrd.gz
 EOF
   rm -rf ${tmpdir}
-#  cp ${tftpdir}/debian-installer/i386/initrd.gz ${tftpdir}/${USER}/debian-installer/i386/initrd.gz
   chmod ugo+r ${tftpdir}/${USER}/debian-installer/i386/initrd.gz
   
   qemu-img create -f qcow2 ${diskimg} ${size}

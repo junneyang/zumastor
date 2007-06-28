@@ -34,6 +34,8 @@ if [ ! -f ${diskimg} ] ; then
   tmpdir=`mktemp -d`
   mkdir ${tmpdir}/initrd
   cp dapper.cfg ${tmpdir}/initrd/preseed.cfg
+  cp dapper-early.sh ${tmpdir}/initrd/early.sh
+  cp dapper-late.sh ${tmpdir}/initrd/late.sh
   passwd=`pwgen 8 1`
   pwhash=`echo ${passwd} | mkpasswd -s --hash=md5`
   cat >>${tmpdir}/initrd/preseed.cfg <<EOF
@@ -41,7 +43,6 @@ d-i     passwd/root-password-crypted    password ${pwhash}
 d-i     passwd/user-password-crypted    password ${pwhash}
 d-i	passwd/user-fullname            string ${USER}
 d-i	passwd/username                 string ${USER}
-d-i	preseed/late_command string mkdir /root/.ssh /home/${USER}/.ssh ; cp /authorized_keys /target/root/.ssh ; cp /authorized_keys /target/home/${USER}/.ssh/ ; chown -R ${USER}:${USER} /home/${USER}
 EOF
 
   cat ~/.ssh/*.pub > ${tmpdir}/initrd/authorized_keys
