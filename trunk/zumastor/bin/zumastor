@@ -916,7 +916,8 @@ define)
 			--help) echo $usage; exit;;
 			-p|--period)
 				verify_valid_number $2 || { echo "$name: error '$2' is not a valid period"; exit 3; }
-				period=$2;;
+				period=$2
+				shift 1;;
 			-y|--yes) yes_to_all=1;;
 			*) echo whoops2; exit 9;;
 			esac
