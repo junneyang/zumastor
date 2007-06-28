@@ -2960,12 +2960,12 @@ static int incoming(struct superblock *sb, struct client *client)
 	case CREATE_SNAPSHOT:
 	{
 		int err = create_snapshot(sb, ((struct create_snapshot *)message.body)->snap);
-		if (err) {
+		if (err < 0) {
 			char *error =
 				-err == EFULL ? "too many snapshots" :
 				-err == EEXIST ? "snapshot already exists" :
 				"unknown snapshot create error";
-			outerror(sock, USECOUNT_ERROR, err, error);
+			outerror(sock, CREATE_SNAPSHOT_ERROR, err, error);
 			break;
 		}
 		save_state(sb);
