@@ -25,7 +25,7 @@ usage()
 function find_storage_devices() {
 	# Check for mounted or swap devices
 	used_devices=`grep ^/dev /etc/mtab /etc/fstab | awk '{print $1}' | cut -d: -f2 | sort -u`
-	echo $used_devices
+	# echo $used_devices
 
 	# Check for existing physical volumes that are in a volume group
 	existing_pvs=`pvdisplay -c 2>/dev/null | awk -F: '$2 != "" {print $1}'`
@@ -36,17 +36,19 @@ function find_storage_devices() {
 	devices=""
 	# Try well known device names
 	for device in $partitions /dev/sd{a,b,c,d,e,f} /dev/hd{a,b,c,d,e,f,g,h}; do
-		[ -b $device ] && devices="$devices $device"
+		if [ -b $device ]; then
+			devices="$devices $device"
+		fi
 	done
 
 	# Build a list of plausible disk devices
 	usable_devices=""
 	for device in $devices; do
 		if echo $devices | egrep -qw "${device}[0-9]+"; then
-			#echo $device is partitioned, don\'t use it
+			echo $device is partitioned >&2
 			continue
 		elif echo $used_devices $existing_pvs | egrep -qw "$device"; then
-			#echo $device is already used
+			echo $device is already used >&2
 			continue
 		else
 			#echo $device is usable
@@ -55,7 +57,7 @@ function find_storage_devices() {
 	done
 
 	if [ -z "$usable_devices" ]; then
-		echo "No free disk devices found."
+		echo "No free disk devices found." >&2
 		return 1
 	fi
 	echo $usable_devices
@@ -72,7 +74,7 @@ function extend_volume_group() {
 	extended=false
 	for device in $usable_devices; do
 		if pvcreate $device 2>/dev/null && vgextend "$vg_name" $device 2>/dev/null; then
-			echo "Added $device to $vg_name."
+			echo "Added $device to $vg_name." >&2
 			extended=true
 		fi
 	done
@@ -81,7 +83,7 @@ function extend_volume_group() {
 	if $extended; then
 		return 0
 	else
-		echo "Unable to extend $vg_name"
+		echo "Unable to extend $vg_name" >&2
 		return 1
 	fi
 }
@@ -93,10 +95,10 @@ function create_new_vg() {
 		return 1
 	fi
 	for device in $usable_devices; do
-		pvcreate $device 2>/dev/null
+		pvcreate $device >/dev/null 2>&1
 		if [ $? -eq 0 ]; then
-			vgcreate ${vg_name} $device 2>/dev/null
-			echo "Created ${vg_name} with $device."
+			vgcreate ${vg_name} $device >/dev/null 2>&1
+			echo "Created ${vg_name} with $device." >&2
 			return 0
 		fi
 	done
@@ -107,9 +109,9 @@ function clean_ztest_volumes() {
 	vg_name=$1
 	origvol=$2
 	snapvol=$3
-	vgreduce --removemissing ${vg_name} 2>/dev/null
-	lvremove -f /dev/${vg_name}/$origvol 2>/dev/null
-	lvremove -f /dev/${vg_name}/$snapvol 2>/dev/null
+	vgreduce --removemissing ${vg_name} >/dev/null 2>&1
+	lvremove -f /dev/${vg_name}/$origvol >/dev/null 2>&1
+	lvremove -f /dev/${vg_name}/$snapvol >/dev/null 2>&1
 }
 
 function create_ztest_volumes() {
@@ -134,10 +136,10 @@ function create_ztest_volumes() {
 	vgname=${vg_name}
 	vg_name="$2"
 	if [ "${vg_name}" != "${vgname}" ]; then
-		echo "Found VG ${vg_name}, using it rather than ${vgname}."
+		echo "Found VG ${vg_name}, using it rather than ${vgname}." >&2
 	fi
 	if [ "$vg_freespace" -lt "$space_needed" ]; then
-		echo "Not enough space in $vg_name. Attempting to extend it."
+		echo "Not enough space in $vg_name. Attempting to extend it." >&2
 		if extend_volume_group ${vg_name}; then
 			# if volumes were actually added, we'll try again
 			create_ztest_volumes ${vg_name} ${origvol} ${snapvol} ${origsize} ${snapsize}
@@ -146,9 +148,13 @@ function create_ztest_volumes() {
 	fi
 
 	# Create logical volumes
-	lvcreate -L ${origsize}k -n ${origvol} ${vg_name} 2>/dev/null
-	lvcreate -L ${snapsize}k -n ${snapvol} ${vg_name} 2>/dev/null
-	return 0
+	lvcreate -L ${origsize}k -n ${origvol} ${vg_name} >/dev/null 2>&1
+	retval=$?
+	if [ $retval -ne 0 ]; then
+		return $retval
+	fi
+	lvcreate -L ${snapsize}k -n ${snapvol} ${vg_name} >/dev/null 2>&1
+	return $?
 }
 
 while getopts "n:O:S:o:s:" option ; do
@@ -172,9 +178,13 @@ ORIGVOLSIZE=$(( ${ORIGVOLSIZE} * 1024 ))
 SNAPVOLSIZE=$(( ${SNAPVOLSIZE} * 1024 ))
 
 create_ztest_volumes ${VGNAME} ${ORIGVOLNAME} ${SNAPVOLNAME} ${ORIGVOLSIZE} ${SNAPVOLSIZE}
-
+if [ $? -ne 0 ]; then
+	exit 5
+fi
 if [ ! -e /dev/${VGNAME}/${ORIGVOLNAME} -o ! -e /dev/${VGNAME}/${SNAPVOLNAME} ]; then
 	exit 5
 fi
+
+echo /dev/${VGNAME}/${ORIGVOLNAME} /dev/${VGNAME}/${SNAPVOLNAME}
 
 exit 0

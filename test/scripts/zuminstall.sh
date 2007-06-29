@@ -21,9 +21,9 @@ PACKAGEDIR=""
 
 usage()
 {
-	echo "Usage: $0 [-p <path>] [-k <config file>] <hostname/IP address>" 1>&2
-	echo "Where <path> is the directory that contains the Zumastor .deb files"
-	echo "and <config file> is a kernel config file to be used for the build."
+	echo "Usage: $0 [-p <path>] [-k <config file>] <hostname/IP address>" >&2
+	echo "Where <path> is the directory that contains the Zumastor .deb files" >&2
+	echo "and <config file> is a kernel config file to be used for the build." >&2
 	exit 1
 }
 
@@ -39,11 +39,11 @@ update_build()
 		svn checkout http://zumastor.googlecode.com/svn/trunk/ zumastor >> $SVNLOG || exit $?
 	fi
 	if [ ! -f zumastor/build_packages.sh ]; then
-		echo "No build_packages script found!"
+		echo "No build_packages script found!" >&2
 		usage
 	fi
 	if [ ! -f ${CONFIG} ]; then
-		echo "No kernel config file \"${CONFIG}\" found!"
+		echo "No kernel config file \"${CONFIG}\" found!" >&2
 		exit 1
 	fi
 	cd ${CURDIR}
@@ -88,7 +88,7 @@ else
 	# Verify that the package directory actually exists.
 	#
 	if [ ! -d "$PACKAGEDIR" ]; then
-		echo "Package dir ${PACKAGEDIR} doesn't exist!"
+		echo "Package dir ${PACKAGEDIR} doesn't exist!" >&2
 		exit 1
 	fi
 fi
@@ -103,19 +103,19 @@ DDSN=`ls ddsnap*.deb | tail -1`
 ZUMA=`ls zumastor*.deb | tail -1`
 fail=0
 if [ ! -f "${KHDR}" ]; then
-	echo "No kernel-headers package found!"
+	echo "No kernel-headers package found!" >&2
 	fail=1
 fi
 if [ ! -f "${KIMG}" ]; then
-	echo "No kernel-image package found!"
+	echo "No kernel-image package found!" >&2
 	fail=1
 fi
 if [ ! -f "${DDSN}" ]; then
-	echo "No ddsnap package found!"
+	echo "No ddsnap package found!" >&2
 	fail=1
 fi
 if [ ! -f "${ZUMA}" ]; then
-	echo "No zumastor package found!"
+	echo "No zumastor package found!" >&2
 	fail=1
 fi
 PACKAGES="${PACKAGEDIR}/${KHDR} ${PACKAGEDIR}/${KIMG} ${PACKAGEDIR}/${DDSN} ${PACKAGEDIR}/${ZUMA}"
@@ -142,22 +142,22 @@ cd /${ZUMADIR}
 #
 dpkg -i ${KHDR}
 if [ $? -ne 0 ]; then
-	echo "dpkg -i ${KHDR} failed: $?!"
+	echo "dpkg -i ${KHDR} failed: $?!" >&2
 	exit 1
 fi
 dpkg -i ${KIMG}
 if [ $? -ne 0 ]; then
-	echo "dpkg -i ${KIMG} failed: $?!"
+	echo "dpkg -i ${KIMG} failed: $?!" >&2
 	exit 1
 fi
 dpkg -i ${DDSN}
 if [ $? -ne 0 ]; then
-	echo "dpkg -i ${DDSN} failed: $?!"
+	echo "dpkg -i ${DDSN} failed: $?!" >&2
 	exit 1
 fi
 dpkg -i ${ZUMA}
 if [ $? -ne 0 ]; then
-	echo "dpkg -i ${ZUMA} failed: $?!"
+	echo "dpkg -i ${ZUMA} failed: $?!" >&2
 	exit 1
 fi
 #
@@ -191,7 +191,7 @@ do
 	#
 	ssh root@${TARGET} "cat >>~/.ssh/authorized_keys" <~/.ssh/id_rsa.pub
 	if [ $? -ne 0 ]; then
-		echo "\"ssh root@${TARGET}\" failed!"
+		echo "\"ssh root@${TARGET}\" failed!" >&2
 		continue
 	fi
 	#
@@ -199,16 +199,28 @@ do
 	# password or passphrase prompts.
 	#
 	ssh root@${TARGET} "/bin/mkdir -p /${ZUMADIR}"
+	if [ $? -ne 0 ]; then
+		echo "ssh root@${TARGET} (mkdir) failed!" >&2
+		continue
+	fi
 	#
 	# Copy the packages and install script to the target.
 	#
 	scp ${PACKAGES} zinstall.sh root@${TARGET}:/${ZUMADIR}
+	if [ $? -ne 0 ]; then
+		echo "scp root@${TARGET} failed!" >&2
+		continue
+	fi
 	#
 	# Run the install script.  This will install the packages, generate
 	# ssh keys if necessary and reboot the system into the Zumastor
 	# kernel.
 	#
 	ssh root@${TARGET} "cd /${ZUMADIR}; ./zinstall.sh"
+	if [ $? -ne 0 ]; then
+		echo "ssh root@${TARGET} (zinstall) failed!" >&2
+		continue
+	fi
 done
 
 exit 0
