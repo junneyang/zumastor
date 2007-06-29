@@ -10,6 +10,7 @@
 # 2) dpkg -l > PackageList
 #    Copy this file to $BASEDIR/source on your build server.
 
+
 # The Base Directory
 if [ "x${BASEDIR}" = "x" ] ; then
   BASEDIR=/home/${USER}/cd
@@ -49,6 +50,41 @@ CDNAME=test.iso
 USPLASH=""
 
 # ------------ End of modifications.
+
+usage()
+{
+	echo "Usage: $0 [-b <base directory>] [-e <extras directory>] [-i <Ubuntu CD image>]" >&2
+	echo "          [-o <CD name>] [-p <package list>] [-s <seed file>] [-u <usplash image>]" >&2
+	echo "Where <base directory> is the directory where we will build the new CD image and" >&2
+	echo "where by default other directories and files are located (default" >&2
+	echo "${BASEDIR}), <extras directory> is a directory that contains files" >&2
+	echo "to be copied directly to the new CD (default ${EXTRASDIR})," >&2
+	echo "<Ubuntu CD image> is an ISO image for an Ubuntu installation CD, preferably" >&2
+	echo "for a server distribution, <CD name> is the name of the produced CD image" >&2
+	echo "<package list> is a file containing the (possibly massaged) output of dpkg -l" >&2
+	echo "on a running system, <seed file> is the name of a preseed file to preseed the" >&2
+	echo "new installation CD." >&2
+	exit 1
+}
+
+VOLLIST=
+while getopts "b:e:i:o:p:s:u:" option ; do
+	case "$option" in
+	b)	BASEDIR="$OPTARG";;
+	e)	EXTRASDIR="$OPTARG";;
+	i)	CDIMAGE="$OPTARG";;
+	o)	CDNAME="$OPTARG";;
+	p)	PACKAGELIST="$OPTARG";;
+	s)	SEEDFILE="$OPTARG";;
+	u)	USPLASH="$OPTARG";;
+	*)	usage;;
+	esac
+done
+shift $(($OPTIND - 1))
+# No more arguments
+if [ $# -ge 1 ]; then
+	usage
+fi
 
 
 ################## Initial requirements

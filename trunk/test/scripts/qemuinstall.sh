@@ -5,6 +5,8 @@
 #
 # Potentially modifiable parameters.
 #
+# Number of virtual images to create.
+NUMIMAGES=1
 # Working directory, where images and ancillary files live.
 WORKDIR=~/local
 # The CD image to install.
@@ -13,32 +15,61 @@ CDIMAGE=~/cd/test.iso
 ZUMINSTALL=~/zumastor/test/scripts/zuminstall.sh
 # Where the svn output goes.
 SVNLOG=svn.log
+# Suffix of disk image names.
+IMGSUFFIX=.img
 # Name of the main installed Qemu disk image.
-DISKIMG=${WORKDIR}/qimage.img
-# Name of the volume to be used for Zumastor testing.
-ZUMVOLUME=${WORKDIR}/zumavol.img
-# Names of the test origin and snapshop store disk images for the source
-# and target.
-QLIVEIMG=${WORKDIR}/qlive.img
+DISKIMG=${WORKDIR}/qimage${IMGSUFFIX}
+# Prefix of the name of the live image.  The image number is appended to this
+# along with the suffix ".img", e.g. "qlive-1.img".
+QLIVEPREFIX=qlive-
+# Prefix of the volume to be used for Zumastor testing.
+ZUMVOLUME=${WORKDIR}/zumavol-
 # Name of the install directory.  This must match the name in the preseed file!
 QINSTDIR=/zinst
-# Where we put the "zumtest" link so it'll be run at boot.
+# Where we put the "zstartup" link so it'll be run at boot.
 QRUNDIR=/etc/rc2.d
 
+#
+# These are the list of packages upon which we may be dependent if we run
+# Zumastor tests.
+#
+PACKAGEDEPS="tree dmsetup openssh-server make gcc libc6-dev"
+
+#
+# Where we can find the Zumastor package files.
+#
 PACKAGEDIR=""
+
+canonicalize_hostname()
+{
+	oname=$1
+	set `host ${oname} | sed -e 's/\.$//'`
+	if [ "$3" = "not" -a "$4" = "found:" ]; then
+		echo ""
+		return 1
+	fi
+	case "$2" in
+	has)	cname=$1;;
+	domain)	cname=$5;;
+	*)	cname=$oname;;
+	esac
+	echo $cname
+}
 
 usage()
 {
-	echo "Usage: $0 [-p <path>] [-i <image>]" 1>&2
-	echo "Where <path> is the directory that contains the Zumastor .deb files"
-	echo "and <image> is the CD image to install."
+	echo "Usage: $0 [-p <path>] [-i <image>] [-n <number of images>" 1>&2
+	echo "Where <path> is a directory that contains the Zumastor .deb files,"
+	echo "<image> is the CD image from which to install the virtual images and"
+	echo "<number of images> is the number of images to create, by default one."
 	exit 1
 }
 
 PACKAGEDIR=""
-while getopts "i:p:" option ; do
+while getopts "i:n:p:" option ; do
 	case "$option" in
 	i)	CDIMAGE=${OPTARG};;
+	n)	NUMIMAGES=${OPTARG};;
 	p)	PACKAGEDIR="${OPTARG}";;
 	*)	usage;;
 	esac
@@ -48,6 +79,7 @@ if [ $# -ge 1 ]; then
 	usage
 fi
 
+echo "Building ${NUMIMAGES} qemu image(s)..."
 #
 # If the CD image path doesn't start with a "/" then it's relative to
 # the current directory.
@@ -86,6 +118,8 @@ chmod 755 qemu-ifup.sh
 cat <<EOF_zinstall.sh >zinstall.sh
 #!/bin/sh
 
+set -x
+
 cd /${QINSTDIR}
 #
 # Install our test startup script that will run when we reboot.
@@ -94,54 +128,53 @@ cp zstartup.sh /etc/init.d/zstartup
 chmod 755 /etc/init.d/zstartup
 ln -s ../init.d/zstartup ${QRUNDIR}/S99zstartup
 #
-# Install 'tree' dependency as well as openssh-server
+# Install all potential dependencies.
 #
-/usr/bin/apt-get -y install tree
-/usr/bin/apt-get -y install openssh-server
-
+/usr/bin/apt-get -y install ${PACKAGEDEPS}
 #
 # Set up ssh
 #
 mkdir -p /root/.ssh
 cat hostkey.pub >>/root/.ssh/authorized_keys
-
 #
 # Set 'noapic' on the kernel(s) since qemu doesn't have one.
 #
-sed --in-place '/^kernel/s/$/ noapic/' /boot/grub/menu.lst
+sed --in-place '/^kernel/s/$/ noapic/' /boot/grub/menu.lst >/dev/console 2>&1
+#
+# Add extra interfaces to /etc/network/interfaces
+#
+cat <<EOF_network >>/etc/network/interfaces
+auto eth1
+iface eth1 inet dhcp
+auto eth2
+iface eth2 inet dhcp
 
 exit 0
 EOF_zinstall.sh
 chmod 755 zinstall.sh
 #
-# Create the test startup script.  This script runs at boot, sucks in the
-# zumastor test configuration script and runs it.
+# Create the test startup script.  This script runs at boot and performs any
+# necessary post-installation setup, then removes itself.
 #
 cat <<EOF_zstartup >zstartup.sh
 #!/bin/sh
 
-cd /${QINSTDIR}
-
 #
-# Pull in the test configuration script and any tests that might be included.
+# All we do here is send our configured IP address out our console.
 #
-tar xf /dev/hdb
-grep -q eth1 /etc/network/interfaces
-#if [ \$? -ne 0 ]; then
-	#
-	# Configure our network appropriately.
-	#
-#	echo "auto eth1" >>/etc/network/interfaces
-#	echo "iface eth1 inet dhcp" >>/etc/network/interfaces
-#	ifdown eth1 >/dev/null 2>&1
-#	ifup eth1
-#fi
-ifconfig eth0 | grep "inet addr:" >>/dev/ttyS0
+echo "**********************************" >>/dev/ttyS0
+echo "**********************************" >>/dev/ttyS0
+ifconfig eth1 | grep "inet addr:" >>/dev/ttyS0
+echo "**********************************" >>/dev/ttyS0
+echo "**********************************" >>/dev/ttyS0
 echo "**********************************" >>/dev/ttyS0
 
 # Remove the startup script now that it has fulfilled its purpose.
 rm /etc/init.d/zstartup
 rm ${QRUNDIR}/S99zstartup
+
+# Shut the virtual system down so we can do the next one.
+#shutdown -hP now
 
 exit 0
 EOF_zstartup
@@ -152,6 +185,7 @@ zinstar=${WORKDIR}/zinstar-$$.tar
 #
 if [ ! -f ${DISKIMG} ]; then
 	trap "rm -f ${CDIMAGE} ${zinstar} ${DISKIMG}; exit 1" 1 2 3 9
+	echo "Building master..."
 	#
 	# Generate (if necessary) and grab our ssh key to hand to the virtual
 	# machine.
@@ -170,35 +204,67 @@ if [ ! -f ${DISKIMG} ]; then
 	#
 	qemu-img create -f qcow2 ${DISKIMG} 10G
 	qemu -no-reboot -hdb ${zinstar} -cdrom ${CDIMAGE} -boot d ${DISKIMG}
-	
+
 	rm ${zinstar}
 fi
 
 trap - 1 2 3 9
 
-# Clone the test disk image for our live instance.
-cp ${DISKIMG} ${QLIVEIMG} &
-rm -f qemu.pid qemu.cons
-# Prepare the tarfile and start the source instance...
-tar cf zstart.tar zumcfg.sh
-mkfifo qemu.cons
-# Wait for the test disk image copy to complete.
-wait
-echo '********** WARNING:  Running sudo.  You may have to type your password!'
-sudo qemu --pidfile qemu.pid -no-reboot -serial pipe:qemu.cons -m 512 -cdrom ${CDIMAGE} -hdb zstart.tar -boot c -net nic -net tap,ifname=eth1,script=${WORKDIR}/qemu-ifup.sh -net nic,vlan=1,macaddr=00:e0:10:00:00:01 -net socket,vlan=1,listen=:3333 ${QLIVEIMG} &
-QIP=
-while [ -z "${QIP}" ]; do
-	QIP=`dd if=qemu.cons bs=80 count=2 | grep "inet addr:" | tail -1 | sed -e "s/	/ /g" | sed -e 's/^.*addr:\(.*\).*Bcast:.*$/\1/'`
-	echo $QIP
+#
+# Now clone the base image, boot the new image and collect its IP address.
+#
+imagenum=1
+while [ ${imagenum} -le ${NUMIMAGES} ]; do
+	echo "Cloning image ${imagenum}..."
+	# Clone the test disk image for our live instance.
+	thisimg=${WORKDIR}/${QLIVEPREFIX}${imagenum}${IMGSUFFIX}
+	thisname=${QLIVEPREFIX}${imagenum}
+	cp ${DISKIMG} ${thisimg} &
+	rm -f qemu-${imagenum}.pid qemu-${imagenum}.cons
+	mkfifo qemu-${imagenum}.cons
+	# Create the Zumastor test volume.
+	zvol=${ZUMVOLUME}${imagenum}${IMGSUFFIX}
+	qemu-img create -f qcow2 ${zvol} 32G
+	# Wait for the test disk image copy to complete.
+	wait
+	#
+	# Run qemu once to do the post-boot configuration and so we can get
+	# the IP address of the virtual machine.  This one will try to reboot;
+	# the "no-reboot" option means that it just shuts down.
+	#
+	echo '********** WARNING:  Running sudo.  You may have to type your password!'
+	sudo qemu --pidfile qemu-${imagenum}.pid -serial pipe:qemu-${imagenum}.cons -m 512 -hdb ${zvol} -cdrom ${CDIMAGE} -boot c -net nic,macaddr=00:e0:10:00:00:0${imagenum} -net tap,ifname=eth${imagenum},script=${WORKDIR}/qemu-ifup.sh ${thisimg} &
+	QIP=
+	while [ -z "${QIP}" ]; do
+		QIP=`dd if=qemu-${imagenum}.cons bs=80 count=2 | grep "inet addr:" | tail -1 | sed -e "s/	/ /g" | sed -e 's/^.*addr:\(.*\).*Bcast:.*$/\1/'`
+	done
+	echo "${QIP}	${thisname}"
+	sleep 5
+	#sh -x ${ZUMINSTALL} ${PACKAGEDIR} ${QIP}
+#	wait
+#	rm -f qemu-${imagenum}.pid
+	#
+	# Now run qemu for the last time, this time in the background.  We
+	# leave this instance running after we ssh in and set its hostname.
+	#
+#	echo '********** WARNING:  Running sudo (again).  You may have to type your password!'
+#	sudo qemu --pidfile qemu-${imagenum}.pid -serial pipe:qemu-${imagenum}.cons -m 512 -hdb ${zvol} -boot c -net nic,macaddr=00:e0:10:00:00:0${imagenum} -net tap,ifname=eth${imagenum},script=${WORKDIR}/qemu-ifup.sh ${thisimg} &
+#	sleep 60
+	disown -a
+	grep -v ${QIP} ~/.ssh/known_hosts >/tmp/kn.$$
+	cat /tmp/kn.$$ >~/.ssh/known_hosts
+	rm /tmp/kn.$$
+	ssh-keyscan ${QIP}
+	hostname=`canonicalize_hostname ${QIP}`
+	if [ "${hostname}" = "" ]; then
+		hostname=${thisname}
+	fi
+	echo ${hostname} | ssh root@${QIP} "cat >/etc/hostname"
+	echo ${hostname} | ssh root@${QIP} "cat >/etc/hostname"
+	ssh root@${QIP} "hostname ${hostname}"
+	echo "${QIP}	${hostname}" | ssh root@${QIP} "cat >>/etc/hosts"
+	imagenum=`expr ${imagenum} + 1`
 done
-sleep 5
-rm -f qemu.pid
-sh -x ${ZUMINSTALL} ${PACKAGEDIR} ${QIP}
-# Create the Zumastor test volume.
-qemu-img create -f qcow2 ${ZUMVOLUME} 32G
-wait
-echo '********** WARNING:  Running sudo (again).  You may have to type your password!'
-sudo qemu --pidfile qemu.pid -no-reboot -m 512 -hdb ${ZUMVOLUME} -boot c -net nic -net tap,ifname=eth1,script=${WORKDIR}/qemu-ifup.sh -net nic,vlan=1,macaddr=00:e0:10:00:00:01 -net socket,vlan=1,listen=:3333 ${QLIVEIMG} &
 
 exit 0
 

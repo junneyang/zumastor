@@ -2,29 +2,18 @@
 
 set -x
 
-# Volume group containing the origin and snap store.
-VGNAME=sysvg
-# Names of the origin and snap store volumes.
-ORIGVOLNAME=ztestorig
-SNAPVOLNAME=ztestsnap
 # Name of the Zumastor volume.
 TESTVOL=testvol
 
 usage()
 {
-	echo "Usage: $0 [-n <vgname>] [-o <origin name>] [-s <snapshot name>] [-v <test volume>]" 1>&2
-	echo "Where <vgname> is the name of the volume group to use for the volumes,"
-	echo "<origin name> and <snapshot name> are the names of the origin and"
-	echo "snapshot volumes, respectively, and <test volume> is the name of"
-	echo "the volume that will be used for testing."
+	echo "Usage: $0 [-v <test volume>]" 1>&2
+	echo "Where <test volume> is the name of the volume that will be used for testing."
 	exit 1
 }
 
-while getopts "n:o:s:v:" option ; do
+while getopts "v:" option ; do
 	case "$option" in
-	n)	VGNAME="$OPTARG";;
-	o)	ORIGVOLNAME="$OPTARG";;
-	s)	SNAPVOLNAME="$OPTARG";;
 	v)	TESTVOL="$OPTARG";;
 	*)	usage;;
 	esac
@@ -42,14 +31,6 @@ if [ $? -ne 0 ]; then
 	exit 5
 fi
 
-#
-# Set up the zumastor volume, create a file system on it and start making
-# snapshots.
-#
-zumastor define volume ${TESTVOL} /dev/${VGNAME}/${ORIGVOLNAME} /dev/${VGNAME}/${SNAPVOLNAME} --initialize
-mkfs.ext3 /dev/mapper/${TESTVOL}
-zumastor define master ${TESTVOL} -h 24 -d 7
-zumastor snapshot ${TESTVOL} hourly
 #
 # Set up TET environment, go there and run it.
 #
