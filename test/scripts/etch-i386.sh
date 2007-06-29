@@ -11,6 +11,12 @@
 
 set -e
 
+if [ "x$MACFILE" = "x" -o "x$MACADDR" = "x" -o "x$IFACE" = "x" ] ; then
+  echo "Run this script under tunbr"
+  exit 1
+fi
+
+
 # defaults, overridden by /etc/default/testenv if it exists
 # diskimgdir should be local for reasonable performance
 size=2G
@@ -19,8 +25,6 @@ tftpdir=/tftpboot
 qemu_i386=qemu  # could be kvm, kqemu version, etc.  Must be 0.9.0 to net boot.
 
 [ -x /etc/default/testenv ] && . /etc/default/testenv
-
-
 
 if [ ! -e ${diskimgdir}/template ]; then
   mkdir -p ${diskimgdir}/template
@@ -32,7 +36,7 @@ if [ ! -f ${diskimg} ] ; then
 
   # extract and repack the initrd with the desired preseed file
   tmpdir=`mktemp -d`
-  mkdir ${tmpdir}/initrd
+  mkdir -p ${tmpdir}/initrd
   cp etch.cfg ${tmpdir}/initrd/preseed.cfg
   cp etch-early.sh ${tmpdir}/initrd/early.sh
   cp etch-late.sh ${tmpdir}/initrd/late.sh
@@ -48,6 +52,14 @@ EOF
 
   cat ~/.ssh/*.pub > ${tmpdir}/initrd/authorized_keys
   
+  if [ ! -d ${tftpdir}/${USER} ] ; then
+    mkdir -p ${tftpdir}/${USER}
+    sudo chown ${USER} ${tftpdir}/${USER}
+  fi
+  if [ ! -d ${tftpdir}/${USER}/debian-installer/i386 ]; then
+    mkdir -p ${tftpdir}/${USER}/debian-installer/i386
+  fi
+
   fakeroot <<EOF
 cd ${tmpdir}/initrd
 zcat ${tftpdir}/debian-installer/i386/initrd.gz | cpio -i
@@ -78,4 +90,4 @@ else
   echo "image ${diskimg} already exists."
   echo "rm if you wish to recreate it and all of its derivatives."
 fi
-  
+

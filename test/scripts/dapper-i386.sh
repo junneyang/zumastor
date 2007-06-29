@@ -11,6 +11,11 @@
 
 set -e
 
+if [ "x$MACFILE" = "x" -o "x$MACADDR" = "x" -o "x$IFACE" = "x" ] ; then
+  echo "Run this script under tunbr"
+  exit 1
+fi
+
 # defaults, overridden by /etc/default/testenv if it exists
 # diskimgdir should be local for reasonable performance
 size=2G
@@ -77,4 +82,4 @@ else
   echo "image ${diskimg} already exists."
   echo "rm if you wish to recreate it and all of its derivatives."
 fi
-  
+
