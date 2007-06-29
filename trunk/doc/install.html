@@ -171,11 +171,12 @@ RUN STATUS:
     The origin filesystem on /var/run/zumastor/mount/testvol is where
     all testing and fielsystem activity should take place.
 
-    <p>
-      To make an "hourly" snapshot immediately: <br>
-      <code>
-	zumastor snapshot testvol hourly
-      </code>
+<p>
+      To verify snapshots are working correctly:<br>
+      <code> date >> /var/run/zumastor/mount/testvol/testfile </code> <br>
+      <code>zumastor snapshot testvol hourly </code><br>
+      <code> cat /var/run/zumastor/mount/testvol\(1\)/testfile </code><br>
+      <code> cat /var/run/zumastor/mount/testvol/testfile </code>
 
     <h2>Remote replication</h2>
 
@@ -219,7 +220,7 @@ zumastor define volume testvol /dev/sysvg/test /dev/sysvg/test_snap --initialize
     <p>
 root@lab2:~#
       <code>
-	zumastor define source testvol lab1.example.com -p 600
+	zumastor define source testvol lab1.example.com --period 600
       </code>
 
      <p>zumastor status
@@ -279,14 +280,14 @@ RUN STATUS:
 
    <h3>Verify replication</h3>
       root@lab1:~#
-      <code> date > /var/run/zumastor/mount/testvol/testfile </code>
+      <code> date >> /var/run/zumastor/mount/testvol/testfile </code>
 
       <p>
       Wait 30-60 seconds for next replication cycle to complete.
 
     <p>
       root@lab2:~#
-      <code> ls -l /var/run/zumastor/mount/testvol/testfile </code>
+      <code> cat /var/run/zumastor/mount/testvol/testfile </code>
 
     <p>
       You may need to leave the current directory to see incoming
