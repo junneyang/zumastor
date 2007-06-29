@@ -16,5 +16,4 @@ cp /authorized_keys /target/root/.ssh
 
 echo 'Acquire::http::Pipeline-Depth "0";' > /target/etc/apt/apt.conf.d/01cache
 
-apt-install install openssh-server
-  
+apt-install openssh-server
