@@ -25,6 +25,8 @@
 #include <errno.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <strings.h>
+#include <stdlib.h>
 
 extern char **environ;
 
@@ -49,76 +51,301 @@ extern char **environ;
 #define PXELINUXCFGDIR "/tftpboot/pxelinux.cfg/"
 #endif
 
+#ifndef ETHERS
+#define ETHERS "/etc/ethers"
+#endif
+
+#ifndef NEWETHERS
+#define NEWETHERS "/etc/ethers.new"
+#endif
+
+#ifndef IP0
+#define IP0 192
+#endif
+
+#ifndef IP1
+#define IP1 168
+#endif
+
+#ifndef IP2
+#define IP2 23
+#endif
+
+#ifndef IP3LOW
+#define IP3LOW 151 
+#endif
+
+#ifndef IP3HIGH
+#define IP3HIGH 253
+#endif
+
+
+/* delete an entry from ethers (argument 1)
+ * comment matching pid is deleted,
+ * active line matching mac[] and ip[] is deleted.
+ * all other lines are passed through verbatim. */
+void del_from_ethers(const char *ethers, const char *newethers,
+		     const unsigned char mac[6], const unsigned char ip[4]) {
+  int ofd;
+  FILE *ifp;
+  int iip[4], imac[6];
+  int pid, mpid;
+  int n, s, rv;
+  char *buffer=NULL;
+  int bufsize=0;
+
+  ofd = open(newethers, O_WRONLY|O_CREAT|O_EXCL, 0644);
+  if (ofd == -1) {
+    fprintf(stderr, "Unable to open %s exclusively.  "
+	    "Either a rare collision occured and rerunning the previous "
+	    "command will succeed, "
+	    "or the file was abandoned in the middle of an atomic operation "
+	    "and should be deleted.\n",
+	    newethers);
+    return;
+  }
+
+
+  mpid = getpid();
+
+  ifp = fopen(ethers, "r");
+  if (ifp) {
+    while ((s = getline(&buffer, &bufsize, ifp)) > 0) {
+      n=sscanf(buffer, "%x:%x:%x:%x:%x:%x %d.%d.%d.%d",
+	       imac+0, imac+1, imac+2, imac+3, imac+4, imac+5,
+	       iip+0, iip+1, iip+2, iip+3);
+      if (n==10) {
+	if (iip[0]==ip[0] && iip[1]==ip[1] && iip[2]==ip[2] && iip[3]==ip[3] &&
+	    imac[0]==mac[0] && imac[1]==mac[1] && imac[2]==mac[2] &&
+	    imac[3]==mac[3] && imac[4]==mac[4] && imac[5]==mac[5]) {
+	  continue;
+	}
+      }
+
+      n=sscanf(buffer, "# added by tunbr pid %d", &pid);
+      if (n==1 && pid==mpid) {
+	continue;
+      }
+
+      n=write(ofd, buffer, s);
+      if (n != s) {
+	fprintf(stderr, "short write to %s\n", newethers);
+	perror(newethers);
+      }
+    }
+    rv = fclose(ifp);
+    if (rv == -1) {
+      perror(ethers);
+    }
+    free(buffer);
+  }
+
+
+  rv = close(ofd);
+  if (rv == -1) {
+    perror(newethers);
+  }
+
+  rv = rename(newethers, ethers);
+  if (rv == -1) {
+    perror(newethers);
+  }
+}
+
+
+/* add a new entry to ethers (argument 1) in the IPx range
+ * that does not conflict with existing entries.
+ * Returns ip[4] and mac[6] with the free choices found */
+void add_to_ethers(const char *ethers, const char *newethers,
+		   unsigned char mac[6], unsigned char ip[4]) {
+  FILE *ifp;
+  unsigned int iip[4], imac[6];
+  char *buffer=NULL;
+  int bufsize=0;
+  char used[256];
+  int i, s, n;
+  int rfd, ofd;
+  int rv;
+  char outbuf[512];
+
+  bzero(used, sizeof(used));
+
+  rfd = open("/dev/urandom", O_RDONLY);
+  if (rfd) {
+    n = read(rfd, mac, sizeof(mac));
+    if (n != sizeof(mac)) {
+      perror("short read from /dev/urandom");
+      exit(2);
+    }
+    close(rfd);
+    mac[0] &= 0xfe;
+  } else {
+    perror("Unable to open /dev/urandom");
+    exit(3);
+  }
+
+
+  ofd = open(newethers, O_WRONLY|O_CREAT|O_EXCL, 0644);
+  if (ofd == -1) {
+    fprintf(stderr, "Unable to open %s exclusively.  "
+	    "Either a rare collision occured and rerunning the previous "
+	    "command will succeed, "
+	    "or the file was abandoned in the middle of an atomic operation "
+	    "and should be deleted.\n",
+	    newethers);
+    exit(1);
+  }
+
+  rv = fchmod(ofd, 0644);
+  if (rv == -1) {
+    perror(newethers);
+    exit(18);
+  }
+
+  ifp = fopen(ethers, "r");
+  if (ifp) {
+    while ((s = getline(&buffer, &bufsize, ifp)) > 0) {
+      n=write(ofd, buffer, s);
+      if (n != s) {
+	fprintf(stderr, "short write to %s\n", newethers);
+	perror(newethers);
+	exit(4);
+      }
+      n=sscanf(buffer,"%x:%x:%x:%x:%x:%x %d.%d.%d.%d",
+	       imac+0, imac+1, imac+2, imac+3, imac+4, imac+5,
+	       iip+0, iip+1, iip+2, iip+3);
+      if (n==10) {
+	if (iip[0]==IP0 && iip[1]==IP1 && iip[2]==IP2) {
+	  used[iip[3]] = 1;
+	}
+	if (imac[0]==mac[0] && imac[1]==mac[1] && imac[2]==mac[2] &&
+	    imac[3]==mac[3] && imac[4]==mac[4] && imac[5]==mac[5]) {
+	  fprintf(stderr, "Rerun prior command.  A rare MAC address conflict "
+		  "occured.");
+	  exit(5);
+	}
+      }
+    }
+    free(buffer);
+    rv = fclose(ifp);
+    if (rv == -1) {
+      perror(ethers);
+      exit(14);
+    }
+  }
+
+
+  for (i=IP3LOW; i<=IP3HIGH; i++) {
+    if (used[i] == 0) break;
+  }
+  if (i<=IP3HIGH) {
+  } else {
+    fprintf(stderr, "All available IPs in range %d.%d.%d.%d to %d.%d.%d.%d "
+	    "used in /etc/ethers.  Manual cleanup of orphaned addresses "
+	    "without the commented PIDs running may be required.\n");
+  }
+
+  ip[0] = IP0;
+  ip[1] = IP1;
+  ip[2] = IP2;
+  ip[3] = i;
+ 
+  n = snprintf(outbuf, sizeof(outbuf), "# added by tunbr pid %d\n"
+	       "%x:%x:%x:%x:%x:%x %d.%d.%d.%d\n", getpid(),
+	       mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
+	       ip[0], ip[1], ip[2], ip[3]);
+  if (n>0 && n<sizeof(outbuf)) {
+    s = write(ofd, outbuf, n);
+    if (s != n) {
+      perror(newethers);
+      exit(6);
+    }
+  } else {
+    fprintf(stderr, "Unable to write buffer[] with new ethers entry.\n");
+    exit(9);
+  }
+
+  rv = close(ofd);
+  if (rv == -1) {
+    perror(newethers);
+    exit(7);
+  }
+
+  rv = rename(newethers, ethers);
+  if (rv == -1) {
+    perror(newethers);
+    exit(8);
+  }
+}
 
 
 
-
-
-
-
-int main(int argc,char **argv) {
+int main(int argc, char **argv) {
   uid_t uid;
   pid_t child;
   char command[256], device[16];
   int n, tapn, nuid, rv, status;
   FILE *tunctlfp;
   int rfd, mfd;
-  char macfile[256], macaddr[20];
-  unsigned char mac[6];
+  char macfile[256], macaddr[20], ipaddr[16];
+  unsigned char mac[6], ip[4];
   
 
   uid = getuid();
 
-  
-  rfd = open("/dev/urandom", O_RDONLY);
-  if (rfd) {
-    n = read(rfd,mac,sizeof(mac));
-    if (n != sizeof(mac)) {
-      perror("short read");
-      return(-7);
-    }
-    close(rfd);
-    mac[0] &= 0xfe;
+  add_to_ethers(ETHERS, NEWETHERS, mac, ip);
 
-    n = snprintf(macfile, sizeof(macfile),
-		 PXELINUXCFGDIR "01-%02x-%02x-%02x-%02x-%02x-%02x",
-		 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], mac[6]);
-    mfd = creat(macfile,0644);
-    if (mfd == -1) {
-      perror("create macfile");
-      return errno;
-    }
-    rv = close(mfd);
-    if (rv == -1) {
-      perror("close macfile fd");
-      return errno;
-    }
-    rv = chown(macfile, uid, -1);
-    if (rv == -1) {
-      perror("chown");
-      return errno;
-    }
-    rv = chmod(macfile, 0644);
-    if (rv == -1) {
-      perror("chmod");
-      return errno;
-    }
-    rv = setenv("MACFILE", macfile);
-    if (rv == -1) {
-      fprintf(stderr, "insufficient environment space for MACFILE variable\n");
-      return -12;
-    }
 
-    n = snprintf(macaddr, sizeof(macaddr),
-		 "%02x:%02x:%02x:%02x:%02x:%02x",
-		 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], mac[6]);
-    rv = setenv("MACADDR", macaddr);
-    if (rv == -1) {
-      fprintf(stderr, "insufficient environment space for MACADDR variable\n");
-      return -11;
-    }
+  n = snprintf(macfile, sizeof(macfile),
+	       PXELINUXCFGDIR "01-%02x-%02x-%02x-%02x-%02x-%02x",
+	       mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+  mfd = creat(macfile,0644);
+  if (mfd == -1) {
+    perror("mkdir " PXELINUXCFGDIR);
+    goto release_ether;
+  }
+  rv = close(mfd);
+  if (rv == -1) {
+    perror("close macfile fd");
+    goto release_ether;
   }
 
+  rv = chown(macfile, uid, -1);
+  if (rv == -1) {
+    perror("chown");
+    goto release_ether;
+  }
+
+  rv = chmod(macfile, 0644);
+  if (rv == -1) {
+    perror("chmod");
+    return errno;
+  }
+
+  rv = setenv("MACFILE", macfile, 1);
+  if (rv == -1) {
+    fprintf(stderr, "insufficient environment space for MACFILE variable\n");
+    goto release_ether;
+  }
+
+  n = snprintf(macaddr, sizeof(macaddr),
+	       "%02x:%02x:%02x:%02x:%02x:%02x",
+	       mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+  rv = setenv("MACADDR", macaddr, 1);
+  if (rv == -1) {
+    fprintf(stderr, "insufficient environment space for MACADDR variable\n");
+    goto release_ether;
+  }
+
+
+  n = snprintf(ipaddr, sizeof(ipaddr),
+	       "%d.%d.%d.%d",
+	       ip[0], ip[1], ip[2], ip[3]);
+  rv = setenv("IPADDR", ipaddr, 1);
+  if (rv == -1) {
+    fprintf(stderr, "insufficient environment space for IPADDR variable\n");
+    goto release_ether;
+  }
 
   n = snprintf(command, sizeof(command), TUNCTL " -u %d", uid);
 
@@ -126,7 +353,7 @@ int main(int argc,char **argv) {
   tunctlfp = popen(command, "r");
   if (!tunctlfp) {
     perror(command);
-    return errno;
+    goto release_ether;
   }
 
   n = fscanf(tunctlfp, "Set 'tap%d' persistent and owned by uid %d",
@@ -134,12 +361,12 @@ int main(int argc,char **argv) {
   if (n != 2) {
     fprintf(stderr, "'%s' output did not provide a device and uid\n",
 	    command);
-    return -1;
+    goto release_ether;
   }
 
   if (pclose(tunctlfp) == -1) {
     perror("tunctlfp close failed");
-    return errno;
+    goto release_iface;
   }
 
 
@@ -148,11 +375,11 @@ int main(int argc,char **argv) {
   rv = system(command);
   if (rv == -1) {
     perror(TUNCTL);
-    return errno;
+    goto release_iface;
   }
   if (rv) {
     fprintf(stderr, "'%s' returned %d\n", command, rv);
-    return -2;
+    goto release_iface;
   }
 
 
@@ -160,19 +387,19 @@ int main(int argc,char **argv) {
   rv = system(command);
   if (rv == -1) {
     perror(TUNCTL);
-    return errno;
+    goto release_iface;
   }
   if (rv) {
     fprintf(stderr, "'%s' returned %d", command, rv);
-    return -10;
+    goto release_iface;
   }
 
 
   n = snprintf(device, sizeof(device), "tap%d", tapn);
-  rv = setenv("IFACE", device);
+  rv = setenv("IFACE", device, 1);
   if (rv == -1) {
     fprintf(stderr, "insufficient environment space for IFACE variable\n");
-    return -5;
+    goto release_iface;
   }
 
 
@@ -184,20 +411,19 @@ int main(int argc,char **argv) {
     execve(argv[1], argv+2, environ);
   } else {
     perror("fork");
-    return errno;
   }
 
 
+ release_iface:
   n = snprintf(command, sizeof(command), BRCTL " delif " BRIDGE " tap%d",
                tapn);
   rv = system(command);
   if (rv == -1) {
     perror(TUNCTL);
-    return errno;
+    goto release_ether;
   }
   if (rv) {
     fprintf(stderr, "'%s' returned %d\n", command, rv);
-    return -3;
   }
 
 
@@ -205,12 +431,14 @@ int main(int argc,char **argv) {
   rv = system(command);
   if (rv == -1) {
     perror(TUNCTL);
-    return errno;
   }
   if (rv) {
     fprintf(stderr, "'%s' returned %d\n", command, rv);
-    return -4;
   }
+
+
+ release_ether:
+  del_from_ethers(ETHERS, NEWETHERS, mac, ip);
 
 
   rv = unlink(macfile);
