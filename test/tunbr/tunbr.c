@@ -27,6 +27,7 @@
 #include <fcntl.h>
 #include <strings.h>
 #include <stdlib.h>
+#include <time.h>
 
 extern char **environ;
 
@@ -51,12 +52,16 @@ extern char **environ;
 #define PXELINUXCFGDIR "/tftpboot/pxelinux.cfg/"
 #endif
 
-#ifndef ETHERS
-#define ETHERS "/etc/ethers"
+#ifndef LEASES
+#define LEASES "/var/lib/misc/dnsmasq.leases"
 #endif
 
-#ifndef NEWETHERS
-#define NEWETHERS "/etc/ethers.new"
+#ifndef NEWLEASES
+#define NEWLEASES "/var/lib/misc/dnsmasq.leases.new"
+#endif
+
+#ifndef LEASESECONDS
+#define LEASESECONDS 12*3600
 #endif
 
 #ifndef IP0
@@ -79,13 +84,21 @@ extern char **environ;
 #define IP3HIGH 253
 #endif
 
+void stop_dnsmasq() {
+  system("/etc/init.d/dnsmasq stop");
+}
 
-/* delete an entry from ethers (argument 1)
+void start_dnsmasq() {
+  system("/etc/init.d/dnsmasq start");
+}
+
+
+/* delete an entry from dnsmasq.leases (argument 1)
  * comment matching pid is deleted,
  * active line matching mac[] and ip[] is deleted.
  * all other lines are passed through verbatim. */
-void del_from_ethers(const char *ethers, const char *newethers,
-		     const unsigned char mac[6], const unsigned char ip[4]) {
+void del_from_leases(const char *leases, const char *newleases,
+		      const unsigned char mac[6], const unsigned char ip[4]) {
   int ofd;
   FILE *ifp;
   int iip[4], imac[6];
@@ -93,28 +106,31 @@ void del_from_ethers(const char *ethers, const char *newethers,
   int n, s, rv;
   char *buffer=NULL;
   int bufsize=0;
+  time_t t;
 
-  ofd = open(newethers, O_WRONLY|O_CREAT|O_EXCL, 0644);
+  stop_dnsmasq();
+
+  ofd = open(newleases, O_WRONLY|O_CREAT|O_EXCL, 0644);
   if (ofd == -1) {
     fprintf(stderr, "Unable to open %s exclusively.  "
 	    "Either a rare collision occured and rerunning the previous "
 	    "command will succeed, "
 	    "or the file was abandoned in the middle of an atomic operation "
 	    "and should be deleted.\n",
-	    newethers);
+	    newleases);
     return;
   }
 
 
   mpid = getpid();
 
-  ifp = fopen(ethers, "r");
+  ifp = fopen(leases, "r");
   if (ifp) {
     while ((s = getline(&buffer, &bufsize, ifp)) > 0) {
-      n=sscanf(buffer, "%x:%x:%x:%x:%x:%x %d.%d.%d.%d",
+      n=sscanf(buffer, "%ld %x:%x:%x:%x:%x:%x %d.%d.%d.%d", &t,
 	       imac+0, imac+1, imac+2, imac+3, imac+4, imac+5,
 	       iip+0, iip+1, iip+2, iip+3);
-      if (n==10) {
+      if (n==11) {
 	if (iip[0]==ip[0] && iip[1]==ip[1] && iip[2]==ip[2] && iip[3]==ip[3] &&
 	    imac[0]==mac[0] && imac[1]==mac[1] && imac[2]==mac[2] &&
 	    imac[3]==mac[3] && imac[4]==mac[4] && imac[5]==mac[5]) {
@@ -122,6 +138,7 @@ void del_from_ethers(const char *ethers, const char *newethers,
 	}
       }
 
+#if 0
       n=sscanf(buffer, "# added by tunbr pid %d", &pid);
       if (n==1 && pid==mpid) {
 	continue;
@@ -129,13 +146,15 @@ void del_from_ethers(const char *ethers, const char *newethers,
 
       n=write(ofd, buffer, s);
       if (n != s) {
-	fprintf(stderr, "short write to %s\n", newethers);
-	perror(newethers);
+	fprintf(stderr, "short write to %s\n", newleases);
+	perror(newleases);
       }
+#endif
+
     }
     rv = fclose(ifp);
     if (rv == -1) {
-      perror(ethers);
+      perror(leases);
     }
     free(buffer);
   }
@@ -143,20 +162,22 @@ void del_from_ethers(const char *ethers, const char *newethers,
 
   rv = close(ofd);
   if (rv == -1) {
-    perror(newethers);
+    perror(newleases);
   }
 
-  rv = rename(newethers, ethers);
+  rv = rename(newleases, leases);
   if (rv == -1) {
-    perror(newethers);
+    perror(newleases);
   }
+
+  start_dnsmasq();
 }
 
 
-/* add a new entry to ethers (argument 1) in the IPx range
+/* add a new entry to dnsmasq.leases (argument 1) in the IPx range
  * that does not conflict with existing entries.
  * Returns ip[4] and mac[6] with the free choices found */
-void add_to_ethers(const char *ethers, const char *newethers,
+void add_to_leases(const char *leases, const char *newleases,
 		   unsigned char mac[6], unsigned char ip[4]) {
   FILE *ifp;
   unsigned int iip[4], imac[6];
@@ -167,13 +188,16 @@ void add_to_ethers(const char *ethers, const char *newethers,
   int rfd, ofd;
   int rv;
   char outbuf[512];
+  time_t t;
 
   bzero(used, sizeof(used));
 
   rfd = open("/dev/urandom", O_RDONLY);
   if (rfd) {
-    n = read(rfd, mac, sizeof(mac));
-    if (n != sizeof(mac)) {
+    n = read(rfd, mac, 6);
+    fprintf(stderr,"mac %d %x:%x:%x:%x:%x:%x\n", n,
+	    mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    if (n != 6) {
       perror("short read from /dev/urandom");
       exit(2);
     }
@@ -185,33 +209,35 @@ void add_to_ethers(const char *ethers, const char *newethers,
   }
 
 
-  ofd = open(newethers, O_WRONLY|O_CREAT|O_EXCL, 0644);
+  stop_dnsmasq();
+
+  ofd = open(newleases, O_WRONLY|O_CREAT|O_EXCL, 0644);
   if (ofd == -1) {
     fprintf(stderr, "Unable to open %s exclusively.  "
 	    "Either a rare collision occured and rerunning the previous "
 	    "command will succeed, "
 	    "or the file was abandoned in the middle of an atomic operation "
 	    "and should be deleted.\n",
-	    newethers);
+	    newleases);
     exit(1);
   }
 
   rv = fchmod(ofd, 0644);
   if (rv == -1) {
-    perror(newethers);
+    perror(newleases);
     exit(18);
   }
 
-  ifp = fopen(ethers, "r");
+  ifp = fopen(leases, "r");
   if (ifp) {
     while ((s = getline(&buffer, &bufsize, ifp)) > 0) {
       n=write(ofd, buffer, s);
       if (n != s) {
-	fprintf(stderr, "short write to %s\n", newethers);
-	perror(newethers);
+	fprintf(stderr, "short write to %s\n", newleases);
+	perror(newleases);
 	exit(4);
       }
-      n=sscanf(buffer,"%x:%x:%x:%x:%x:%x %d.%d.%d.%d",
+      n=sscanf(buffer,"%ld %x:%x:%x:%x:%x:%x %d.%d.%d.%d", &t,
 	       imac+0, imac+1, imac+2, imac+3, imac+4, imac+5,
 	       iip+0, iip+1, iip+2, iip+3);
       if (n==10) {
@@ -229,7 +255,7 @@ void add_to_ethers(const char *ethers, const char *newethers,
     free(buffer);
     rv = fclose(ifp);
     if (rv == -1) {
-      perror(ethers);
+      perror(leases);
       exit(14);
     }
   }
@@ -241,8 +267,9 @@ void add_to_ethers(const char *ethers, const char *newethers,
   if (i<=IP3HIGH) {
   } else {
     fprintf(stderr, "All available IPs in range %d.%d.%d.%d to %d.%d.%d.%d "
-	    "used in /etc/ethers.  Manual cleanup of orphaned addresses "
-	    "without the commented PIDs running may be required.\n");
+	    "used in %s.  Manual cleanup of orphaned addresses "
+	    "without the commented PIDs running may be required.\n",
+	    leases);
   }
 
   ip[0] = IP0;
@@ -250,14 +277,15 @@ void add_to_ethers(const char *ethers, const char *newethers,
   ip[2] = IP2;
   ip[3] = i;
  
-  n = snprintf(outbuf, sizeof(outbuf), "# added by tunbr pid %d\n"
-	       "%x:%x:%x:%x:%x:%x %d.%d.%d.%d\n", getpid(),
+  n = snprintf(outbuf, sizeof(outbuf),
+	       "%ld %02x:%02x:%02x:%02x:%02x:%02x %d.%d.%d.%d * *\n",
+	       time(NULL) + LEASESECONDS,
 	       mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
 	       ip[0], ip[1], ip[2], ip[3]);
   if (n>0 && n<sizeof(outbuf)) {
     s = write(ofd, outbuf, n);
     if (s != n) {
-      perror(newethers);
+      perror(newleases);
       exit(6);
     }
   } else {
@@ -267,15 +295,17 @@ void add_to_ethers(const char *ethers, const char *newethers,
 
   rv = close(ofd);
   if (rv == -1) {
-    perror(newethers);
+    perror(newleases);
     exit(7);
   }
 
-  rv = rename(newethers, ethers);
+  rv = rename(newleases, leases);
   if (rv == -1) {
-    perror(newethers);
+    perror(newleases);
     exit(8);
   }
+
+  start_dnsmasq();
 }
 
 
@@ -293,8 +323,7 @@ int main(int argc, char **argv) {
 
   uid = getuid();
 
-  add_to_ethers(ETHERS, NEWETHERS, mac, ip);
-
+  add_to_leases(LEASES, NEWLEASES, mac, ip);
 
   n = snprintf(macfile, sizeof(macfile),
 	       PXELINUXCFGDIR "01-%02x-%02x-%02x-%02x-%02x-%02x",
@@ -438,7 +467,7 @@ int main(int argc, char **argv) {
 
 
  release_ether:
-  del_from_ethers(ETHERS, NEWETHERS, mac, ip);
+  del_from_leases(LEASES, NEWLEASES, mac, ip);
 
 
   rv = unlink(macfile);

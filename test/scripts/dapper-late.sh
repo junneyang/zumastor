@@ -17,3 +17,6 @@ cp /authorized_keys /target/root/.ssh
 echo 'Acquire::http::Pipeline-Depth "0";' > /target/etc/apt/apt.conf.d/01cache
 
 apt-install openssh-server
+
+# Since the MAC will change on subsequent copies, get rid of persistence
+rm /target/etc/iftab
