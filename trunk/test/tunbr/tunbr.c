@@ -233,7 +233,7 @@ void add_to_leases(const char *leases, const char *newleases,
       n=sscanf(buffer,"%ld %x:%x:%x:%x:%x:%x %d.%d.%d.%d", &t,
 	       imac+0, imac+1, imac+2, imac+3, imac+4, imac+5,
 	       iip+0, iip+1, iip+2, iip+3);
-      if (n==10) {
+      if (n == 11) {
 	if (iip[0]==IP0 && iip[1]==IP1 && iip[2]==IP2) {
 	  used[iip[3]] = 1;
 	}
@@ -323,7 +323,7 @@ int main(int argc, char **argv) {
 	       mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
   mfd = creat(macfile,0644);
   if (mfd == -1) {
-    perror("mkdir " PXELINUXCFGDIR);
+    perror(macfile);
     goto release_ether;
   }
   rv = close(mfd);
