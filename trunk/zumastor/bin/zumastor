@@ -648,7 +648,7 @@ function set_source {
 	echo $host > $path/source/hostname || return 1
 
 	if [[ -z $period ]]; then
-		rm $path/source/period 2>/dev/null
+		rm $path/source/period 2>/dev/null || return 0
 	else
 		echo $period > $path/source/period || return 1
 	fi
