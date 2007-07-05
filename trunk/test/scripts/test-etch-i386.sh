@@ -32,7 +32,7 @@ fi
 
 
 ${qemu_i386} -snapshot \
-  -net nic,macaddr=${MACADDR},model=ne2k_pci \
+  -net nic,macaddr=${MACADDR} \
   -net tap,ifname=${IFACE},script=no \
   -boot c -hda ${diskimg} -no-reboot
   
