@@ -138,18 +138,11 @@ void del_from_leases(const char *leases, const char *newleases,
 	}
       }
 
-#if 0
-      n=sscanf(buffer, "# added by tunbr pid %d", &pid);
-      if (n==1 && pid==mpid) {
-	continue;
-      }
-
       n=write(ofd, buffer, s);
       if (n != s) {
 	fprintf(stderr, "short write to %s\n", newleases);
 	perror(newleases);
       }
-#endif
 
     }
     rv = fclose(ifp);
