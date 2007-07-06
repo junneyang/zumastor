@@ -188,14 +188,15 @@ void add_to_leases(const char *leases, const char *newleases,
   rfd = open("/dev/urandom", O_RDONLY);
   if (rfd) {
     n = read(rfd, mac, 6);
-    fprintf(stderr,"mac %d %x:%x:%x:%x:%x:%x\n", n,
-	    mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
     if (n != 6) {
       perror("short read from /dev/urandom");
       exit(2);
     }
     close(rfd);
+    /* non-multicast, locally admimistered flags set
+     * http://en.wikipedia.org/wiki/MAC_address */
     mac[0] &= 0xfe;
+    mac[0] |= 0x02;
   } else {
     perror("Unable to open /dev/urandom");
     exit(3);
