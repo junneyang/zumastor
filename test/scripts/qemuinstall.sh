@@ -7,14 +7,12 @@
 #
 # Number of virtual images to create.
 NUMIMAGES=1
+# The number to start with.
+STARTNUM=1
 # Working directory, where images and ancillary files live.
 WORKDIR=~/local
 # The CD image to install.
 CDIMAGE=~/cd/test.iso
-# The real generic zumastor installation script.
-ZUMINSTALL=~/zumastor/test/scripts/zuminstall.sh
-# Where the svn output goes.
-SVNLOG=svn.log
 # Suffix of disk image names.
 IMGSUFFIX=.img
 # Name of the main installed Qemu disk image.
@@ -65,17 +63,19 @@ canonicalize_hostname()
 
 usage()
 {
-	echo "Usage: $0 [-i <image>] [-n <number of images>" 1>&2
+	echo "Usage: $0 [-i <image>] [-n <number of images> -s <start number>" >&2
 	echo "Where <path> is a directory that contains the Zumastor .deb files,"
-	echo "<image> is the CD image from which to install the virtual images and"
-	echo "<number of images> is the number of images to create, by default one."
+	echo "<image> is the CD image from which to install the virtual images," >&2
+	echo "<number of images> is the number of images to create, by default one and" >&2
+	echo "<start number> is the number of the virtual image to begin with." >&2
 	exit 1
 }
 
-while getopts "i:n:" option ; do
+while getopts "i:n:s:" option ; do
 	case "$option" in
 	i)	CDIMAGE=${OPTARG};;
 	n)	NUMIMAGES=${OPTARG};;
+	s)	STARTNUM=${OPTARG};;
 	*)	usage;;
 	esac
 done
@@ -163,13 +163,13 @@ cat <<EOF_zstartup >zstartup.sh
 #
 #echo "**********************************" >>/dev/ttyS0
 #echo "**********************************" >>/dev/ttyS0
-ifconfig -a | grep eth >>/dev/ttyS0
+ifconfig -a | grep eth | cut -f1 -d' ' >>/dev/ttyS0
 sleep 1
-ifconfig -a | grep eth >>/dev/ttyS0
+ifconfig -a | grep eth | cut -f1 -d' ' >>/dev/ttyS0
 sleep 1
-ifconfig -a | grep eth >>/dev/ttyS0
+ifconfig -a | grep eth | cut -f1 -d' ' >>/dev/ttyS0
 sleep 1
-ifconfig -a | grep eth >>/dev/ttyS0
+ifconfig -a | grep eth | cut -f1 -d' ' >>/dev/ttyS0
 #echo "**********************************" >>/dev/ttyS0
 #echo "**********************************" >>/dev/ttyS0
 #echo "**********************************" >>/dev/ttyS0
@@ -256,7 +256,8 @@ export HOSTIP=${IPNET}.${IPSTART}
 #
 # Now clone the base image, boot the new image and collect its IP address.
 #
-imagenum=1
+imagenum=${STARTNUM}
+NUMIMAGES=$(($NUMIMAGES + $STARTNUM - 1))
 while [ ${imagenum} -le ${NUMIMAGES} ]; do
 	echo "Cloning image ${imagenum}..."
 	# Clone the test disk image for our live instance.
@@ -285,8 +286,8 @@ while [ ${imagenum} -le ${NUMIMAGES} ]; do
 		-net nic,macaddr=${QMAC} -net tap,ifname=${QIF},script=${WORKDIR}/qemu-ifup.sh \
 		${thisimg} &
 	IFACE=
-	while [ -z "${IFACE}" ]; do
-		IFACE=`dd if=${qconsole} bs=80 count=2 | grep eth | cut -f1 -d' '`
+	while [ -z "${IFACE}" -o "${IFACE:0:3}" != "eth" ]; do
+		IFACE=`dd if=${qconsole} ibs=1 count=10 | grep eth | head -1 | sed -e 's/\r//'`
 	done
 	echo ${IFACE}
 	sleep 5
@@ -294,6 +295,9 @@ while [ ${imagenum} -le ${NUMIMAGES} ]; do
 	# Try to configure the interface.
 	#
 	echo -ne "\r\r" >>${qconsole}
+	sleep 1
+	echo -ne "\r\r" >>${qconsole}
+	sleep 1
 	echo -n "${QINSTDIR}/znet " >>${qconsole}
 	sleep 1
 	echo -n "${IFACE} ${QIP} ${thisname}" >>${qconsole}
@@ -311,10 +315,12 @@ while [ ${imagenum} -le ${NUMIMAGES} ]; do
 	if [ "${hostname}" = "" ]; then
 		hostname=${thisname}
 	fi
-	echo ${hostname} | ssh root@${QIP} "cat >/etc/hostname"
-	echo ${hostname} | ssh root@${QIP} "cat >/etc/hostname"
-	ssh root@${QIP} "hostname ${hostname}"
-	echo "${QIP}	${hostname}" | ssh root@${QIP} "cat >>/etc/hosts"
+	echo ${hostname} | ssh -o StrictHostKeyChecking=no root@${QIP} "cat >/etc/hostname"
+	echo ${hostname} | ssh -o StrictHostKeyChecking=no root@${QIP} "cat >/etc/hostname"
+	ssh -o StrictHostKeyChecking=no root@${QIP} "hostname ${hostname}"
+	echo "${QIP}	${hostname}" | ssh -o StrictHostKeyChecking=no root@${QIP} "cat >>/etc/hosts"
+	# Now reboot the virtual image and leave it running.
+	ssh -o StrictHostKeyChecking=no root@${QIP} "/sbin/shutdown -r now"
 	imagenum=`expr ${imagenum} + 1`
 done
 
