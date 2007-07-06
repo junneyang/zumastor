@@ -20,16 +20,16 @@ REPLHOST=
 
 usage()
 {
-	echo "Usage: $0 [-s <script directory>] [-t <test directory>] [-d <TET directory>] [-v <test volume>] <hostname> [<replication hostname>]" 1>&2
+	echo "Usage: $0 [-s <script directory>] [-t <test directory>]"
+	echo "    [-d <TET directory>] [-v <test volume>] <hostname> [<replication hostname>]" 1>&2
 	echo "Where"
 	echo "	<script directory> is the directory that contains support scripts,"
 	echo "	<test directory> is the directory that contains the TET-based tests,"
 	echo "	<TET directory> is the directory that contains the TET distribution,"
 	echo "	<test volume> is the name of the volume that will be used for testing,"
 	echo "	<hostname> identifies a master host upon which to install and run the"
-	echo "	tests, and"
-	echo "	<replication hostname> identifies a host that will be used as a"
-	echo "	replication target as the test runs."
+	echo "	tests, and <replication hostname> identifies a host that will be used"
+	echo "	as a replication target as the test runs."
 	exit 1
 }
 
@@ -79,9 +79,9 @@ fi
 #
 # Copy our support scripts over.
 #
-scp ${SCRIPTS}/volcreate.sh root@${TARGET}:/tmp
-scp ${SCRIPTS}/zinstalltet.sh root@${TARGET}:/tmp
-scp ${SCRIPTS}/zruntet.sh root@${TARGET}:/tmp
+scp ${SCRIPTS}/volcreate.sh root@${HOST}:/tmp
+scp ${SCRIPTS}/zinstalltet.sh root@${HOST}:/tmp
+scp ${SCRIPTS}/zruntet.sh root@${HOST}:/tmp
 #
 # Create the test volumes.
 #
@@ -98,7 +98,7 @@ ssh root@${HOST} "zumastor snapshot ${TESTVOL} hourly"
 # Set up replication, if necessary.
 #
 if [ "${REPLHOST}" != "" ]; then
-	sh ${SCRIPTS}/zreplicate.sh -s {SCRIPTS} -v ${TESTVOL} ${HOST} ${REPLHOST}
+	sh ${SCRIPTS}/zreplicate.sh -s ${SCRIPTS} -v ${TESTVOL} ${HOST} ${REPLHOST}
 fi
 #
 # Run the zinstalltet script to install and build TET.

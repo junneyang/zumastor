@@ -178,7 +178,7 @@ fi
 #
 # Everything is installed, reboot the system into the zumastor kernel.
 #
-shutdown -r +1 &
+shutdown -r now &
 exit 0
 EOF_zinstall.sh
 chmod 755 zinstall.sh
@@ -189,7 +189,7 @@ do
 	# Attempt to copy our public key into the authorized_keys file on the
 	# target.  We skip the target if this fails.
 	#
-	ssh root@${TARGET} "cat >>~/.ssh/authorized_keys" <~/.ssh/id_rsa.pub
+	ssh -o StrictHostKeyChecking=no root@${TARGET} "cat >>~/.ssh/authorized_keys" <~/.ssh/id_rsa.pub
 	if [ $? -ne 0 ]; then
 		echo "\"ssh root@${TARGET}\" failed!" >&2
 		continue
@@ -198,7 +198,7 @@ do
 	# Now make the working directory.  Hopefully we won't have any more
 	# password or passphrase prompts.
 	#
-	ssh root@${TARGET} "/bin/mkdir -p /${ZUMADIR}"
+	ssh -o StrictHostKeyChecking=no root@${TARGET} "/bin/mkdir -p /${ZUMADIR}"
 	if [ $? -ne 0 ]; then
 		echo "ssh root@${TARGET} (mkdir) failed!" >&2
 		continue
@@ -206,7 +206,7 @@ do
 	#
 	# Copy the packages and install script to the target.
 	#
-	scp ${PACKAGES} zinstall.sh root@${TARGET}:/${ZUMADIR}
+	scp -l 10240 -C ${PACKAGES} zinstall.sh root@${TARGET}:/${ZUMADIR}
 	if [ $? -ne 0 ]; then
 		echo "scp root@${TARGET} failed!" >&2
 		continue
@@ -216,7 +216,7 @@ do
 	# ssh keys if necessary and reboot the system into the Zumastor
 	# kernel.
 	#
-	ssh root@${TARGET} "cd /${ZUMADIR}; ./zinstall.sh"
+	ssh -o StrictHostKeyChecking=no root@${TARGET} "cd /${ZUMADIR}; ./zinstall.sh"
 	if [ $? -ne 0 ]; then
 		echo "ssh root@${TARGET} (zinstall) failed!" >&2
 		continue
