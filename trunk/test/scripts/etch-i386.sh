@@ -38,6 +38,7 @@ if [ ! -f ${diskimg} ] ; then
   tmpdir=`mktemp -d`
   mkdir -p ${tmpdir}/initrd
   cp etch.cfg ${tmpdir}/initrd/preseed.cfg
+  cp common.cfg ${tmpdir}/initrd/
   cp etch-early.sh ${tmpdir}/initrd/early.sh
   cp etch-late.sh ${tmpdir}/initrd/late.sh
   passwd=`pwgen 8 1`

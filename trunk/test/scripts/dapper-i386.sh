@@ -39,6 +39,7 @@ if [ ! -f ${diskimg} ] ; then
   tmpdir=`mktemp -d`
   mkdir ${tmpdir}/initrd
   cp dapper.cfg ${tmpdir}/initrd/preseed.cfg
+  cp common.cfg ${tmpdir}/initrd/
   cp dapper-early.sh ${tmpdir}/initrd/early.sh
   cp dapper-late.sh ${tmpdir}/initrd/late.sh
   passwd=`pwgen 8 1`
