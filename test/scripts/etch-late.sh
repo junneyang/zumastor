@@ -17,4 +17,10 @@ cp /authorized_keys /target/root/.ssh
 echo 'Acquire::http::Pipeline-Depth "0";' > /target/etc/apt/apt.conf.d/01cache
 
 apt-install openssh-server
- 
+
+cat <<EOF >> /target/etc/network/interfaces
+
+# also try to bring up eth1 due to qemu emulation quirk
+allow-hotplug eth1
+iface eth1 inet dhcp
+EOF

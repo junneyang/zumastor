@@ -9,3 +9,10 @@
 
 set -e
 
+touch /early-running
+
+#mkdir -p /target/etc/apt/
+#echo 'Acquire::http::Pipeline-Depth "0";' >> /target/etc/apt/apt.conf
+
+touch /early-ran
+
