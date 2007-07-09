@@ -429,7 +429,7 @@ function init_define_volume {
 	local -r sock=${SERVERS}/$vol
 	local -r log=$LOGS/$vol/init.log
 
-	mkdir $LOGS/$vol || return 1
+	[[ -d $LOGS/$vol ]] || mkdir $LOGS/$vol || return 1
 	mkdir $path || return 1
 	mkdir $path/device || return 1
 	ln -sf $odev $path/device/origin  || return 1
@@ -474,9 +474,6 @@ function forget_volume {
 	local -r vol=$1
 	local -r path=$VOLUMES/$vol
 	local -r sock=${SERVERS}/$vol
-	local -r agentlog=${LOGS}/$vol/agent.log
-	local -r serverlog=${LOGS}/$vol/server.log
-
 	local id host targets
 
 	for host in $VOLUMES/$vol/targets/*; do
@@ -504,8 +501,6 @@ function forget_volume {
 	rmdir $path/targets
 	rm -rf $path/device
 
-	[[ -d $LOGS/.archived ]] || mkdir $LOGS/.archived
-	mv $LOGS/$vol $LOGS/.archived/`date +%s`.$vol
 	rmdir $path || return 1
 }
 
