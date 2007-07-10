@@ -14,9 +14,11 @@ set -e
 mkdir /target/root/.ssh
 cp /authorized_keys /target/root/.ssh
 
-echo 'Acquire::http::Pipeline-Depth "0";' > /target/etc/apt/apt.conf.d/01cache
+apt-install openssh-server cron postfix dmsetup build-essential
 
-apt-install openssh-server
+in-target apt-get dist-upgrade -y
+
+in-target apt-get clean
 
 # Since the MAC will change on subsequent copies, get rid of persistence
 rm /target/etc/iftab
