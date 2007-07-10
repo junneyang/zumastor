@@ -8,7 +8,7 @@
 # Working directory, where images and ancillary files live.
 WORKDIR=~/local
 # Where the svn output goes.
-SVNLOG=svn.log
+BUILDLOG=build.log
 # Name of target Zumastor support directory.  This must match the name in the
 # preseed file!  Note:  No leading "/"!
 ZUMADIR=zinst
@@ -21,7 +21,7 @@ PACKAGEDIR=""
 
 usage()
 {
-	echo "Usage: $0 [-p <path>] [-k <config file>] <hostname/IP address>" >&2
+	echo "Usage: $0 [-p <path>] [-c <config file>] <hostname/IP address>" >&2
 	echo "Where <path> is the directory that contains the Zumastor .deb files" >&2
 	echo "and <config file> is a kernel config file to be used for the build." >&2
 	exit 1
@@ -34,9 +34,9 @@ update_build()
 	cd ${BUILDDIR}
 	echo -ne Getting zumastor sources from subversion ...
 	if [ -e zumastor -a -f zumastor/build_packages.sh ]; then
-		svn update zumastor >> $SVNLOG || exit $?
+		svn update zumastor >> $BUILDLOG 2>&1 || exit $?
 	else
-		svn checkout http://zumastor.googlecode.com/svn/trunk/ zumastor >> $SVNLOG || exit $?
+		svn checkout http://zumastor.googlecode.com/svn/trunk/ zumastor >> $BUILDLOG 2>&1 || exit $?
 	fi
 	if [ ! -f zumastor/build_packages.sh ]; then
 		echo "No build_packages script found!" >&2
@@ -47,12 +47,12 @@ update_build()
 		exit 1
 	fi
 	cd ${CURDIR}
-	sh ${BUILDDIR}/zumastor/build_packages.sh ${CONFIG}
+	sh ${BUILDDIR}/zumastor/build_packages.sh ${CONFIG} >>${BUILDLOG} 2>&1
 }
 
-while getopts "k:p:" option ; do
+while getopts "c:p:" option ; do
 	case "$option" in
-	k)	CONFIG="$OPTARG";;
+	c)	CONFIG="$OPTARG";;
 	p)	PACKAGEDIR="$OPTARG";;
 	*)	usage;;
 	esac
@@ -81,6 +81,14 @@ fi
 # and use the .deb files so produced.
 #
 if [ "${PACKAGEDIR}" = "" ]; then
+	#
+	# Verify that the config file actually exists.
+	#
+	if [ ! -f "${CONFIG}" ]; then
+		echo "Config file ${CONFIG} doesn't exist!" >&2
+		exit 1
+	fi
+	echo "No package directory, building new packages in ${BUILDDIR} with config file ${CONFIG}." >&2
 	update_build
 	PACKAGEDIR=${BUILDDIR}
 else
@@ -91,6 +99,7 @@ else
 		echo "Package dir ${PACKAGEDIR} doesn't exist!" >&2
 		exit 1
 	fi
+	echo "Using package directory ${PACKAGEDIR}." >&2
 fi
 #
 # Find the Zumastor packages.  We want the latest, therefore the last in the
