@@ -431,7 +431,7 @@ int main(int argc, char **argv) {
     waitpid(child, &status, 0);
   } else if (child==0) {
     setuid(uid);
-    execve(argv[1], argv+2, environ);
+    execve(argv[1], argv+1, environ);
   } else {
     perror("fork");
   }
