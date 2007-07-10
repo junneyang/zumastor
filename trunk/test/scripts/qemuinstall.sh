@@ -64,8 +64,7 @@ canonicalize_hostname()
 usage()
 {
 	echo "Usage: $0 [-i <image>] [-n <number of images> -s <start number>" >&2
-	echo "Where <path> is a directory that contains the Zumastor .deb files,"
-	echo "<image> is the CD image from which to install the virtual images," >&2
+	echo "Where <image> is the CD image from which to install the virtual images," >&2
 	echo "<number of images> is the number of images to create, by default one and" >&2
 	echo "<start number> is the number of the virtual image to begin with." >&2
 	exit 1
@@ -99,8 +98,6 @@ cd ${WORKDIR}
 #
 cat <<EOF_qemu-ifup.sh >qemu-ifup.sh
 #!/bin/sh
-
-set -x
 
 #
 # If the qemu bridge doesn't exist, create it.
@@ -258,6 +255,7 @@ export HOSTIP=${IPNET}.${IPSTART}
 #
 imagenum=${STARTNUM}
 NUMIMAGES=$(($NUMIMAGES + $STARTNUM - 1))
+IPLIST=
 while [ ${imagenum} -le ${NUMIMAGES} ]; do
 	echo "Cloning image ${imagenum}..."
 	# Clone the test disk image for our live instance.
@@ -289,7 +287,7 @@ while [ ${imagenum} -le ${NUMIMAGES} ]; do
 	while [ -z "${IFACE}" -o "${IFACE:0:3}" != "eth" ]; do
 		IFACE=`dd if=${qconsole} ibs=1 count=10 | grep eth | head -1 | sed -e 's/\r//'`
 	done
-	echo ${IFACE}
+	#echo "New interface ${IFACE}"
 	sleep 5
 	#
 	# Try to configure the interface.
@@ -321,8 +319,15 @@ while [ ${imagenum} -le ${NUMIMAGES} ]; do
 	echo "${QIP}	${hostname}" | ssh -o StrictHostKeyChecking=no root@${QIP} "cat >>/etc/hosts"
 	# Now reboot the virtual image and leave it running.
 	ssh -o StrictHostKeyChecking=no root@${QIP} "/sbin/shutdown -r now"
+	if [ "${IPLIST}" = "" ]; then
+		IPLIST=${QIP}
+	else
+		IPLIST="${IPLIST}, ${QIP}";
+	fi
 	imagenum=`expr ${imagenum} + 1`
 done
+
+echo "Created ${NUMIMAGES} images with IP addresses ${IPLIST}" >&2
 
 exit 0
 

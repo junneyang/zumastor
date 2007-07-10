@@ -45,6 +45,7 @@ for TEST in TETtests/*; do
 	#
 	# Build the test set.
 	#
+	echo "Building test set ${TEST}."
 	tcc -p -b ${TEST} >${outfile}
 	JOURNAL=`grep 'journal file is' ${outfile} | sed -e "s/^.*file is //"`
 	if [ -z "${JOURNAL}" -o ! -f "${JOURNAL}" ]; then
@@ -59,6 +60,7 @@ for TEST in TETtests/*; do
 	#
 	# The build must have succeeded, now run the test set.
 	#
+	echo "Running test set ${TEST}."
 	tcc -p -e ${TEST} >${outfile}
 	JOURNAL=`grep 'journal file is' ${outfile} | sed -e "s/^.*file is //"`
 	if [ -z "${JOURNAL}" -o ! -f "${JOURNAL}" ]; then
