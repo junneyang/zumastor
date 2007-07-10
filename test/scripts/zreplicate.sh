@@ -123,13 +123,29 @@ ssh -o StrictHostKeyChecking=no ${SSHUSER}@${TARGET} "ssh -o StrictHostKeyChecki
 # Now replicate the volumes.
 #
 for vol in ${srcvols}; do
-	origdev=`ssh -o StrictHostKeyChecking=no ${SSHUSER}@${SOURCE} "readlink /var/lib/zumastor/volumes/${vol}/device/origin"`
-	snapdev=`ssh -o StrictHostKeyChecking=no ${SSHUSER}@${SOURCE} "readlink /var/lib/zumastor/volumes/${vol}/device/snapstore"`
-	origsize=`ssh -o StrictHostKeyChecking=no ${SSHUSER}@${SOURCE} "fdisk -l ${origdev}" | grep "^Disk .*bytes" | cut -f3 -d\ `
-	snapsize=`ssh -o StrictHostKeyChecking=no ${SSHUSER}@${SOURCE} "fdisk -l ${snapdev}" | grep "^Disk .*bytes" | cut -f3 -d\ `
+	#
+	# If the volume is already replicated to the target, skip it.
+	#
+	ssh ${SSHUSER}@${SOURCE} "/usr/bin/test -d /var/lib/zumastor/volumes/${vol}/${TARGET}"
+	if [ $? -eq 0 ]; then
+		echo "Volume ${vol} already replicated between ${SOURCE} and ${TARGET}." >&2
+		continue
+	fi
+	#
+	# If the target already has a volume with this name, we can do nothing.
+	#
+	ssh root@${HOST} "/usr/bin/test -b /dev/mapper/${vol}"
+	if [ $? -eq 0 ]; then
+		echo "Volume ${vol} already exists on ${TARGET}." >&2
+		continue
+	fi
+	origdev=`ssh ${SSHUSER}@${SOURCE} "readlink /var/lib/zumastor/volumes/${vol}/device/origin"`
+	snapdev=`ssh ${SSHUSER}@${SOURCE} "readlink /var/lib/zumastor/volumes/${vol}/device/snapstore"`
+	origsize=`ssh ${SSHUSER}@${SOURCE} "fdisk -l ${origdev}" | grep "^Disk .*bytes" | cut -f3 -d\ `
+	snapsize=`ssh ${SSHUSER}@${SOURCE} "fdisk -l ${snapdev}" | grep "^Disk .*bytes" | cut -f3 -d\ `
 	volsize=`expr ${origsize} + ${snapsize}`
-	scp -o StrictHostKeyChecking=no ${SCRIPTS}/volcreate.sh ${SSHUSER}@${TARGET}:/tmp
-	voldevs=`ssh -o StrictHostKeyChecking=no ${SSHUSER}@${TARGET} "sh -x /tmp/volcreate.sh -O ${origsize} -S ${snapsize}"`
+	scp ${SCRIPTS}/volcreate.sh ${SSHUSER}@${TARGET}:/tmp
+	voldevs=`ssh ${SSHUSER}@${TARGET} "sh /tmp/volcreate.sh -O ${origsize} -S ${snapsize}"`
 	if [ $? -ne 0 ]; then
 		echo "$0:  Can't create replication volumes."
 		exit 5
@@ -137,8 +153,8 @@ for vol in ${srcvols}; do
 	set ${voldevs}
 	origdev=$1
 	snapdev=$2
-	ssh -o StrictHostKeyChecking=no ${SSHUSER}@${TARGET} "/bin/zumastor define volume ${vol} ${origdev} ${snapdev} --initialize"
-	ssh -o StrictHostKeyChecking=no ${SSHUSER}@${TARGET} "/bin/zumastor define source ${vol} ${SNAME} -p 600"
-	ssh -o StrictHostKeyChecking=no ${SSHUSER}@${SOURCE} "/bin/zumastor define target ${vol} ${TNAME}:11235 30"
-	ssh -o StrictHostKeyChecking=no ${SSHUSER}@${TARGET} "/bin/zumastor start source ${vol}"
+	ssh ${SSHUSER}@${TARGET} "/bin/zumastor define volume ${vol} ${origdev} ${snapdev} --initialize"
+	ssh ${SSHUSER}@${TARGET} "/bin/zumastor define source ${vol} ${SNAME} -p 600"
+	ssh ${SSHUSER}@${SOURCE} "/bin/zumastor define target ${vol} ${TNAME}:11235 30"
+	ssh ${SSHUSER}@${TARGET} "/bin/zumastor start source ${vol}"
 done
