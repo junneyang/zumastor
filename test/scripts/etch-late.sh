@@ -14,9 +14,12 @@ set -e
 mkdir /target/root/.ssh
 cp /authorized_keys /target/root/.ssh
 
-echo 'Acquire::http::Pipeline-Depth "0";' > /target/etc/apt/apt.conf.d/01cache
+in-target apt-get dist-upgrade -y
 
-apt-install openssh-server
+apt-install openssh-server cron dmsetup build-essential \
+  lockfile-progs debconf libterm-readline-gnu-perl
+
+in-target apt-get clean
 
 cat <<EOF >> /target/etc/network/interfaces
 
