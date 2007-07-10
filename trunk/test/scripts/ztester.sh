@@ -83,17 +83,26 @@ scp ${SCRIPTS}/volcreate.sh root@${HOST}:/tmp
 scp ${SCRIPTS}/zinstalltet.sh root@${HOST}:/tmp
 scp ${SCRIPTS}/zruntet.sh root@${HOST}:/tmp
 #
-# Create the test volumes.
+# If the base volumes don't exist, create them.
 #
-ssh root@${HOST} "sh /tmp/volcreate.sh -n ${VGNAME} -o ${ORIGNAME} -s ${SNAPNAME} -O ${ORIGSIZE} -S ${SNAPSIZE}"
+ssh root@${HOST} "/usr/bin/test -b /dev/${VGNAME}/${ORIGNAME}"
+if [ $? -ne 0 ]; then
+	ssh root@${HOST} "sh /tmp/volcreate.sh -n ${VGNAME} -o ${ORIGNAME} -s ${SNAPNAME} -O ${ORIGSIZE} -S ${SNAPSIZE}"
+fi
 #
-# Set up the zumastor volume, create a file system on it and start making
-# snapshots.
+# If the test Zumastor volume isn't already there, create it.
 #
-ssh root@${HOST} "zumastor define volume ${TESTVOL} /dev/${VGNAME}/${ORIGNAME} /dev/${VGNAME}/${SNAPNAME} --initialize"
-ssh root@${HOST} "mkfs.ext3 /dev/mapper/${TESTVOL}"
-ssh root@${HOST} "zumastor define master ${TESTVOL} -h 24 -d 7"
-ssh root@${HOST} "zumastor snapshot ${TESTVOL} hourly"
+ssh root@${HOST} "/usr/bin/test -b /dev/mapper/${TESTVOL}"
+if [ $? -ne 0 ]; then
+	#
+	# Set up the zumastor volume, create a file system on it and start making
+	# snapshots.
+	#
+	ssh root@${HOST} "zumastor define volume ${TESTVOL} /dev/${VGNAME}/${ORIGNAME} /dev/${VGNAME}/${SNAPNAME} --initialize"
+	ssh root@${HOST} "mkfs.ext3 /dev/mapper/${TESTVOL}"
+	ssh root@${HOST} "zumastor define master ${TESTVOL} -h 24 -d 7"
+	ssh root@${HOST} "zumastor snapshot ${TESTVOL} hourly"
+fi
 #
 # Set up replication, if necessary.
 #
