@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/sh -x
 
 # Set up the initial Ubuntu/dapper template image, for use when duplicating
 # the install to multiple server/client tests.  Makes use of tunbr and
@@ -58,7 +58,6 @@ cd ${tmpdir}/initrd
 zcat ${tftpdir}/ubuntu-installer/i386/initrd.gz | cpio -i
 find . -print0 | cpio -0 -o -H newc | gzip -9 > ${tftpdir}/${USER}/ubuntu-installer/i386/initrd.gz
 EOF
-  rm -rf ${tmpdir}
   chmod ugo+r ${tftpdir}/${USER}/ubuntu-installer/i386/initrd.gz
   
   qemu-img create -f qcow2 ${diskimg} ${size}
@@ -77,7 +76,27 @@ EOF
     -net nic,macaddr=${MACADDR} -net tap,ifname=${IFACE},script=no \
     -boot n -hda ${diskimg} -no-reboot
     
+  ${qemu_i386} \
+    -net nic,macaddr=${MACADDR} -net tap,ifname=${IFACE},script=no \
+    -boot c -hda ${diskimg} -no-reboot &
+
+  while ! ssh -o StrictHostKeyChecking=no root@${IPADDR} hostname 2>/dev/null
+  do
+    echo -n .
+    sleep 10
+  done
+
+  # turn the swap partition into LVM2 sysvg
+  scp swap2sysvg.sh root@${IPADDR}:
+  ssh root@${IPADDR} './swap2sysvg.sh && rm swap2sysvg.sh'
+
+  ssh root@${IPADDR} halt
+
+  wait
+
   echo "${diskimg} installed.  root and ${USER} passwords are: ${passwd}"
+
+  rm -rf ${tmpdir}
 
 else
   echo "image ${diskimg} already exists."

@@ -1,7 +1,8 @@
-#!/bin/sh -x
+#!/bin/sh
 
-# Build an image with current or provided zumastor debs installed.
-# Inherit from the dapper template.
+# Build an image with current or provided zumastor debs installed, booted,
+# and ready to immediately run single-node tests.
+# Inherits from the generic dapper template.
 
 # $Id$
 # Copyright 2007 Google Inc.
@@ -56,7 +57,7 @@ ${qemu_i386} \
   -boot c -hda ${zumaimg} -no-reboot &
   
 # wait for ssh to work
-while ! ssh -o StrictHostKeyChecking=no root@${IPADDR} hostname
+while ! ssh -o StrictHostKeyChecking=no root@${IPADDR} hostname 2>/dev/null
 do
   echo -n .
   sleep 10
@@ -81,6 +82,34 @@ EOF
 # halt the new image, and wait for qemu to exit
 ssh root@${IPADDR} halt
 wait
+
+if false
+then
+
+  tmpdir=`mktemp -d`
+
+  mkfifo ${tmpdir}/monitor
+
+  ${qemu_i386} \
+    -net nic,macaddr=${MACADDR} -net tap,ifname=${IFACE},script=no \
+    -boot c -hda ${diskimg} -no-reboot -monitor pipe:${tmpdir}/monitor &
+
+  while ! ssh -o StrictHostKeyChecking=no root@${IPADDR} hostname 2>/dev/null
+  do
+    echo -n .
+    sleep 10
+  done
+
+  cat <<EOF > ${tmpdir}/monitor
+stop
+savevm booted
+quit
+EOF
+
+  wait
+
+  rm -rf ${tmpdir}
+fi
 
 echo "Instance shut down, removing ssh hostkey"
 sed -i /^${IPADDR}\ .*\$/d ~/.ssh/known_hosts
