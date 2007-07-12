@@ -1,6 +1,6 @@
-#!/bin/sh -x
+#!/bin/sh
 
-# Run the dapper/i386 image using -snapshot to verify that it works.
+# Run the zuma/dapper/i386 image using -snapshot to verify that it works.
 # The template should be left unmodified.
 # Any parameters are copied to the destination instance and executed as root
 
@@ -30,7 +30,7 @@ qemu_i386=qemu  # could be kvm, kqemu version, etc.  Must be 0.9.0 to net boot.
 
 
 
-diskimg=${diskimgdir}/template/dapper-i386.img
+diskimg=${diskimgdir}/zuma/dapper-i386.img
 
 if [ ! -f ${diskimg} ] ; then
 
@@ -46,13 +46,12 @@ ${qemu_i386} -snapshot \
   -net tap,ifname=${IFACE},script=no \
   -boot c -hda ${diskimg} -no-reboot &
   
-while ! ssh -o StrictHostKeyChecking=no root@${IPADDR} hostname
+while ! ssh -o StrictHostKeyChecking=no root@${IPADDR} hostname 2>/dev/null
 do
   echo -n .
   sleep 10
 done
 
-date
 
 # execute any parameters here
 if [ "x${execfiles}" != "x" ]
@@ -60,7 +59,12 @@ then
   scp ${execfiles} root@${IPADDR}: </dev/null || true
   for f in ${execfiles}
   do
-    ssh root@${IPADDR} ./${f} || true
+    if ssh root@${IPADDR} ./${f}
+    then
+      echo ${f} ok
+    else
+      echo ${f} not ok
+    fi
   done
 fi
 
