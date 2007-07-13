@@ -1434,10 +1434,11 @@ static void brelse_free(struct superblock *sb, struct buffer *buffer)
 	set_buffer_empty(buffer);
 }
 
+#define MAX_BTREE_DIRTY	10 // max dirty buffers generated in a btree operation, depends on how bushy the btree is
 static void set_buffer_dirty_check(struct buffer *buffer, struct superblock *sb)
 {
 	set_buffer_dirty(buffer);
-	if (dirty_buffer_count >= sb->image.journal_size - 1) {
+	if ((int)dirty_buffer_count >= (int)(sb->image.journal_size - MAX_BTREE_DIRTY)) {
 		if (dirty_buffer_count > sb->image.journal_size)
 			warn("number of dirty buffers %d is too large for journal %u", dirty_buffer_count, sb->image.journal_size);
 		commit_transaction(sb);
@@ -1535,7 +1536,7 @@ keep_prev_node:
 			} while (level < levels - 1);
 		}
 
-		if (dirty_buffer_count >= sb->image.journal_size - 1) {
+		if (dirty_buffer_count >= sb->image.journal_size - MAX_BTREE_DIRTY) {
 			if (dirty_buffer_count > sb->image.journal_size)
 				warn("number of dirty buffers is too large for journal");
 			trace_off(warn("flushing dirty buffers to disk"););
