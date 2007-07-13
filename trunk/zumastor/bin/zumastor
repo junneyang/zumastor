@@ -66,15 +66,12 @@ function new_snapshot {
 	local -r maxfile=$master/schedule/$kind
 	local -r listfile=$master/snapshots/$kind
 	local -a snapshots
-	local max
-	local next
-	local num
-	local oldest
+	local max next num oldest
 
 	log "new '$kind' snapshot requested for volume '$vol'"
 
-	if [[ $kind != "manual" ]]; then
-		[ -f $maxfile ] || { echo "$0: '$maxfile' is missing, doing nothing"; return 1; }
+	if [[ $kind != "/manual" ]]; then
+		[[ -f $maxfile ]] || { echo "$0: '$maxfile' does not exist, doing nothing"; return 1; }
 		read max <$maxfile
 		[ $max ] || { echo "$0: '$maxfile' is empty, doing nothing"; return 1; }
 		[ $max -gt 0 ] || { echo "$0: '$maxfile' contains zero, doing nothing"; return 1; }
@@ -94,7 +91,7 @@ function new_snapshot {
 	create_snapshot $vol $next
 	create_device $vol $next
 
-	[[ $kind == "manual" ]] && return 0
+	[[ $kind == "/manual" ]] && return 0
 	mount_device $vol $next
 
 	if [[ $num -ge $max ]]; then
@@ -292,11 +289,10 @@ function run_master {
 		# this is now overloaded to support two types of requests to create snapshots:
 		# <kind> - which triggers a periodic snapshot (hourly, daily, etc)
 		# target <hostname> - which triggers a snapshot for replication
-		read kind hostname <$fifo || exit 1
-		if [[ $kind = "target" ]]; then
-			new_target_snapshot $vol $hostname >> $log 2>&1
+		read kind <$fifo || exit 1
+		if [[ $kind =~ "^target/" ]]; then
+			new_target_snapshot $vol ${kind/target\//} >> $log 2>&1
 		else
-			find_in $kind ${KINDS[@]} || log "unknown snapshot type '$kind'" $log
 			new_snapshot $vol $kind >> $log 2>&1
 		fi
 	done &
@@ -669,7 +665,7 @@ function trigger_replication {
 
 	if [[ -z $snap ]]; then
 		# no snapshot specified, asking the master for a new one
-		send_to_fifo $master_fifo "target $host" || return 1
+		send_to_fifo $master_fifo "target/$host" || return 1
 	else
 		# increase reference count to pin snapshot
 		#usecount_increment $vol $snap
@@ -761,7 +757,7 @@ function nag_daemon {
 		fi
 
 		log "sending wakeup to $host:" $log
-		run_remote $host "echo target $MYHOSTNAME > $VOLUMES/$vol/master/trigger" >> $log 2>&1
+		run_remote $host "echo target/$MYHOSTNAME > $VOLUMES/$vol/master/trigger" >> $log 2>&1
 		sleep $period
 	done &
 }
@@ -846,40 +842,45 @@ define)
 		define_target $vol $host $port $period
 		exit $? ;;
 	master)
-		declare args arg kind i
+		declare args arg kind count
 		declare -a token value
 
 		declare name="$0 $1 $2"
 		shift 2
-		args=`getopt -oh:d:w:m:c:y -l help,hourly:,daily:,weekly:,monthly:,custom:,yes -n"$name" -- "$@"` || \
+		args=`getopt -oh:d:w:m:c::y -l help,hourly:,daily:,weekly:,monthly:,custom:,yes -n"$name" -- "$@"` || \
 			{ echo "usage: $name <vol> [Options]"; exit 2; }
 
 		eval set -- "$args" # remove getopt quotes and set new arguments
 
 		until [[ $1 = -- ]]; do
 			kind=
+			count=$2
 			case "$1" in
 			--help)
 				echo "usage: $name <vol> [Options]"
 				echo "Options"
-				echo "  -h, --hourly=N    set hourly snapshot limit"
-				echo "  -d, --daily=N     set daily snapshot limit"
-				echo "  -w, --weekly=N    set weekly snapshot limit"
-				echo "  -m, --monthly=N   set monthly snapshot limit"
-				echo "  -c, --custom=N    set custom snapshot limit"
-				echo "  -y, --yes         answer yes to all prompts"
+				echo "  -h, --hourly <n>         set hourly snapshot limit"
+				echo "  -d, --daily <n>          set daily snapshot limit"
+				echo "  -w, --weekly <n>         set weekly snapshot limit"
+				echo "  -m, --monthly <n>        set monthly snapshot limit"
+				echo "  -c, --custom <name>,<n>  set snapshot limit for custom rotation named <name>"
+				echo "  -y, --yes                answer yes to all prompts"
 				exit;;
 			-h|--hourly) kind=hourly;;
 			-d|--daily) kind=daily;;
 			-w|--weekly) kind=weekly;;
 			-m|--monthly) kind=monthly;;
-			-c|--custom) kind=custom;;
+			-c|--custom) kind=${count/,*/}
+				find_in $kind hourly daily weekly monthly /manual && { echo "illegal custom snapshot rotation '$kind'"; exit 1; }
+				verify_valid_volname $kind || { echo "$0: invalid custom rotation name '$kind'"; exit 1; }
+				count=${count/*,/};;
 			-y|--yes) yes_to_all=1; shift 1; continue;;
 			*) echo whoops; exit 9;;
 			esac
-			verify_valid_number $2 || { echo $2 is not a valid $kind limit; exit 1; }
+			verify_valid_number $count || { echo $count is not a valid $kind limit; exit 1; }
+			find_in $kind ${token[@]} && { echo "duplicate rotation '$kind'"; exit 1; }
 			token+=($kind)
-			value+=($2)
+			value+=($count)
 			shift 2
 		done
 
@@ -1052,12 +1053,13 @@ snapshot)
 	[[ $# -eq 2 ]] || [[ $# -eq 3 ]] || { echo "usage: $0 snapshot <vol> [kind]"; exit 2; }
 	declare vol=$2
 	declare kind=$3
+	declare maxfile=$VOLUMES/$vol/master/schedule/$kind
 
 	verify_managed_vol $vol || { echo "$0: volume '$vol' is not a managed volume"; exit 1; }
 	if [[ $# -eq 3 ]]; then
-		find_in $kind ${KINDS[@]} || { echo "$0: unknown snapshot type '$kind'"; exit 1; }
+		[[ -e $maxfile ]] || { echo "$0: unknown snapshot rotation '$kind'"; exit 1; }
 	else
-		kind="manual"
+		kind="/manual"
 	fi
 	
 	trigger_snapshot $vol $kind
