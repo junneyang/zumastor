@@ -19,8 +19,6 @@ declare -r CRONS=$RUNPATH/cron
 declare -r DEFAULT_PORT=$(cat $CONFIG/defaultport)
 declare -r SSH_COMMAND=$(cat $CONFIG/ssh_command)
 
-declare -ar KINDS=(hourly daily weekly monthly custom)
-
 # FIXME TODO - this is where we decide the hostname must be the fqdn of the
 # machine.  This has to be consistent so one machine can identify itself to
 # the other.  We do this rather than trying to resolve hostnames.
@@ -55,9 +53,7 @@ function find_in {
 	local -ra array=(${@:2})
 
 	for memb in ${array[@]}; do
-		if [ X$memb = X$item ]; then
-			return 0
-		fi
+		[[ $memb = $item ]] && return 0
 	done
 
 	return 1
@@ -284,12 +280,9 @@ function remove_device {
 function get_managed_snapshots {
 	[ $# -eq 1 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
 	local -r vol=$1
-	local kind snappath snapshots snap
+	local snappath snap
 
-	for kind in ${KINDS[@]}; do
-		snappath=$VOLUMES/$vol/master/snapshots/$kind
-		[[ -e $snappath ]] && cat $snappath # !!! find a better way
-	done
+	cat $VOLUMES/$vol/master/snapshots/* 2>/dev/null
 
 	for snappath in $VOLUMES/$vol/targets/*/{hold,send} $VOLUMES/$vol/source/{hold,send}; do
 		[[ -e $snappath ]] && { read -d" " snap <$snappath; echo $snap; }
