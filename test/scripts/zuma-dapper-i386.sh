@@ -65,9 +65,9 @@ done
 
 date
 
-# copy the debs that were built in the copy level directory
+# copy the debs that were built in the build directory
 # onto the new zuma template instance
-scp ../../*.deb root@${IPADDR}:
+scp ../../build/*.deb root@${IPADDR}:
 
 # install the copied debs in the correct order
 ssh root@${IPADDR} <<EOF

@@ -46,7 +46,7 @@ ${qemu_i386} -snapshot \
   -net tap,ifname=${IFACE},script=no \
   -boot c -hda ${diskimg} -no-reboot &
   
-while ! ssh -o StrictHostKeyChecking=no root@${IPADDR} hostname
+while ! ssh -o StrictHostKeyChecking=no root@${IPADDR} hostname 2>/dev/null
 do
   echo -n .
   sleep 10
