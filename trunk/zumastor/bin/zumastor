@@ -373,7 +373,7 @@ function run_target {
 			fi
 			# background this so the master and target daemons can't both block
 			log "scheduling replication cycle in ${delay}s" $log
-			zumastor replicate $vol $host --delay $delay &
+			(zumastor replicate $vol $host --delay $delay &)
 		fi
 	done &
 }
@@ -1152,6 +1152,7 @@ receive)
 	declare port=$4
 	declare snap=$5
 	declare holdfile=$VOLUMES/$vol/source/hold
+	declare progressfile=$VOLUMES/$vol/source/apply
 	declare log=${LOGS}/$vol/delta.log
 	declare hold
 
@@ -1172,7 +1173,7 @@ receive)
 		# the request came from, in the future, to avoid doing something
 		# wrong, such as replicatin from 2 hosts, check the $SSH_CLIENT
 		# environment variable
-		ddsnap delta listen /dev/mapper/$vol 0.0.0.0:$port -l $log
+		ddsnap delta listen /dev/mapper/$vol 0.0.0.0:$port -l $log -o $progressfile
 		if [[ $? -ne 0 ]]; then
 			log "failed to start listen" $log
 			echo "failed to start listen"
