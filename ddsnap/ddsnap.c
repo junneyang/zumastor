@@ -635,6 +635,39 @@ static char *malloc_snapshot_name(const char *devstem, u32 id)
 	return snapshot_name;
 }
 
+int generate_progress_file(const char *progress_file, char **tmpfilename)
+{
+	char *progress_tmpfile;
+	int progress_len = strlen(progress_file);
+	if (!(progress_tmpfile = malloc(progress_len + 5))) {
+		warn("unable to allocate progress tempfile name");
+		return -1;
+	}
+	strncpy(progress_tmpfile, progress_file, progress_len);
+	*tmpfilename = progress_tmpfile;
+	return 0;
+}
+
+int write_progress(const char *progress_file, const char *progress_tmpfile, u64 chunk_num, u64 chunk_count, u64 extent_addr, int tgt_snap)
+{
+	FILE *progress_fs;
+	if ((progress_fs = fopen(progress_tmpfile, "w")) == NULL) {
+		warn("unable to open progress temp file %s: %s", progress_tmpfile, strerror(errno));
+		return -1;
+	}
+	if (fprintf(progress_fs, "%i %Lu/%Lu %Lu\n", tgt_snap, chunk_num, chunk_count, extent_addr) < 0) {
+		warn("unable write to progress temp file %s: %s", progress_tmpfile, strerror(errno));
+		fclose(progress_fs);
+		return -1;
+	}
+	fclose(progress_fs);
+	if (rename(progress_tmpfile, progress_file) < 0) {
+		warn("unable to rename progress file: %s", strerror(errno));
+		return -1;
+	}
+	return 0;
+}
+
 static int generate_delta_extents(u32 mode, int level, struct change_list *cl, int deltafile, char const *devstem, int src_snap, int tgt_snap, char const *progress_file)
 {
 	int fullvolume = (src_snap == -1);
@@ -673,15 +706,8 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 	trace_off(printf("level: %d, chunksize bits: %u, chunk_count: "U64FMT"\n", level, cl->chunksize_bits, cl->count););
 	trace_off(printf("starting delta generation, mode %u, chunksize %u\n", mode, chunk_size););
 
-	if (progress_file) {
-		int progress_len = strlen(progress_file);
-		if (!(progress_tmpfile = malloc(progress_len + 5))) {
-			warn("unable to allocate progress tempfile name");
-			goto out;
-		}
-		strncpy(progress_tmpfile, progress_file, progress_len);
-		strcpy(progress_tmpfile + progress_len, ".tmp");
-	}
+	if (progress_file && generate_progress_file(progress_file, &progress_tmpfile))
+		goto out;
 
 	int current_time, last_update = 0, start_time = now();
 
@@ -758,24 +784,12 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 		}
 		bytes_sent += deh.extents_delta_length + sizeof(deh);
 
-		if (progress_file && (((current_time = now()) - last_update) > 0)) {
-			FILE *progress_fs;
-			if ((progress_fs = fopen(progress_tmpfile, "w")) == NULL) {
-				warn("unable to open progress temp file %s: %s", progress_tmpfile, strerror(errno));
+		if (progress_file && ((((current_time = now()) - last_update) > 0) || (chunk_num == cl->count))) {
+			if (write_progress(progress_file, progress_tmpfile, chunk_num, cl->count, extent_addr, tgt_snap) < 0)
 				goto out;
-			}
-			if (fprintf(progress_fs, "%i %Lu/%Lu %Lu\n", tgt_snap, chunk_num, cl->count, extent_addr) < 0) {
-				warn("unable write to progress temp file %s: %s", progress_tmpfile, strerror(errno));
-				fclose(progress_fs);
-				goto out;
-			}
-			fclose(progress_fs);
-			if (rename(progress_tmpfile, progress_file) < 0) {
-				warn("unable to rename progress file: %s", strerror(errno));
-				goto out;
-			}
 			last_update = current_time;
 		}
+
 		chunk_num = chunk_num + num_of_chunks;
 	}
 
@@ -1076,7 +1090,7 @@ out:
 	return err;
 }
 
-static int apply_delta_extents(int deltafile, u32 chunk_size, u64 chunk_count, char const *dev1name, char const *dev2name)
+static int apply_delta_extents(int deltafile, u32 chunk_size, u64 chunk_count, char const *dev1name, char const *dev2name, char const *progress_file, int tgt_snap)
 {
 	int fullvolume = !dev1name;
 	int snapdev1, snapdev2;
@@ -1086,33 +1100,42 @@ static int apply_delta_extents(int deltafile, u32 chunk_size, u64 chunk_count, c
 	dev1name = dev2name;
 
 	/* if an extent is being applied */
-	if (!fullvolume) {
-		snapdev1 = open(dev1name, O_RDONLY);
-		if (snapdev1 < 0) {
-			err = -errno;
-			goto apply_open1_error;
-		}
+	if (!fullvolume && ((snapdev1 = open(dev1name, O_RDONLY)) < 0)) {
+		warn("could not open snapdev file \"%s\" for reading: %s.", dev1name, strerror(-err));
+		return -errno;
 	}
 
-	snapdev2 = open(dev2name, O_WRONLY);
-	if (snapdev2 < 0) {
-		err = -errno;
-		goto apply_open2_error;
+	if ((snapdev2 = open(dev2name, O_WRONLY)) < 0) {
+		warn("could not open snapdev file \"%s\" for writing: %s.", dev2name, strerror(-err));
+		if (!fullvolume)
+			close(snapdev1);
+		return -errno;
+	}
+
+	char *progress_tmpfile = NULL;
+	if (progress_file && generate_progress_file(progress_file, &progress_tmpfile))
+		goto out;
+
+	unsigned char *updated=NULL, *extent_data=NULL, *delta_data=NULL, *comp_delta=NULL;
+	char *up_extent1=NULL, *up_extent2=NULL;
+
+	if (!(updated = malloc(MAX_MEM_SIZE)) || !(extent_data = malloc(MAX_MEM_SIZE)) \
+		|| !(delta_data = malloc(MAX_MEM_SIZE)) || !(comp_delta = malloc(MAX_MEM_SIZE)) \
+		|| !(up_extent1 = malloc(MAX_MEM_SIZE)) || !(up_extent2 = malloc(MAX_MEM_SIZE))) {
+		warn("memory allocation failed: %s", strerror(errno));
+		err = -ENOMEM;
+		goto out;
 	}
 
 	struct delta_extent_header deh;
 	u64 uncomp_size, extent_size;
 	u64 extent_addr, chunk_num;
+	int current_time, last_update = 0;
 
-	unsigned char *updated     = malloc(MAX_MEM_SIZE);
-	unsigned char *extent_data = malloc(MAX_MEM_SIZE);
-	unsigned char *delta_data  = malloc(MAX_MEM_SIZE);
-	unsigned char *comp_delta  = malloc(MAX_MEM_SIZE);
-	char *up_extent1  = malloc(MAX_MEM_SIZE);
-	char *up_extent2  = malloc(MAX_MEM_SIZE);
-
-	if (!updated || !extent_data || !delta_data || !comp_delta || !up_extent1 || !up_extent2)
-		goto apply_alloc_error;	
+	if (progress_file && !chunk_count) {
+		if (write_progress(progress_file, progress_tmpfile, 0, 0, 0, tgt_snap) < 0)
+			goto out;
+	}
 
 	for (chunk_num = 0; chunk_num < chunk_count;) {
 		trace_off(printf("reading chunk "U64FMT" header\n", chunk_num););
@@ -1167,92 +1190,71 @@ static int apply_delta_extents(int deltafile, u32 chunk_size, u64 chunk_count, c
 			warn("deh chksum %lld, checksum %lld", deh.ext2_chksum, checksum((const unsigned char *)updated, extent_size));
 			goto apply_checksum_error;
 		}
+		warn("dev2name %s, extent_size %lld, extent_addr %lld", dev2name, extent_size, extent_addr);
 		if ((err = diskwrite(snapdev2, updated, extent_size, extent_addr)) < 0)
 			goto apply_write_error;
+
+		if (progress_file && ((((current_time = now()) - last_update) > 0) || (chunk_num == chunk_count))) {
+			if (write_progress(progress_file, progress_tmpfile, chunk_num, chunk_count, extent_addr, tgt_snap) < 0)
+				goto out;
+			last_update = current_time;
+		}
+
 		chunk_num = chunk_num + deh.num_of_chunks;
 	}
-	free(up_extent1);
-	free(up_extent2);
-	free(comp_delta);
-	free(extent_data);
-	free(delta_data);
-	free(updated);
-
-	close(snapdev2);
-	if (!fullvolume)
-		close(snapdev1);
-
 	trace_on(warn("All extents applied to %s\n", dev2name););
-	return 0;
+	err = 0;
+	goto out;
 
 	/* error messages */
-
-apply_open1_error:
-	warn("could not open snapdev file \"%s\" for reading: %s.", dev1name, strerror(-err));
-	goto apply_cleanup;
-
-apply_open2_error:
-	warn("could not open snapdev file \"%s\" for writing: %s.", dev2name, strerror(-err));
-	goto apply_closesrc_cleanup;
-
 apply_headerread_error:
 	warn("could not read header for extent starting at chunk "U64FMT" of "U64FMT" total chunks: %s", chunk_num, chunk_count, strerror(-err));
-	goto apply_closeall_cleanup;
+	goto out;
 
 apply_magic_error:
 	err = -ERANGE;
 	warn("wrong magic in header for extent starting at chunk "U64FMT" of "U64FMT" total chunks", chunk_num, chunk_count);
-	goto apply_closeall_cleanup;
-
-apply_alloc_error:
-	err = -ENOMEM;
-	warn("memory allocation failed while applying "U64FMT" chunk extent starting at offset "U64FMT": %s", deh.num_of_chunks, extent_addr, strerror(-err));
-	goto apply_closeall_cleanup;
+	goto out;
 
 apply_deltaread_error:
 	warn("could not properly read delta data for extent at offset "U64FMT": %s", extent_addr, strerror(-err));
-	goto apply_freeall_cleanup;
+	goto out;
 
 apply_devread_error:
 	warn("could not read "U64FMT" chunk extent at offset "U64FMT" from downstream snapshot device \"%s\": %s", deh.num_of_chunks, extent_addr, dev1name, strerror(-err));
-	goto apply_freeall_cleanup;
+	goto out;
 
 apply_compmem_error:
 	warn("not enough buffer memory for decompression of delta for "U64FMT" chunk extent starting at offset "U64FMT, deh.num_of_chunks, extent_addr);
-	goto apply_freeall_cleanup;
+	goto out;
 
 apply_compbuf_error:
 	warn("not enough room in the output buffer for decompression of delta for "U64FMT" chunk extent starting at offset "U64FMT, deh.num_of_chunks, extent_addr);
-	goto apply_freeall_cleanup;
+	goto out;
 
 apply_compdata_error:
 	warn("compressed data corrupted in delta for "U64FMT" chunk extent starting at offset "U64FMT, deh.num_of_chunks, extent_addr);
-	goto apply_freeall_cleanup;
+	goto out;
 
 apply_chunk_error:
 	err = -ERANGE; /* FIXME: find better error */
 	warn("delta could not be applied for "U64FMT" chunk extent with start address of "U64FMT, deh.num_of_chunks, extent_addr);
-	goto apply_freeall_cleanup;
+	goto out;
 
 apply_checksum_error_snap0:
 	err = -ERANGE;
 	warn("checksum failed for "U64FMT" chunk extent with start address of "U64FMT" snapshot0 is not the same on the upstream and the downstream", deh.num_of_chunks, extent_addr);
-	goto apply_freeall_cleanup;
-
+	goto out;
 
 apply_checksum_error:
 	err = -ERANGE;
 	warn("checksum failed for "U64FMT" chunk extent with start address of "U64FMT, deh.num_of_chunks, extent_addr);
-	goto apply_freeall_cleanup;
+	goto out;
 
 apply_write_error:
 	warn("updated extent could not be written at start address "U64FMT" in snapshot device \"%s\": %s", extent_addr, dev2name, strerror(-err));
-	goto apply_freeupdate_cleanup;
 
-
-	/* error cleanup */
-
-apply_freeall_cleanup:
+out:
 	if (up_extent2)
 		free(up_extent2);
 	if (up_extent1)
@@ -1263,18 +1265,11 @@ apply_freeall_cleanup:
 		free(extent_data);
 	if (delta_data)
 		free(delta_data);
-
-apply_freeupdate_cleanup:
 	if (updated)
 		free(updated);
-
-apply_closeall_cleanup:
 	close(snapdev2);
-
-apply_closesrc_cleanup:
-	close(snapdev1);
-
-apply_cleanup:
+	if (!fullvolume)
+		close(snapdev1);
 	return err;
 }
 
@@ -1309,7 +1304,7 @@ static int apply_delta(int deltafile, char const *devstem)
 		return -ENOMEM;
 	}
 
-	if ((err = apply_delta_extents(deltafile, dh.chunk_size, dh.chunk_num, dev1name, devstem)) < 0) {
+	if ((err = apply_delta_extents(deltafile, dh.chunk_size, dh.chunk_num, dev1name, devstem, NULL, dh.tgt_snap)) < 0) {
 		if (dev1name)
 			free(dev1name);
 		return err;
@@ -1587,7 +1582,7 @@ static int usecount(int sock, u32 snaptag, int32_t usecnt_dev)
 	return 0; // should we return usecount here too?
 }
 
-static int ddsnap_delta_server(int lsock, char const *devstem)
+static int ddsnap_delta_server(int lsock, char const *devstem, const char *progress_file)
 {
 	char const *origindev = devstem;
 
@@ -1680,7 +1675,7 @@ static int ddsnap_delta_server(int lsock, char const *devstem)
 			/* retrieve it */
 
 			if (apply_delta_extents(csock, body.chunk_size, 
-						body.chunk_num, src_snapdev, origindev) < 0) {
+						body.chunk_num, src_snapdev, origindev, progress_file, body.tgt_snap) < 0) {
 				snprintf(err_msg, MAX_ERRMSG_SIZE, "unable to apply upstream delta to device \"%s\"", origindev);
 				err_msg[MAX_ERRMSG_SIZE-1] = '\0';
 				if (src_snapdev)
@@ -1991,15 +1986,16 @@ int main(int argc, char *argv[])
 	int nobg = 0;
 	char const *logfile = NULL;
 	char const *pidfile = NULL;
+	char const *progress_file = NULL;
 	struct poptOption serverOptions[] = {
 		{ "foreground", 'f', POPT_ARG_NONE, &nobg, 0, "run in foreground. daemonized by default.", NULL }, // !!! unusual semantics, we should be foreground by default, and optionally daemonize
 		{ "logfile", 'l', POPT_ARG_STRING, &logfile, 0, "use specified log file", NULL },
 		{ "pidfile", 'p', POPT_ARG_STRING, &pidfile, 0, "use specified process id file", NULL },
+		{ "progress", 'o', POPT_ARG_STRING, &progress_file, 0, "Output progress to specified file", NULL },
 		POPT_TABLEEND
 	};
 
 	int xd = FALSE, raw = FALSE, test = FALSE, gzip_level = DEF_GZIP_COMP, best_comp = FALSE;
-	char const *progress_file = NULL;
 	struct poptOption cdOptions[] = {
 		{ "xdelta", 'x', POPT_ARG_NONE, &xd, 0, "Delta file format: xdelta chunk", NULL },
 		{ "raw", 'r', POPT_ARG_NONE, &raw, 0, "Delta file format: raw chunk from later snapshot", NULL },
@@ -2956,7 +2952,7 @@ int main(int argc, char *argv[])
 				}
 			}
 
-			return ddsnap_delta_server(sock, devstem);
+			return ddsnap_delta_server(sock, devstem, progress_file);
 		}
 
 		fprintf(stderr, "%s %s: unrecognized delta subcommand: %s.\n", argv[0], command, subcommand);
