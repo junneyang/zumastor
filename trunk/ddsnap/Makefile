@@ -71,7 +71,7 @@ ddsnap.8.gz: ./man/ddsnap.8
 	gzip -c ./man/ddsnap.8 > ddsnap.8.gz
 
 clean:
-	rm -f build.h $(binaries) *.o xdelta/*.o a.out ddsnap.8.gz
+	rm -f build.h $(binaries) *.o xdelta/*.o a.out ddsnap.8.gz patches/*/00_dm-ddsnap.AUTO
 .PHONY: clean
 
 install:
@@ -80,11 +80,8 @@ install:
 	gzip -c ./man/ddsnap.8 > $(prefix)/$(mandir)/man8/ddsnap.8.gz
 .PHONY: install
 
-kernel:
-	cd ../../.. && make bzImage
-
-kern:
-	cd ../../.. && make bzImage SUBDIRS=drivers/md
+genpatches:
+	./scripts/genallpatches.sh
 
 build.h: $(ddsnap_agent_deps) $(ddsnapd_deps) $(ddsnap_deps) 
 	rm -f $@

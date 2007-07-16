@@ -41,6 +41,7 @@ echo -n Building ddsnap Debian package...
 pushd zumastor/ddsnap >> $LOG || exit 1
 dch -b -v $VERSION-r$SVNREV "revision $SVNREV" || exit 1
 dpkg-buildpackage -uc -us -rfakeroot >> $LOG || exit 1
+make genpatches
 popd >> $LOG
 cp zumastor/*.deb .
 echo -e "done.\n"
