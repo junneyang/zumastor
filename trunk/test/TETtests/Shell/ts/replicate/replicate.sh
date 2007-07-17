@@ -147,7 +147,7 @@ repl_verify_data()
 	# host.  Start a replicate, wait for it to finish, then find the
 	# file on the target and diff it with the local file.
 	#
-	tfile=`create_file /var/run/zumastor/mount/${ZUMA_TEST_VOL}` ${repl_file_size}
+	tfile=`create_file /var/run/zumastor/mount/${ZUMA_TEST_VOL} ${repl_file_size}`
 	replicate_and_wait ${ZUMA_TEST_VOL} ${targ}
 	if [ $? -ne 0 ]; then
 		tet_result UNRESOLVED
@@ -198,7 +198,7 @@ repl_verify_delete()
 	# host.  Start a replicate, wait for it to finish, then find the
 	# file on the target and diff it with the local file.
 	#
-	tfile=`create_file /var/run/zumastor/mount/${ZUMA_TEST_VOL}` ${repl_file_size}
+	tfile=`create_file /var/run/zumastor/mount/${ZUMA_TEST_VOL} ${repl_file_size}`
 	replicate_and_wait ${ZUMA_TEST_VOL} ${targ}
 	if [ $? -ne 0 ]; then
 		tet_result UNRESOLVED
