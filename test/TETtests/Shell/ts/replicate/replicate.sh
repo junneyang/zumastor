@@ -5,10 +5,10 @@
 
 tet_startup="startup"
 tet_cleanup="cleanup"
-iclist="small medium large"		# list invocable components
-small="small_repl1 small_repl2"		# functions for "small"
-medium="medium_repl1 medium_repl2"
-large="large_repl1 large_repl2"
+iclist="ic1 ic2 ic3"
+ic1="small_repl1 small_repl2"
+ic2="medium_repl1 medium_repl2"
+ic3="large_repl1 large_repl2"
 
 # source TET API shell functions
 . $TET_ROOT/lib/xpg3sh/tetapi.sh
