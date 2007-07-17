@@ -84,6 +84,11 @@ extern char **environ;
 #define IP3HIGH 253
 #endif
 
+#ifndef MAX_INSTANCES
+#define MAX_INSTANCES (IP3HIGH-IP3LOW+1)
+#endif
+
+
 void stop_dnsmasq() {
   system("/etc/init.d/dnsmasq stop");
 }
@@ -304,6 +309,72 @@ void add_to_leases(const char *leases, const char *newleases,
 
 
 
+/* A set of functions to return the names of environment variables
+ * for each instance number. */
+const char *macfile_var(int i) {
+  static char buffer[32];
+  int n;
+
+  if (i<2) return "MACFILE";
+  n = snprintf(buffer, sizeof(buffer), "MACFILE%d", i);
+  if (n>0 && n<sizeof(buffer)-1) {
+    return buffer;
+  }
+  return NULL;
+}
+
+const char *macaddr_var(int i) {
+  static char buffer[32];
+  int n;
+
+  if (i<2) return "MACADDR";
+  n = snprintf(buffer, sizeof(buffer), "MACADDR%d", i);
+  if (n>0 && n<sizeof(buffer)-1) {
+    return buffer;
+  }
+  return NULL;
+}
+
+const char *ipaddr_var(int i) {
+  static char buffer[32];
+  int n;
+
+  if (i<2) return "IPADDR";
+  n = snprintf(buffer, sizeof(buffer), "IPADDR%d", i);
+  if (n>0 && n<sizeof(buffer)-1) {
+    return buffer;
+  }
+  return NULL;
+}
+
+const char *iface_var(int i) {
+  static char buffer[32];
+  int n;
+
+  if (i<2) return "IFACE";
+  n = snprintf(buffer, sizeof(buffer), "IFACE%d", i);
+  if (n>0 && n<sizeof(buffer)-1) {
+    return buffer;
+  }
+  return NULL;
+}
+
+
+/* scan through the tunbr environment variables looking for the
+ * next free instance.  The variables are:
+ * MACADDRx, MACFILEx, IPADDRx, and IFACEx.  x is null for the first
+ * instance and starts at 2 and above for the next.
+ * Returns x as an integer. x=0 for null and x=-1 on error. */
+int next_instance() {
+  int i, n;
+  char buffer[32];
+
+  for (i=1;i<=MAX_INSTANCES;i++) {
+    if (getenv(macfile_var(i))==NULL) return i;
+  }
+}
+
+
 int main(int argc, char **argv) {
   uid_t uid;
   pid_t child;
@@ -313,9 +384,15 @@ int main(int argc, char **argv) {
   int rfd, mfd;
   char macfile[256], macaddr[20], ipaddr[16];
   unsigned char mac[6], ip[4];
-  
+  int instance;
 
-  uid = getuid();
+
+  instance = next_instance();
+  if (instance<0) {
+    fprintf(stderr, "Unable to find unallocated MACADDR variables\n");
+    return -1;
+  }
+
 
   add_to_leases(LEASES, NEWLEASES, mac, ip);
 
@@ -345,18 +422,21 @@ int main(int argc, char **argv) {
     return errno;
   }
 
-  rv = setenv("MACFILE", macfile, 1);
+  rv = setenv(macfile_var(instance), macfile, 1);
   if (rv == -1) {
-    fprintf(stderr, "insufficient environment space for MACFILE variable\n");
+    fprintf(stderr, "insufficient environment space for %s variable\n",
+	    macfile_var(instance));
     goto release_ether;
   }
+
 
   n = snprintf(macaddr, sizeof(macaddr),
 	       "%02x:%02x:%02x:%02x:%02x:%02x",
 	       mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-  rv = setenv("MACADDR", macaddr, 1);
+  rv = setenv(macaddr_var(instance), macaddr, 1);
   if (rv == -1) {
-    fprintf(stderr, "insufficient environment space for MACADDR variable\n");
+    fprintf(stderr, "insufficient environment space for %s variable\n",
+	    macaddr_var(instance));
     goto release_ether;
   }
 
@@ -364,15 +444,15 @@ int main(int argc, char **argv) {
   n = snprintf(ipaddr, sizeof(ipaddr),
 	       "%d.%d.%d.%d",
 	       ip[0], ip[1], ip[2], ip[3]);
-  rv = setenv("IPADDR", ipaddr, 1);
+  rv = setenv(ipaddr_var(instance), ipaddr, 1);
   if (rv == -1) {
-    fprintf(stderr, "insufficient environment space for IPADDR variable\n");
+    fprintf(stderr, "insufficient environment space for %s variable\n",
+	    ipaddr_var(instance));
     goto release_ether;
   }
 
+
   n = snprintf(command, sizeof(command), TUNCTL " -u %d", uid);
-
-
   tunctlfp = popen(command, "r");
   if (!tunctlfp) {
     perror(command);
@@ -419,13 +499,15 @@ int main(int argc, char **argv) {
 
 
   n = snprintf(device, sizeof(device), "tap%d", tapn);
-  rv = setenv("IFACE", device, 1);
+  rv = setenv(iface_var(instance), device, 1);
   if (rv == -1) {
-    fprintf(stderr, "insufficient environment space for IFACE variable\n");
+    fprintf(stderr, "insufficient environment space for %s variable\n",
+	    iface_var(instance));
     goto release_iface;
   }
 
 
+  uid = getuid();
   child = fork();
   if (child>0) {
     waitpid(child, &status, 0);
