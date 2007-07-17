@@ -168,8 +168,7 @@ u32 strtobits(char const *string)
 
 #define XDELTA 1
 #define RAW (1 << 1)
-#define TEST (1 << 2)
-#define BEST_COMP (1 << 3)
+#define BEST_COMP (1 << 2)
 
 #define DEF_GZIP_COMP 0
 #define MAX_GZIP_COMP 9
@@ -753,12 +752,12 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 			/* 3 different modes, raw (raw dev2 extent), xdelta (xdelta dev2 extent), best (either gzipped raw dev2 extent or gzipped xdelta dev2 extent) */
 			if (mode == RAW)
 				err = create_raw_delta (&deh, dev2_extent, extents_delta, extent_size, &delta_size);
-			else
+			else // compute xdelta for XDELTA or BEST_COMP mode
 				err = create_xdelta_delta (&deh, dev1_extent, dev2_extent, extents_delta, extent_size, &delta_size);
 			if ((err < 0) || ((err = gzip_on_delta(&deh, extents_delta, gzip_delta, delta_size, &gzip_size, level)) < 0))
 				goto error_source;
 
-			if (mode != RAW && mode != XDELTA) {
+			if (mode == BEST_COMP) {
 				/* delta extent header set-up for dev2_extent */
 				deh2.gzip_on = FALSE;
 				deh2.extents_delta_length = extent_size;
@@ -1995,12 +1994,11 @@ int main(int argc, char *argv[])
 		POPT_TABLEEND
 	};
 
-	int xd = FALSE, raw = FALSE, test = FALSE, gzip_level = DEF_GZIP_COMP, best_comp = FALSE;
+	int xd = FALSE, raw = FALSE, best_comp = FALSE, gzip_level = DEF_GZIP_COMP;
 	struct poptOption cdOptions[] = {
 		{ "xdelta", 'x', POPT_ARG_NONE, &xd, 0, "Delta file format: xdelta chunk", NULL },
 		{ "raw", 'r', POPT_ARG_NONE, &raw, 0, "Delta file format: raw chunk from later snapshot", NULL },
 		{ "best", 'b', POPT_ARG_NONE, &best_comp, 0, "Delta file format: best compression (slowest)", NULL},
-		{ "test", 't', POPT_ARG_NONE, &test, 0, "Delta file format: xdelta chunk, raw chunk from earlier snapshot and raw chunk from later snapshot", NULL },
 		{ "gzip", 'g', POPT_ARG_INT, &gzip_level, 0, "Compression via gzip", "compression_level"},
 		{ "progress", 'p', POPT_ARG_STRING, &progress_file, 0, "Output progress to specified file", NULL },
 		POPT_TABLEEND
@@ -2647,18 +2645,18 @@ int main(int argc, char *argv[])
 		}
 
 		/* Make sure the options are mutually exclusive */
-		if (xd+raw+test+best_comp > 1) {
-			fprintf(stderr, "%s %s: Too many chunk options were selected.\nPlease select only one: -x, -r, -t or -o\n", argv[0], argv[1]);
+		if (xd+raw+best_comp > 1) {
+			fprintf(stderr, "%s %s: Too many chunk options were selected.\nPlease select only one: -x, -r or -b\n", argv[0], argv[1]);
 			poptPrintUsage(cdCon, stderr, 0);
 			poptFreeContext(cdCon);
 			return 1;
 		}
 
-		u32 mode = (test ? TEST : (raw ? RAW : (xd ? XDELTA : BEST_COMP)));
+		u32 mode = (raw ? RAW : (xd ? XDELTA : BEST_COMP));
 		if (best_comp)
 			gzip_level = MAX_GZIP_COMP;
 
-		trace_off(fprintf(stderr, "xd=%d raw=%d test=%d best_comp=%d mode=%u gzip_level=%d\n", xd, raw, test, best_comp, mode, gzip_level););
+		trace_off(fprintf(stderr, "xd=%d raw=%d best_comp=%d mode=%u gzip_level=%d\n", xd, raw, best_comp, mode, gzip_level););
 
 		char const *sockname, *snaptag1str, *snaptag2str, *hoststr;
 
@@ -2822,18 +2820,18 @@ int main(int argc, char *argv[])
 			}
 
 			/* Make sure the options are mutually exclusive */
-			if (xd+raw+test+best_comp > 1) {
-				fprintf(stderr, "%s %s: Too many chunk options were selected.\nPlease select only one: -x, -r, -t or -b\n", argv[0], argv[1]);
+			if (xd+raw+best_comp > 1) {
+				fprintf(stderr, "%s %s: Too many chunk options were selected.\nPlease select only one: -x, -r or -b\n", argv[0], argv[1]);
 				poptPrintUsage(cdCon, stderr, 0);
 				poptFreeContext(cdCon);
 				return 1;
 			}
 
-			u32 mode = (test ? TEST : (raw ? RAW : (xd? XDELTA : BEST_COMP)));
+			u32 mode = (raw ? RAW : (xd? XDELTA : BEST_COMP));
 			if (best_comp)
 				gzip_level = MAX_GZIP_COMP;
 		
-			trace_off(fprintf(stderr, "xd=%d raw=%d test=%d best_comp=%d mode=%u gzip_level=%d\n", xd, raw, test, best_comp, mode, gzip_level););
+			trace_off(fprintf(stderr, "xd=%d raw=%d best_comp=%d mode=%u gzip_level=%d\n", xd, raw, best_comp, mode, gzip_level););
 
 			char const *changelist, *deltafile, *devstem;
 
