@@ -410,6 +410,7 @@ int main(int argc, char **argv) {
     goto release_ether;
   }
 
+  uid = getuid();
   rv = chown(macfile, uid, -1);
   if (rv == -1) {
     perror("chown");
@@ -507,7 +508,6 @@ int main(int argc, char **argv) {
   }
 
 
-  uid = getuid();
   child = fork();
   if (child>0) {
     waitpid(child, &status, 0);
