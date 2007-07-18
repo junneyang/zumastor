@@ -152,8 +152,6 @@ static void kick(struct block_device *dev)
 
 /* ...Useful gizmos */
 
-typedef u64 chunk_t;
-
 #define SECTOR_SHIFT 9
 #define IS_SNAP_FLAG (1 << 0)
 #define REPORT_BIT 1
