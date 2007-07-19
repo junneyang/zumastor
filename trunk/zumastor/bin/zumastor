@@ -1107,11 +1107,33 @@ replicate)
 	exit $?
 	;;
 status)
-	[ $# -lt 4 ] || { echo "usage: $0 status [-f] [<vol> [<snap>]]"; exit 2; }
+	declare name="$0 $1"
+	declare showfull=""
+	declare showuse=0
+	declare usage="Usage: $0 status [<vol> [<snap>]] [--full] [--usage]"
 
-	# !!! zero or one arguments means to call tree for now
-	if [ $# -lt 3 ]; then
-		declare opt=$2
+	shift 1
+	args=`getopt -ofhu -l full,help,usage -n"$name" -- "$@"` || { echo $usage; exit 2; }
+
+	eval set -- "$args" # remove getopt quotes and set new arguments
+	until [[ $1 = -- ]] ; do
+		case "$1" in
+		-h|--help)
+			echo $usage
+			echo "  -h, --help            show this help"
+			echo "  -f, --full            show full rather than abbreviated paths"
+			echo "  -u, --usage           show detailed snapshot usage"
+			exit;;
+		-f|--full) showfull="-f";;
+		-u|--usage) showuse=1;;
+		*) echo whoops; exit 9;;
+		esac
+		shift 1
+	done
+	shift # remove --
+
+	# zero arguments means to call tree for now
+	if [ $# -lt 1 ]; then
 		declare vol
 
 		# for debugging
@@ -1119,28 +1141,37 @@ status)
 		pushd $VOLUMES >/dev/null
 		[[ `ls | wc -l` -gt 0 ]] && for vol in *; do
 			echo VOLUME $vol:
-			if [ -e $SERVERS/$vol ]; then
-				ddsnap status $SERVERS/$vol && echo Status: running || echo Status: failed
-			else
-				echo Status: not running
+			if [ $showuse -eq 1 ]; then
+				if [ -e $SERVERS/$vol ]; then
+					ddsnap status $SERVERS/$vol && echo Status: running || echo Status: failed
+				else
+					echo Status: not running
+				fi
 			fi
 			echo "Configuration:"
-			tree -Fx --noreport $opt $VOLUMES/$vol
+			tree -Fx --noreport $showfull $VOLUMES/$vol
 			echo
 		done 2> /dev/null
 		popd >/dev/null
 		echo RUN STATUS:
-		tree -Fx --noreport $opt $RUNPATH
+		tree -Fx --noreport $showfull $RUNPATH
 		exit $?
 	else
-		declare vol=$2
-		declare snap=$3
+		declare vol=$1
+		declare snap=$2
 		declare sock=${SERVERS}/$vol
 
 		verify_managed_vol $vol || { echo "$0: volume '$vol' is not a managed volume"; exit 1; }
-		[ -z $snap ] || verify_existing_snap $vol $snap || { echo "$0: invalid snapshot '$snap' for volume '$vol'"; exit 1; }
-
-		ddsnap status $sock $snap
+		if [ ! -z $snap ]; then
+			verify_existing_snap $vol $snap || { echo "$0: invalid snapshot '$snap' for volume '$vol'"; exit 1; }
+			showuse=1
+		fi
+		if [ $showuse -eq 1 ]; then
+			ddsnap status $sock $snap
+		fi
+		if [ -z $snap ]; then
+			tree -Fx --noreport $showfull $VOLUMES/$vol
+		fi
 		exit $?
 	fi
 	;;
