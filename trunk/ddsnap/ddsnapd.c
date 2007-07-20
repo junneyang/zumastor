@@ -67,6 +67,7 @@
  * building with a new kernel. 
  */
 #define PR_SET_LESS_THROTTLE 21
+#define PR_SET_MEMALLOC	22
 #define MAX_NEW_METACHUNKS 10
 
 #define trace trace_off
@@ -3430,6 +3431,8 @@ int snap_server(struct superblock *sb, int listenfd, int getsigfd, int agentfd)
 
 	if ((err = prctl(PR_SET_LESS_THROTTLE, 0, 0, 0, 0)))
 		warn("can not set process to throttle less (error %i, %s)", errno, strerror(errno));
+	if ((err = prctl(PR_SET_MEMALLOC, 0, 0, 0, 0)))
+		warn("failed to enter memalloc mode (may deadlock) (error %i, %s)", errno, strerror(errno));
 	
 	while (1) {
 		trace(warn("Waiting for activity"););
