@@ -76,9 +76,8 @@ function stop_zumastor {
 		for host in $(ls $VOLUMES/$vol/targets); do
 			zumastor stop target $vol $host
 		done
-		if [ -x $VOLUMES/$vol/master ]; then
-			zumastor stop master $vol
-		fi
+		[ -x $VOLUMES/$vol/master ] && zumastor stop master $vol
+		[ -x $VOLUMES/$vol/source ] && zumastor stop source $vol
 
 		list=$(cat $VOLUMES/$vol/master/snapshots/* 2>/dev/null)
 		for id in $list; do

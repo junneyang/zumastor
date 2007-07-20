@@ -640,7 +640,7 @@ int generate_progress_file(const char *progress_file, char **tmpfilename)
 	int progress_len = strlen(progress_file);
 	if (!(progress_tmpfile = malloc(progress_len + 5))) {
 		warn("unable to allocate progress tempfile name");
-		return -1;
+		return -ENOMEM;
 	}
 	strncpy(progress_tmpfile, progress_file, progress_len);
 	*tmpfilename = progress_tmpfile;
@@ -667,12 +667,17 @@ int write_progress(const char *progress_file, const char *progress_tmpfile, u64 
 	return 0;
 }
 
-static int generate_delta_extents(u32 mode, int level, struct change_list *cl, int deltafile, char const *devstem, int src_snap, int tgt_snap, char const *progress_file)
+static int generate_delta_extents(u32 mode, int level, struct change_list *cl, int deltafile, char const *devstem, int src_snap, int tgt_snap, char const *progress_file, u64 start_chunk)
 {
 	int fullvolume = (src_snap == -1);
 	char *dev1name = NULL, *dev2name = NULL, *progress_tmpfile = NULL;
 	int snapdev1 = -1, snapdev2 = -1;
 	int err = -ENOMEM;
+	unsigned char *dev1_extent   = malloc(MAX_MEM_SIZE);
+	unsigned char *dev2_extent   = malloc(MAX_MEM_SIZE);
+	unsigned char *extents_delta = malloc(MAX_MEM_SIZE);
+	unsigned char *gzip_delta    = malloc(MAX_MEM_SIZE + 12 + (MAX_MEM_SIZE >> 9));
+	unsigned char *dev2_gzip_extent = malloc(MAX_MEM_SIZE + 12 + (MAX_MEM_SIZE >> 9));
 
 	if (!fullvolume && (!(dev1name = malloc_snapshot_name(devstem, src_snap)) || ((snapdev1 = open(dev1name, O_RDONLY)) < 0))) {
 		warn("unable to open source snapshot: %s", strerror(errno));
@@ -682,12 +687,6 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 		warn("unable to open target snapshot: %s", strerror(errno));
 		goto out;
 	}
-
-	unsigned char *dev1_extent   = malloc(MAX_MEM_SIZE);
-	unsigned char *dev2_extent   = malloc(MAX_MEM_SIZE);
-	unsigned char *extents_delta = malloc(MAX_MEM_SIZE);
-	unsigned char *gzip_delta    = malloc(MAX_MEM_SIZE + 12 + (MAX_MEM_SIZE >> 9));
-	unsigned char *dev2_gzip_extent = malloc(MAX_MEM_SIZE + 12 + (MAX_MEM_SIZE >> 9));
 
 	if (!dev1_extent || !dev2_extent || !extents_delta || !gzip_delta || !dev2_gzip_extent) {
 		warn("variable memory allocation failed: %s", strerror(-err));
@@ -705,12 +704,12 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 	trace_off(printf("level: %d, chunksize bits: %u, chunk_count: "U64FMT"\n", level, cl->chunksize_bits, cl->count););
 	trace_off(printf("starting delta generation, mode %u, chunksize %u\n", mode, chunk_size););
 
-	if (progress_file && generate_progress_file(progress_file, &progress_tmpfile))
+	if (progress_file && (err = generate_progress_file(progress_file, &progress_tmpfile)))
 		goto out;
 
 	int current_time, last_update = 0, start_time = now();
 
-	for (chunk_num = 0; chunk_num < cl->count;) {
+	for (chunk_num = start_chunk; chunk_num < cl->count;) {
 		if (fullvolume) {
 			extent_size = chunk_size;
 			extent_addr = chunk_num * extent_size;
@@ -749,7 +748,8 @@ static int generate_delta_extents(u32 mode, int level, struct change_list *cl, i
 			if ((err = gzip_on_delta(&deh, dev2_extent, gzip_delta, extent_size, &gzip_size, level)) < 0)
 				goto error_source;
 		} else {
-			/* 3 different modes, raw (raw dev2 extent), xdelta (xdelta dev2 extent), best (either gzipped raw dev2 extent or gzipped xdelta dev2 extent) */
+			/* Three different modes, raw, xdelta, best (either gzipped raw or gzipped xdelta)
+			 * Always use raw when senind the first chunk we are resuming on */
 			if (mode == RAW)
 				err = create_raw_delta (&deh, dev2_extent, extents_delta, extent_size, &delta_size);
 			else // compute xdelta for XDELTA or BEST_COMP mode
@@ -842,7 +842,7 @@ static int generate_delta(u32 mode, int level, struct change_list *cl, int delta
 	if ((err = fdwrite(deltafile, &dh, sizeof(dh))) < 0)
 		return err;
 
-	return generate_delta_extents(mode, level, cl, deltafile, devstem, dh.src_snap, dh.tgt_snap, NULL);
+	return generate_delta_extents(mode, level, cl, deltafile, devstem, dh.src_snap, dh.tgt_snap, NULL, 0);
 }
 
 static int ddsnap_generate_delta(u32 mode, int level, char const *changelistname, char const *deltaname, char const *devstem)
@@ -1002,9 +1002,9 @@ static u64 get_origin_sectors(int serv_fd)
 }
 
 
-static int ddsnap_replication_send(int serv_fd, u32 src_snap, u32 tgt_snap, char const *devstem, u32 mode, int level, int ds_fd, char const *progress_file)
+static int ddsnap_replication_send(int serv_fd, u32 src_snap, u32 tgt_snap, char const *devstem, u32 mode, int level, int ds_fd, char const *progress_file, u64 start_addr)
 {
-	int fullvolume = (src_snap == -1);
+	int fullvolume = (src_snap == -1), chunks = 0;
 	struct change_list *cl = NULL;
 	int err = -ENOMEM;
 
@@ -1030,6 +1030,7 @@ static int ddsnap_replication_send(int serv_fd, u32 src_snap, u32 tgt_snap, char
 		cl->src_snap = src_snap;
 		cl->tgt_snap = tgt_snap;
 		cl->chunks = NULL;
+		chunks = (vol_size_bytes - start_addr) >> cl->chunksize_bits;
 	} else {
 		trace_off(printf("requesting changelist from snapshot %u to %u\n", src_snap, tgt_snap););
 		if ((cl = stream_changelist(serv_fd, src_snap, tgt_snap)) == NULL) {
@@ -1037,10 +1038,15 @@ static int ddsnap_replication_send(int serv_fd, u32 src_snap, u32 tgt_snap, char
 			err = -EINVAL;
 			goto out;
 		}
+		if (start_addr) // if we are resuming, find the first entry in the changelist to send
+			for (chunks = 0; chunks < cl->count; chunks++)
+				if (cl->chunks[chunks] << cl->chunksize_bits >= start_addr)
+					break;
+		chunks = cl->count - chunks;
 	}
 
 	/* request approval for delta send */
-	if ((err = outbead(ds_fd, SEND_DELTA, struct delta_header, DELTA_MAGIC_ID, cl->count, 1 << cl->chunksize_bits, src_snap, tgt_snap))) {
+	if ((err = outbead(ds_fd, SEND_DELTA, struct delta_header, DELTA_MAGIC_ID, chunks, 1 << cl->chunksize_bits, src_snap, tgt_snap))) {
 		warn("unable to send delta: %s", strerror(-err));
 		goto out;
 	}
@@ -1064,7 +1070,7 @@ static int ddsnap_replication_send(int serv_fd, u32 src_snap, u32 tgt_snap, char
 	warn("sending delta from %i to %i", src_snap, tgt_snap);
 
 	/* stream delta */
-	if ((err = generate_delta_extents(mode, level, cl, ds_fd, devstem, src_snap, tgt_snap, progress_file)) < 0) {
+	if ((err = generate_delta_extents(mode, level, cl, ds_fd, devstem, src_snap, tgt_snap, progress_file, cl->count - chunks)) < 0) {
 		warn("could not send delta downstream for snapshots %i and %i", src_snap, tgt_snap);
 		goto out;
 	}
@@ -1095,9 +1101,6 @@ static int apply_delta_extents(int deltafile, u32 chunk_size, u64 chunk_count, c
 	int snapdev1, snapdev2;
 	int err;
 
-	/* !!! FIXME !!! - checksum against origin due to journal replay */
-	dev1name = dev2name;
-
 	/* if an extent is being applied */
 	if (!fullvolume && ((snapdev1 = open(dev1name, O_RDONLY)) < 0)) {
 		warn("could not open snapdev file \"%s\" for reading: %s.", dev1name, strerror(-err));
@@ -1112,7 +1115,7 @@ static int apply_delta_extents(int deltafile, u32 chunk_size, u64 chunk_count, c
 	}
 
 	char *progress_tmpfile = NULL;
-	if (progress_file && generate_progress_file(progress_file, &progress_tmpfile))
+	if (progress_file && (err = generate_progress_file(progress_file, &progress_tmpfile)))
 		goto out;
 
 	unsigned char *updated=NULL, *extent_data=NULL, *delta_data=NULL, *comp_delta=NULL;
@@ -1128,13 +1131,8 @@ static int apply_delta_extents(int deltafile, u32 chunk_size, u64 chunk_count, c
 
 	struct delta_extent_header deh;
 	u64 uncomp_size, extent_size;
-	u64 extent_addr, chunk_num;
+	u64 extent_addr = 0, chunk_num;
 	int current_time, last_update = 0;
-
-	if (progress_file && !chunk_count) {
-		if (write_progress(progress_file, progress_tmpfile, 0, 0, 0, tgt_snap) < 0)
-			goto out;
-	}
 
 	for (chunk_num = 0; chunk_num < chunk_count;) {
 		trace_off(printf("reading chunk "U64FMT" header\n", chunk_num););
@@ -1189,7 +1187,7 @@ static int apply_delta_extents(int deltafile, u32 chunk_size, u64 chunk_count, c
 			warn("deh chksum %lld, checksum %lld", deh.ext2_chksum, checksum((const unsigned char *)updated, extent_size));
 			goto apply_checksum_error;
 		}
-		warn("dev2name %s, extent_size %lld, extent_addr %lld", dev2name, extent_size, extent_addr);
+		trace_off(warn("dev2name %s, extent_size %lld, extent_addr %lld", dev2name, extent_size, extent_addr););
 		if ((err = diskwrite(snapdev2, updated, extent_size, extent_addr)) < 0)
 			goto apply_write_error;
 
@@ -1202,7 +1200,7 @@ static int apply_delta_extents(int deltafile, u32 chunk_size, u64 chunk_count, c
 		chunk_num = chunk_num + deh.num_of_chunks;
 	}
 	trace_on(warn("All extents applied to %s\n", dev2name););
-	err = 0;
+	err = progress_file ? write_progress(progress_file, progress_tmpfile, chunk_num, chunk_count, extent_addr, tgt_snap) : 0;
 	goto out;
 
 	/* error messages */
@@ -1986,6 +1984,7 @@ int main(int argc, char *argv[])
 	char const *logfile = NULL;
 	char const *pidfile = NULL;
 	char const *progress_file = NULL;
+	char const *resume = NULL;
 	struct poptOption serverOptions[] = {
 		{ "foreground", 'f', POPT_ARG_NONE, &nobg, 0, "run in foreground. daemonized by default.", NULL }, // !!! unusual semantics, we should be foreground by default, and optionally daemonize
 		{ "logfile", 'l', POPT_ARG_STRING, &logfile, 0, "use specified log file", NULL },
@@ -2001,6 +2000,7 @@ int main(int argc, char *argv[])
 		{ "best", 'b', POPT_ARG_NONE, &best_comp, 0, "Delta file format: best compression (slowest)", NULL},
 		{ "gzip", 'g', POPT_ARG_INT, &gzip_level, 0, "Compression via gzip", "compression_level"},
 		{ "progress", 'p', POPT_ARG_STRING, &progress_file, 0, "Output progress to specified file", NULL },
+		{ "resume", 's', POPT_ARG_STRING, &resume, 0, "Resume from specified address", NULL },
 		POPT_TABLEEND
 	};
 
@@ -2290,7 +2290,7 @@ int main(int argc, char *argv[])
 			if (pid == -1)
 				error("Could not daemonize\n");
 			if (pid != 0) {
-				trace_on(printf("pid = %lu\n", (unsigned long)pid););
+				trace_off(printf("pid = %lu\n", (unsigned long)pid););
 				return 0;
 			}
 		}
@@ -2656,6 +2656,14 @@ int main(int argc, char *argv[])
 		if (best_comp)
 			gzip_level = MAX_GZIP_COMP;
 
+		u64 start_addr = 0;
+		if (resume && (!sscanf(resume, "%llu", &start_addr))) {
+			fprintf(stderr, "%s %s: Invalid resume position specified", argv[0], argv[1]);
+			poptPrintUsage(cdCon, stderr, 0);
+			poptFreeContext(cdCon);
+			return 1;
+		}
+
 		trace_off(fprintf(stderr, "xd=%d raw=%d best_comp=%d mode=%u gzip_level=%d\n", xd, raw, best_comp, mode, gzip_level););
 
 		char const *sockname, *snaptag1str, *snaptag2str, *hoststr;
@@ -2726,7 +2734,7 @@ int main(int argc, char *argv[])
 				ret = 1;
 			} else {
 				sprintf(devstem, "%s%s", DEVMAP_PATH, volume);
-				ret = ddsnap_replication_send(sock, snaptag1, snaptag2, devstem, mode, gzip_level, ds_fd, progress_file);
+				ret = ddsnap_replication_send(sock, snaptag1, snaptag2, devstem, mode, gzip_level, ds_fd, progress_file, start_addr);
 				free(devstem);
 			}
 		}
@@ -2945,7 +2953,7 @@ int main(int argc, char *argv[])
 				if (pid == -1)
 					error("Error: could not daemonize\n");
 				if (pid != 0) {
-					trace_on(printf("pid = %lu\n", (unsigned long)pid););
+					trace_off(printf("pid = %lu\n", (unsigned long)pid););
 					return 0;
 				}
 			}
