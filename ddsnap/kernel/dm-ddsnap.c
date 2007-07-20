@@ -1200,6 +1200,8 @@ static void ddsnap_destroy(struct dm_target *target)
 
 	if (info->sock)
 		fput(info->sock);
+	if (info->control_socket)
+		fput(info->control_socket);
 	if (info->inode)
 		iput(info->inode);
 	if (info->shared_bitmap)
