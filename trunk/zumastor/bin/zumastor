@@ -8,15 +8,14 @@
 . /lib/zumastor/ddfake
 
 function read_and_inc {
-	[ $# -eq 1 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
+	[[ $# -eq 2 ]] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
 	local -r filename=$1
+	local -r inc=$2
 	local num
-
-	# FIXME TODO add error 
-	read num <$filename || num=0
-	echo $(( num+1 )) > $filename || return 1
-
-	echo $num
+	# we only use even numbers for master snapshots (odd for mounting downstream)
+	read num <$filename && let num++ || num=0
+	[[ $((num % 2)) -eq 0 ]] || let num++
+	echo $num | tee $filename || return 1
 }
 
 function drop_snapshot {
@@ -77,7 +76,7 @@ function new_snapshot {
 		[ $max -gt 0 ] || { echo "$0: '$maxfile' contains zero, doing nothing"; return 1; }
 	fi
 
-	next=$(read_and_inc $master/next) || { log "snapshot number error: $master/next"; return 1; }
+	next=$(read_and_inc $master/next 2) || { log "snapshot number error: $master/next"; return 1; }
 	log "new snapshot will be '$next'"
 
 	if [ -f $listfile ]; then
@@ -138,7 +137,7 @@ function new_target_snapshot {
 	# create snapshot
 	# write id down the trigger
 
-	next=$(read_and_inc $master/next) || { log "ssn error: $master/next"; return 1; }
+	next=$(read_and_inc $master/next 2) || { log "ssn error: $master/next"; return 1; }
 
 	log "new snapshot will be '$next'"
 
@@ -179,16 +178,17 @@ function run_remote  {
 # replicate_snapshot
 # called from target zumastor daemon (run_target)
 function replicate_snapshot {
-	[ $# -eq 3 ] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
+	[[ $# -eq 3 ]] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
 	local -r vol=$1
 	local -r host=$2
-	local -r snap=$3
+	local snap=$3
 	local -r target_dir=$VOLUMES/$vol/targets/$host
 	local -r send_file=$target_dir/send
+	local -r remote_file=$send_file.remote
 	local -r hold_file=$target_dir/hold
 	local -r server=$SERVERS/$vol
 	local -r port_file=$target_dir/port
-	local old_snap port status output
+	local old_snap port status output remote_hold remote_send remote_addr resume ret=0
 
 	read -d" " old_snap <$hold_file 2>/dev/null
 
@@ -200,61 +200,66 @@ function replicate_snapshot {
 		return 1
 	fi
 
+	# fallback to full volume if we lost the snapshot upstream (deleted manually or squash)
+	if [[ $old_snap ]] && ! verify_existing_snap $vol $old_snap; then
+		log "verify $old_snap returned $status, falling back to full volume"
+		old_snap=
+	fi
+
 	read port <$port_file || { log "error reading port from '$port_file'"; return 1; }
 
-	output=$(run_remote $host "zumastor receive start $vol $port $old_snap")
-	status=$?
-	if [[ $status -eq 7 ]]; then # held snapshot mismatch
-		if verify_existing_snap $vol $output; then
-			log "downstream holding valid snapshot '$output', using it instead of '$old_snap'"
-			run_remote $host "zumastor receive start $vol $port $output"
-			status=$?
-			[[ $status -eq 0 ]] && drop_snapshot $vol $old_snap
-			old_snap=$output
+	run_remote $host "zumastor receive start $vol $port" > $remote_file
+	[[ $? -ne 0 ]] && { log "starting remote snapshot receive failed"; return 1; }
+	read remote_hold remote_send remote_addr < $remote_file
+
+	if [[ $remote_hold == "-1" ]]; then # remote has no hold, must do initial
+		[[ $old_snap ]] && drop_snapshot $vol $old_snap
+		remote_hold=
+		old_snap=
+	elif [[ $remote_hold != $old_snap ]]; then # check for race between updating downstream hold file and upstream
+		if verify_existing_snap $vol $remote_hold; then
+			log "downstream holding valid snapshot '$remote_hold', using it instead of '$old_snap'"
+			[[ -e "/dev/mapper/$vol($remote_hold)" ]] || create_device $vol $remote_hold
+			old_snap=$remote_hold
 		else
-			log "downstream holding invalid snapshot '$output', falling back to full volume"
-			run_remote $host "zumastor receive start $vol $port"
-			status=$?
-			old_snap=
+			log "downstream holding invalid snapshot '$remote_hold', falling back to full volume"
+			old_snap= remote_addr=
 		fi
 	fi
-	if [[ $status -ne 0 ]]; then
-		log "starting remote snapshot receive failed"
-		return 1
-	fi
-
-	# fallback to full volume if we lost the snapshot upstream (deleted manually or squash)
-	if [[ $old_snap ]]; then
-		verify_existing_snap $vol $old_snap
-		status=$?
-		if [[ $status -ne 0 ]]; then
-			log "verify $old_snap returned $status, falling back to full volume"
-			old_snap=
+	if [[ $remote_send ]] && [[ $remote_send != $snap ]]; then
+		if verify_existing_snap $vol $remote_send; then
+			log "downstream has partial replication of '$remote_send', using it instead of '$snap'"
+			[[ -e "/dev/mapper/$vol($remote_send)" ]] || create_device $vol $remote_send
+			snap=$remote_send ret=13
+		else
+			log "downstream has partial replication of invalid '$remote_send', falling back to full volume"
+			old_snap= remote_addr=
 		fi
 	fi
 
-	echo $snap > $send_file
+	[[ $remote_addr ]] && resume=" --resume $remote_addr"
 
-	log "remote listen started on port $port, transmitting snapshot $snap"
+	log "remote listen started on port $port, transmitting snapshot $snap$resume"
 	# send the changes since the last snapshot via ddsnap transmit
-	ddsnap transmit $server $host:$port -r -g 6 $old_snap $snap -p $send_file
+	ddsnap transmit $server $host:$port -r -g 6 $old_snap $snap$resume -p $send_file
 	if [[ $? -ne 0 ]]; then
-		log "transmit $server $host:$port $old_snap $snap failed"
+		log "transmit $server $host:$port $old_snap $snap$resume failed"
 		return 1
 	fi
 
 	log "sending snapshot complete, notifying downstream host"
-	run_remote $host "zumastor receive done $vol $port $snap"
-	[[ $? -ne 0 ]] && { log "zumastor receive done $vol $port $snap failed"; return 1; }
+	run_remote $host "zumastor receive done $vol $port"
+	[[ $? -ne 0 ]] && { log "zumastor receive done $vol $port failed"; return 1; }
 
 	#[[ $snap -eq 5 ]] && restart_plug
 	# !!! FIXME TODO this is racy, we should save state by journaling
 	log "setting hold snapshot to $snap"
 	mv $send_file $hold_file
 	echo $snap > $hold_file # to remove progress status
+	rm $remote_file 2>/dev/null
 
 	[[ $old_snap ]] && drop_snapshot $vol $old_snap
-	return 0
+	return $ret
 }
 
 function restart_plug {
@@ -310,7 +315,7 @@ function run_target {
 	local -r period_file=$target_dir/period
 	local -r log=${LOGS}/$vol/target-${host}.log
 	local -r master_fifo=$VOLUMES/$vol/master/trigger
-	local snap period starttime newperiod delay
+	local snap="" period starttime newperiod delay
 
 	[ -r $fifo ] && [ -p $fifo ] || { log "target replication trigger '$fifo' is missing" $log; return 1; }
 
@@ -318,7 +323,7 @@ function run_target {
 
 	if [[ ! -z $period ]]; then
 		if verify_valid_number $period; then
-			zumastor replicate $vol $host &
+			(zumastor replicate $vol $host &) # double fork to prevent sigchld interrupting read
 		else
 			log "invalid period '$period' specified" $log
 			return 1
@@ -336,7 +341,6 @@ function run_target {
 
 		# wrap in a while loop because read will fail is ERESTARTSYS when the
 		# sleeping child exits
-		snap=""
 		while [[ $snap == "" ]]; do
 			read snap <$fifo && break || log "couldn't read from $fifo"
 			sleep 1
@@ -347,9 +351,16 @@ function run_target {
 		replicate_snapshot $vol $host $snap >> $log 2>&1
 		if [[ $? -eq 0 ]]; then #success 
 			log "successfully replicated snapshot $snap" $log
+			snap=""
+		elif [[ $? -eq 13 ]]; then
+			log "successfully replicated resumed snapshot" $log
+			drop_snapshot $vol $snap >> $log 2>&1
+			snap=""
 		else
 			log "replicate error on snapshot $snap: $?" $log
-			drop_snapshot $vol $snap >> $log 2>&1
+			# FIXME TODO add retry code here, for now we retry forever
+			sleep 1
+			continue
 		fi
 
 		read newperiod <$period_file 2>/dev/null || newperiod=
@@ -373,7 +384,7 @@ function run_target {
 			fi
 			# background this so the master and target daemons can't both block
 			log "scheduling replication cycle in ${delay}s" $log
-			(zumastor replicate $vol $host --delay $delay &)
+			(zumastor replicate $vol $host --delay $delay &) # double fork to prevent sigchld interrupting read
 		fi
 	done &
 }
@@ -562,7 +573,11 @@ function forget_source {
 	zumastor stop source $vol
 	# !!! FIXME TODO clean up replication in progress
 	read hold <$VOLUMES/$vol/source/hold 2>/dev/null
-	[[ $hold != "" ]] && drop_snapshot $vol $hold
+	if [[ $hold ]]; then
+		drop_snapshot $vol $hold
+		umount_device $vol $(($hold + 1))
+		drop_snapshot $vol $(($hold + 1))
+	fi
 
 	rm -rf $VOLUMES/$vol/source || return 1
 }
@@ -580,7 +595,6 @@ function define_master {
 	mkdir $path/master || return 1
 	mkdir $path/master/schedule || return 1
 
-	echo 1 >$path/master/next || return 1
 	mkdir $path/master/snapshots || return 1
 	mkfifo $path/master/trigger || return 1
 	zumastor start master $vol || return 1
@@ -670,7 +684,7 @@ function trigger_replication {
 		# increase reference count to pin snapshot
 		#usecount_increment $vol $snap
 		# send specified snapshot
-		send_to_fifo $fifo $snap || { drop_snapshot $vol $snap; return 1; }
+		send_to_fifo $target_fifo $snap || return 1
 	fi
 }
 
@@ -684,21 +698,21 @@ function replication_cycle {
 	local -r path=${VOLUMES}/$vol
 	local -r holdfile=$path/source/hold
 	local -r log=${LOGS}/$vol/source.log
-	local next hold junk
+	local -r mount=$((next + 1))
+	local hold oldmount
 
 	read hold <$holdfile
-
-	if [[ -z $hold ]]; then
-		hold=initial
-	fi
+	[[ -z $hold ]] && hold=initial || oldmount=$((hold + 1))
 
 	log "replication cycle beginning - snapshot ($hold, $next)..." $log
 
-	log "creating snapshot..." $log
+	log "creating snapshots..." $log
 	create_snapshot $vol $next >> $log 2>&1 || { log "error creating new snapshot '$next'" $log; return 1; }
+	create_snapshot $vol $mount >> $log 2>&1
 
-	log "creating device..." $log
+	log "creating devices..." $log
 	create_device $vol $next >> $log 2>&1
+	create_device $vol $mount >> $log 2>&1
 
 	log "setting snapshot unquashable..." $log
 	set_priority $vol $next 127 >> $log 2>&1
@@ -711,17 +725,18 @@ function replication_cycle {
 	if [[ $hold != "initial" ]]; then
 		# NFS suspend
 		echo "foo" > /proc/fs/nfsd/suspend 2>/dev/null
-		log "umounting snapshot $hold " $log
-		umount_device $vol $hold -l >> $log 2>&1
+		log "umounting snapshot $oldmount" $log
+		umount_device $vol $oldmount -l >> $log 2>&1
 	fi
 
-	log "mounting $vol($next)" $log
-	mount_device $vol $next unqualified >> $log 2>&1
+	log "mounting $vol($mount)" $log
+	mount_device $vol $mount unqualified >> $log 2>&1
 
 	if [[ $hold != "initial" ]]; then
 		# NFS resume 
 		cat /proc/fs/nfsd/suspend > /dev/null 2>&1
 		drop_snapshot $vol $hold >> $log 2>&1
+		drop_snapshot $vol $oldmount >> $log 2>&1
 	fi
 
 	log "cycle complete" $log
@@ -991,7 +1006,7 @@ start)
 		declare vol=$3
 		declare holdfile=$VOLUMES/$vol/source/hold
 		declare log=${LOGS}/$vol/source.log
-		declare snap=$(cat $holdfile 2>/dev/null)
+		declare snap=$(($(cat $holdfile 2>/dev/null) + 1))
 
 		verify_managed_vol $vol || { echo "$0: volume '$vol' is not a managed volume"; exit 1; }
 
@@ -1032,7 +1047,7 @@ stop)
 		declare vol=$3
 		declare holdfile=$VOLUMES/$vol/source/hold
 		declare log=${LOGS}/$vol/source.log
-		declare snap=$(cat $holdfile 2>/dev/null)
+		declare snap=$(($(cat $holdfile 2>/dev/null) + 1))
 
 		verify_managed_vol $vol || { echo "$0: volume '$vol' is not a managed volume"; exit 1; }
 
@@ -1177,29 +1192,31 @@ status)
 	;;
 receive)
 	# called via upstream host's ssh command to start/stop listen
-	[[ $# -eq 4 ]] || [[ $# -eq 5 ]] || { echo "usage: $0 receive {start|done} <vol> <port> [snap]}"; exit 2; }
+	[[ $# -eq 4 ]] || { echo "usage: $0 receive {start|done} <vol> <port>}"; exit 2; }
 	declare startstop=$2
 	declare vol=$3
 	declare port=$4
-	declare snap=$5
 	declare holdfile=$VOLUMES/$vol/source/hold
 	declare progressfile=$VOLUMES/$vol/source/apply
 	declare log=${LOGS}/$vol/delta.log
-	declare hold
+	declare hold send_snap send_chunk send_addr count=0
 
 	verify_managed_vol $vol || { echo "$0: volume '$vol' is not a managed volume"; exit 1; }
+	read send_snap send_chunk send_addr <$progressfile 2>/dev/null
+
+	# kill listen first in case it is already listening (previous replication interrupted)
+	while pkill -f "ddsnap delta listen /dev/mapper/$vol 0.0.0.0"; do
+		sleep $count
+		let count++
+		[[ $count -gt 10 ]] && { echo "couldn't kill listener"; exit 1; }
+	done
 
 	case $startstop in
 	start)
 		read hold <$holdfile 2>/dev/null
-		if [[ ! -z $snap ]] && [[ $snap != $hold ]]; then
-			log "mismatch incoming $snap, hold $hold" $log
-			echo $hold
-			exit 7
-		fi
+		[[ $hold ]] && verify_existing_snap $vol $hold || hold=-1
+		echo $hold $send_snap $send_addr
 
-		# kill listen first in case it is already listening (previous replication interrupted)
-		pkill -f "ddsnap delta listen /dev/mapper/$vol 0.0.0.0"
 		# FIXME TODO - for now we listen on 0.0.0.0 and we don't check where
 		# the request came from, in the future, to avoid doing something
 		# wrong, such as replicatin from 2 hosts, check the $SSH_CLIENT
@@ -1211,9 +1228,9 @@ receive)
 			exit 2
 		fi ;;
 	done)
-		pkill -f "ddsnap delta listen /dev/mapper/$vol 0.0.0.0"
-		verify_valid_number $snap || { echo "snapnum '$snap' is not valid"; exit 1; }
-		replication_cycle $vol $snap ;;
+		verify_valid_number $send_snap || { echo "snapnum '$send_snap' is not valid"; exit 2; }
+		[[ ${send_chunk/*\//} -eq ${send_chunk/\/*/} ]] || { echo "replication not complete ($send_chunk chunks)"; exit 3; }
+		replication_cycle $vol $send_snap && rm $progressfile ;;
 	esac
 	exit
 	;;
