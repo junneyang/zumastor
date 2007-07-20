@@ -19,6 +19,7 @@ cp proxy /etc/apache2/sites-available/
 ln -sf /etc/apache2/sites-available/proxy /etc/apache2/sites-enabled/
 ln -sf /etc/apache2/mods-available/proxy.conf /etc/apache2/mods-enabled/
 ln -sf /etc/apache2/mods-available/proxy.load /etc/apache2/mods-enabled/
+ln -sf /etc/apache2/mods-available/proxy_http.load /etc/apache2/mods-enabled/
 ln -sf /etc/apache2/mods-available/cache.load /etc/apache2/mods-enabled/
 ln -sf /etc/apache2/mods-available/disk_cache.load /etc/apache2/mods-enabled/
 
