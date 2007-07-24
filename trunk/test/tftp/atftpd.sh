@@ -12,6 +12,18 @@
 # directory.
 [ -e /tftpboot ] || mkdir /tftpboot
 
+# Some scripts users run may also need a subdirectory of /tftpboot
+# owned by the unprivileged user.  Check if running under sudo and
+# create a directory for that user.
+if test -n "$SUDO_USER"; then
+  mkdir -m 755 /tftpboot/${SUDO_USER}
+  chown ${SUDO_USER} /tftpboot/${SUDO_USER}
+else
+  echo "Some scripts may require dedicated per-user subdirectories in /tftpboot."
+  echo "   sudo mkdir -m 755 /tftpboot/UID"
+  echo "   sudo chown UID /tftpboot/UID"
+fi
+
 # preferred over apt-get, remembers what was a dependency and what was
 # actually requested.
 aptitude -y install atftpd
@@ -41,8 +53,10 @@ fi
 
 # Populate /tftpboot with the Debian and Ubuntu network installers.
 # Allow any user (particularly the atftpd user) to access them.
+UBUNTUARCHIVE="http://archive.ubuntu.com/ubuntu"
+DEBIANARCHIVE="http://ftp.us.debian.org/debian"
 cd /tftpboot
-wget -O - http://archive.ubuntu.com/ubuntu/dists/dapper/main/installer-i386/current/images/netboot/netboot.tar.gz | tar zxvf -
-wget -O - http://ftp.us.debian.org/debian/dists/etch/main/installer-amd64/current/images/netboot/netboot.tar.gz | tar zxvf -
-wget -O - http://ftp.us.debian.org/debian/dists/etch/main/installer-i386/current/images/netboot/netboot.tar.gz | tar zxvf -
+wget -O - ${UBUNTUARCHIVE}/dists/dapper/main/installer-i386/current/images/netboot/netboot.tar.gz | tar zxvf -
+wget -O - ${DEBIANARCHIVE}/dists/etch/main/installer-amd64/current/images/netboot/netboot.tar.gz | tar zxvf -
+wget -O - ${DEBIANARCHIVE}/dists/etch/main/installer-i386/current/images/netboot/netboot.tar.gz | tar zxvf -
 chmod -R o+rX .
