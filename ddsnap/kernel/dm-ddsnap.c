@@ -527,6 +527,7 @@ static int incoming(struct dm_target *target)
 	int err, length;
 	char *err_msg;
 	u32 chunksize_bits;
+	struct socket *vm_sock;
 
 	daemonize("%s %d", "ddsnap-clnt", info->snap);
 	while (down_interruptible(&info->exit2_sem))
@@ -540,6 +541,11 @@ connect:
 		;
 	trace(warn("got socket %p", info->sock);)
 	sock = info->sock;
+#ifdef DM_DDSNAP_SWAP
+	vm_sock = SOCKET_I(info->sock->f_dentry->d_inode);
+	warn("setup sk_vmio");
+	sk_set_vmio(vm_sock->sk);
+#endif
 
 	while (running(info)) { // stop on module exit
 		int rw = READ, to_snap = 1, failed_io = 0;
@@ -1198,8 +1204,14 @@ static void ddsnap_destroy(struct dm_target *target)
 		;
 	warn("thread 3 exited");
 
-	if (info->sock)
+	if (info->sock) {
+#ifdef DM_DDSNAP_SWAP
+		struct socket *vm_sock = SOCKET_I(info->sock->f_dentry->d_inode);
+		warn("clear sk_vmio");
+		sk_clear_vmio(vm_sock->sk);
+#endif
 		fput(info->sock);
+	}
 	if (info->control_socket)
 		fput(info->control_socket);
 	if (info->inode)
