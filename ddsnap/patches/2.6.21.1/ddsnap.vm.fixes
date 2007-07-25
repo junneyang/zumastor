@@ -2265,3 +2265,14 @@ diff -puN kernel/sys.c~PF_MEMALLOC kernel/sys.c
  		default:
  			error = -EINVAL;
 _
+--- linux-2.6.21.1/include/linux/prctl.h	2007-07-16 11:33:05.000000000 -0700
++++ linux-2.6.21.1~new/include/linux/prctl.h	2007-07-25 13:03:15.000000000 -0700
+@@ -60,6 +60,7 @@
+ # define PR_ENDIAN_PPC_LITTLE	2	/* "PowerPC" pseudo little endian */
+ 
+ /* set process less throttleL: see PF_LESS_THROTTLE */
+-#define PR_SET_LESS_THROTTLE           21
++#define PR_SET_LESS_THROTTLE		21
++#define PR_SET_MEMALLOC			22
+ 
+ #endif /* _LINUX_PRCTL_H */
