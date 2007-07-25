@@ -2249,3 +2249,19 @@ diff -purN linux-2.6.21.1.old/security/selinux/avc.c linux-2.6.21.1.new/security
  	if (!node)
  		goto out;
  
+diff -puN kernel/sys.c~PF_MEMALLOC kernel/sys.c
+--- linux-2.6.21.1/kernel/sys.c~PF_MEMALLOC	2007-07-19 11:58:12.000000000 -0700
++++ linux-2.6.21.1-root/kernel/sys.c	2007-07-19 11:59:49.000000000 -0700
+@@ -2175,6 +2175,11 @@ asmlinkage long sys_prctl(int option, un
+ 			current->flags |= PF_LESS_THROTTLE;
+ 			return 0;
+ 		}
++		case PR_SET_MEMALLOC: {
++			current->flags |= PF_MEMALLOC;
++			printk("set PF_MEMALLOC for process %s[%i]\n", current->comm, current->pid);
++			return 0;
++		}
+ 			
+ 		default:
+ 			error = -EINVAL;
+_

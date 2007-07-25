@@ -541,7 +541,7 @@ connect:
 		;
 	trace(warn("got socket %p", info->sock);)
 	sock = info->sock;
-#ifdef DM_DDSNAP_SWAP
+#ifdef CONFIG_DM_DDSNAP_SWAP
 	vm_sock = SOCKET_I(info->sock->f_dentry->d_inode);
 	warn("setup sk_vmio");
 	sk_set_vmio(vm_sock->sk);
@@ -1205,7 +1205,7 @@ static void ddsnap_destroy(struct dm_target *target)
 	warn("thread 3 exited");
 
 	if (info->sock) {
-#ifdef DM_DDSNAP_SWAP
+#ifdef CONFIG_DM_DDSNAP_SWAP
 		struct socket *vm_sock = SOCKET_I(info->sock->f_dentry->d_inode);
 		warn("clear sk_vmio");
 		sk_clear_vmio(vm_sock->sk);
