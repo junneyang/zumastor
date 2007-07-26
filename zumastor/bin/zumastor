@@ -11,11 +11,13 @@ function read_and_inc {
 	[[ $# -eq 2 ]] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
 	local -r filename=$1
 	local -r inc=$2
-	local num
+	local num new
 	# we only use even numbers for master snapshots (odd for mounting downstream)
-	read num <$filename && let num++ || num=0
-	[[ $((num % 2)) -eq 0 ]] || let num++
-	echo $num | tee $filename || return 1
+	read num <$filename || num=0
+	new=$((num + 1))
+	[[ $((new % 2)) -eq 0 ]] || let new++
+	echo $new > $filename || return 1
+	echo $num
 }
 
 function drop_snapshot {
