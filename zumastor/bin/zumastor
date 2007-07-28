@@ -716,8 +716,9 @@ function replication_cycle {
 	create_device $vol $next >> $log 2>&1
 	create_device $vol $mount >> $log 2>&1
 
-	log "setting snapshot unquashable..." $log
-	set_priority $vol $next 127 >> $log 2>&1
+	# disabled to work around the case where many origin write failures make the system go unresponsive
+	#log "setting snapshot unquashable..." $log
+	#set_priority $vol $next 127 >> $log 2>&1
 
 	log "setting holdfile to $next" $log
 	echo $next > $holdfile
