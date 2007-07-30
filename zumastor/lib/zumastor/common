@@ -157,7 +157,7 @@ function start_volume {
 	[[ -h $mdev ]] || mdev=""	
 
 	ddsnap agent -l $agentlog $agent || return 1
-	ddsnap server -l $serverlog $sdev $odev $mdev $agent $server || return 1
+	ddsnap server -p ${RUNPATH}/${vol}-server.pid -l $serverlog $sdev $odev $mdev $agent $server || return 1
 }
 
 function stop_volume {
