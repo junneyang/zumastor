@@ -1,27 +1,30 @@
 #!/usr/bin/perl
 #
-# gnome-spyware.pl : Monitor system usage
-#
-# Copyright (C) 2006 by Callum McKenzie
-#
-# Time-stamp: <2006-12-19 20:30:51 callum>
+# Monitor the ddsnap server page use for all Zumastor volumes.
 #
 
 use POSIX qw(strftime);
 use IO::Handle;
 use Getopt::Std;
 
-$logfile = "$ENV{HOME}/.gnome-spyware-log";
-%options = ();
+my %options = ();
+my $sleeptime = 30;
+my $count = -1;
+my ($logfile, @servers, $server, $ddsnappid);
 
-getopt ("f", \%options);
-$logfile = $options{f} if defined $options{f};
-
-#open (LOGFILE, ">>" . $logfile) or die "Could not open the log file: $!";
-open (LOGFILE, ">&STDOUT") or die "Couldn't dup stdout: $!";
+getopt ("cdf", \%options);
+$count = $options{c} if defined $options{c};
+$sleeptime = $options{d} if defined $options{d};
+if (defined $options{f}) {
+	$logfile = $options{f};
+	open (LOGFILE, ">>" . $logfile) or die "Could not open log file $f: $!";
+}
+else {
+	open (LOGFILE, ">&STDOUT") or die "Couldn't dup stdout: $!";
+}
 select LOGFILE; $| = 1;
 
-$starttime = time;
+my $starttime = time;
 
 sub scan_process {
 	my $pid = $_[0];
@@ -56,12 +59,18 @@ sub scan_process {
 	LOGFILE->flush();
 }
 
-while (1) {
-	unless (opendir(SDIR, "/var/run/zumastor/servers")) {
-		die("Couldn't open server piddir: $!");
+while ($count < 0 || $count-- > 0) {
+	if (scalar(@ARGV) > 0) {
+		@servers = @ARGV;
 	}
-	@servers = grep /^\w+$/, readdir(SDIR);
-	closedir SDIR;
+	else {
+		unless (opendir(SDIR, "/var/run/zumastor/servers")) {
+			die("Couldn't open server piddir: $!");
+		}
+		@servers = grep /^\w+$/, readdir(SDIR);
+		closedir SDIR;
+	}
+	$ddsnappid = "";
 	foreach $server (@servers) {
 		next unless open(PID, "/var/run/zumastor/$server-server.pid");
 		$ddsnappid = <PID>;
@@ -69,5 +78,7 @@ while (1) {
 		chomp $ddsnappid;
 		scan_process($ddsnappid, (time - $starttime), $server);
 	}
-	sleep (30);
+	if ($count != 0) {
+		sleep($sleeptime);
+	}
 }
