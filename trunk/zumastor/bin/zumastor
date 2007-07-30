@@ -228,7 +228,7 @@ function replicate_snapshot {
 			old_snap= remote_addr=
 		fi
 	fi
-	if [[ $remote_send ]] && [[ $remote_send != $snap ]]; then
+	if [[ $remote_send ]] && [[ $remote_send != $snap ]] && [[ $remote_send != $remote_hold ]]; then
 		if verify_existing_snap $vol $remote_send; then
 			log "downstream has partial replication of '$remote_send', using it instead of '$snap'"
 			[[ -e "/dev/mapper/$vol($remote_send)" ]] || create_device $vol $remote_send
@@ -239,7 +239,7 @@ function replicate_snapshot {
 		fi
 	fi
 
-	[[ $remote_addr ]] && resume=" --resume $remote_addr"
+	[[ $remote_addr ]] && [[ $remote_send != $remote_hold ]] && resume=" --resume $remote_addr"
 
 	log "remote listen started on port $port, transmitting snapshot $snap$resume"
 	# send the changes since the last snapshot via ddsnap transmit
@@ -1218,6 +1218,7 @@ receive)
 	start)
 		read hold <$holdfile 2>/dev/null
 		[[ $hold ]] && verify_existing_snap $vol $hold || hold=-1
+		[[ $hold = $send_snap ]] && { send_snap= send_addr=; }
 		echo $hold $send_snap $send_addr
 
 		# FIXME TODO - for now we listen on 0.0.0.0 and we don't check where
