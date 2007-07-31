@@ -17,8 +17,6 @@ diskimgdir=${HOME}/.testenv
 
 REVISION=`svn info | awk '/Revision:/ { print $2; }'`
 export REVISION
-rm -rf build
-time ./build_packages.sh test/config/qemu-config
 rm -f ${diskimgdir}/zuma/dapper-i386.img
 
 cd test/scripts
