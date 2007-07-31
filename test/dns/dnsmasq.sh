@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/sh -x
 #
 # $Id$
 #
@@ -12,6 +12,21 @@
 #
 # Copyright Google Inc. All rights reserved.
 # Author: Drake Diedrich (dld@google.com)
+
+VIRTNET="192.168.23.0/24"
+VIRTHOST="192.168.23.1"
+VIRTBR="br1"
+[ -x /etc/default/testenv ] && . /etc/default/testenv
+
+if echo $VIRTNET | egrep "/24"
+then
+  NETWORK=`echo $VIRTNET | sed s%\.0\/24%%`
+  NETMASK="255.255.255.0"
+else
+  echo "Configure manually.  only /24 supported by $0"
+  exit 2
+fi
+        
 
 aptitude install dnsmasq
 
@@ -34,13 +49,13 @@ if [ ! -f /etc/dnsmasq.conf.distrib ] ; then
 #    dpkg-divert --remove /etc/dnsmasq.conf
 #
 
-interface=br1
+interface=$VIRTBR
 interface=lo
 bind-interfaces
-dhcp-range=192.168.23.50,192.168.23.253,12h
+dhcp-range=$NETWORK.50,$NETWORK.253,12h
 dhcp-leasefile=/var/lib/misc/dnsmasq.leases
 log-queries
-dhcp-boot=/pxelinux.0,boothost,192.168.23.1
+dhcp-boot=/pxelinux.0,boothost,$VIRTHOST
 domain-needed
 bogus-priv
 EOF
