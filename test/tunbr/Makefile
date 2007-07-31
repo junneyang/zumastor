@@ -1,4 +1,4 @@
-CFLAGS=-W -O2 -g
+CFLAGS=-W -O2 -g `./tunbr-config`
 BINDIR=usr/local/bin
 
 all: tunbr
