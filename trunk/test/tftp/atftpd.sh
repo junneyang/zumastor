@@ -8,6 +8,9 @@
 # Copyright 2007 Google Inc.  All rights reserved.
 # Author: Drake Diedrich (dld@google.com)
 
+VIRTHOST="192.168.23.1"
+[ -x /etc/default/testenv ] && . /etc/default/testenv
+
 # Create /tftpboot if it doesn't exist.  May already be a symlink or
 # directory.
 [ -e /tftpboot ] || mkdir /tftpboot
@@ -45,7 +48,7 @@ fi
 # make sure atftpd only binds to the host-only IP address 192.168.23.1,
 # so it's only serving to local instances, not the rest of the world.
 if ! echo $OPTIONS | egrep bind-address ; then
-  sed -i 's/=\"/=\"--bind-address 192.168.23.1 /' /etc/default/atftpd
+  sed -i "s/=\"/=\"--bind-address $VIRTHOST /" /etc/default/atftpd
 fi
 
 # restart atftpd now that it's been reconfigured as a daemon
