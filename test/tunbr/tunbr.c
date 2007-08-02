@@ -28,6 +28,7 @@
 #include <strings.h>
 #include <stdlib.h>
 #include <time.h>
+#include <signal.h>
 
 extern char **environ;
 
@@ -385,6 +386,19 @@ int main(int argc, char **argv) {
   char macfile[256], macaddr[20], ipaddr[16];
   unsigned char mac[6], ip[4];
   int instance;
+  struct sigaction ignoresig;
+
+
+  /* ignore most interrupt-like signals, let them fall through to
+   * the child process, kill it, and then tunbr can clean up and exit */
+  ignoresig.sa_handler = SIG_IGN;
+  ignoresig.sa_flags = 0;
+  sigemptyset(&ignoresig.sa_mask);
+  sigaction(SIGINT, &ignoresig, NULL);
+  sigaction(SIGHUP, &ignoresig, NULL);
+  sigaction(SIGTERM, &ignoresig, NULL);
+  sigaction(SIGUSR1, &ignoresig, NULL);
+  sigaction(SIGUSR2, &ignoresig, NULL);
 
 
   instance = next_instance();
