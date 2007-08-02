@@ -1,0 +1,6 @@
+#!/bin/bash
+
+KERNEL_VERSION=2.6.21.1
+ZUMA_REPOSITORY=/root/zumastor
+LOG=/dev/null
+host_tap_ip=192.168.100.111
