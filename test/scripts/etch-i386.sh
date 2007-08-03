@@ -22,8 +22,9 @@ fi
 size=2G
 diskimgdir=${HOME}/.testenv
 tftpdir=/tftpboot
-qemu_i386=qemu  # could be kvm, kqemu version, etc.  Must be 0.9.0 to net boot.
-
+qemu_i386=qemu  # could be kvm, kqemu version, etc.
+rqemu_i386=qemu  # could be kvm, kqemu version, etc.  Must be 0.9.0 to net boot.
+VIRTHOST=192.168.23.1
 [ -x /etc/default/testenv ] && . /etc/default/testenv
 
 if [ ! -e ${diskimgdir}/template ]; then
@@ -44,6 +45,7 @@ if [ ! -f ${diskimg} ] ; then
   passwd=`pwgen 8 1`
   pwhash=`echo ${passwd} | mkpasswd -s --hash=md5`
   cat >>${tmpdir}/initrd/preseed.cfg <<EOF
+d-i     mirror/http/hostname    string ${VIRTHOST}
 d-i     passwd/root-password-crypted    password ${pwhash}
 d-i     passwd/user-password-crypted    password ${pwhash}
 d-i	passwd/user-fullname            string ${USER}
@@ -69,7 +71,7 @@ EOF
   rm -rf ${tmpdir}
   chmod ugo+r ${tftpdir}/${USER}/debian-installer/i386/initrd.gz
   
-  qemu-img create -f qcow2 ${diskimg} ${size}
+  ${qemu_img} create -f qcow2 ${diskimg} ${size}
 
   cat >${MACFILE} <<EOF
 DEFAULT auto
@@ -81,7 +83,7 @@ TIMEOUT 1
 EOF
   chmod ugo+r ${MACFILE}
 
-  ${qemu_i386} \
+  ${rqemu_i386} \
     -net nic,macaddr=${MACADDR} -net tap,ifname=${IFACE},script=no \
     -boot n -hda ${diskimg} -no-reboot
     
