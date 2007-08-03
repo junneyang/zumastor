@@ -9,8 +9,8 @@
 # machine.  Code direct from the repository is only run on virtual instances.
 
 sendmail=/usr/sbin/sendmail
-email_failure="hotcakes-team@google.com"
-email_success="hotcakes-team@google.com"
+email_failure="zumastor-buildd@google.com"
+email_success="zumastor-buildd@google.com"
 
 if [ ! -f zumastor/Changelog ] ; then
   echo "cp $0 to the parent directory of the zumastor repository and "
