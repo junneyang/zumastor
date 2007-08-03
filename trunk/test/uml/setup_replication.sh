@@ -35,7 +35,7 @@ echo -e "done.\n"
 sleep 30
 
 # set up ssh keys for source and target umls to access each other
-if [[ $initial ]]; then
+if [[ $initial -eq 1 ]]; then
 	echo -n Setting up ssh-keygen...
 	ssh $source_uml_host "rm /root/.ssh/id_dsa; rm /root/.ssh/id_dsa.pub"
 	ssh $source_uml_host "ssh-keygen -t dsa -f /root/.ssh/id_dsa -P ''"

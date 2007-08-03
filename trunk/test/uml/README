@@ -5,8 +5,13 @@ Content
   * build_uml.sh builds kernel linux uml with the KERNEL_VERSION specified in config_uml
   * build_fs.sh installs all the required libraries and utilities based on the image downloaded from uml website
   * setup_network.sh configures uml network
+  * update_zuma.sh takes the file system image as input and installs new ddnsap and zumastor
   * setup_replication.sh loads source and target umls, sets up ssh keys for source and target umls to access each other, and sets up source and target volumes according to the configuratiosn in config_replication
+  * replication_cleanup.sh removes volumes on source and target and shutdowns the umls
   * test_fullreplication.sh starts full volume replication test and monitors the replicaiton progress
+  * test_replication_unplug.sh tests replication in case of network failures
+  * test_source_stop.sh tests occasionally stopping zumastor on source host in the middle of replicaiton
+  * test_target_stop.sh tests occasionally stopping zumastor on target host in the middle of replicaiton
 
 Usage
   * Copy all of the files included in this directory to where you want to run the test
