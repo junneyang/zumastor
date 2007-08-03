@@ -1,7 +1,6 @@
 #
-# Automatically generated make config: don't edit
-# Linux kernel version: 2.6.19.1-zumastor-0.4-pre7
-# Fri Mar 16 14:02:14 2007
+# A full distribution-style zumastor 2.6.19.1 kernel config
+# for full package testing in the zumastor test environment
 #
 CONFIG_X86_32=y
 CONFIG_GENERIC_TIME=y

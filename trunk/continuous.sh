@@ -8,6 +8,10 @@
 # the parent directory to avoid running unsafe code on your host
 # machine.  Code direct from the repository is only run on virtual instances.
 
+sendmail=/usr/sbin/sendmail
+email_failure="hotcakes-team@google.com"
+email_success="hotcakes-team@google.com"
+
 if [ ! -f zumastor/Changelog ] ; then
   echo "cp $0 to the parent directory of the zumastor repository and "
   echo "run from that location.  Periodically inspect the three "
@@ -23,12 +27,29 @@ while true
 do
   svn update
   revision=`svn info | awk '/Revision:/ { print $2; }'`
-  if [ "$revision" = "$oldrevision" ]
+  if [ "x$revision" = "x$oldrevision" ]
   then
     sleep 300
   else
-    ../dapper-build.sh
-    ../runtests.sh
+    # TODO(dld): timeouts and report failure if these take "forever"
+    buildlog=`mktemp`
+      testlog=`mktemp`
+    if ../dapper-build.sh >${buildlog} 2>&1 ; then
+      if ../runtests.sh >${testlog} 2>&1 ; then
+        ( echo "Subject: zumastor r$revision build and test success" ;\
+          echo ; cat ${buildlog} ${testlog} ) | \
+        ${sendmail} ${email_success}
+      else
+        ( echo "Subject: zumastor r$revision test failure" ;\
+          echo ; cat ${buildlog} ${testlog} ) | \
+        ${sendmail} ${email_success}
+      fi
+    else
+      ( echo "Subject: zumastor r$revision build failure" ;\
+        echo ; cat ${buildlog} ) | \
+      ${sendmail} ${email_failure}
+    fi
+      
   fi
   oldrevision=$revision
 done

@@ -88,10 +88,16 @@ cd ~build/zumastor
 ./builddepends.sh
 EOF
 
+# Use the full kernel config unless qemu symlink points to another config file
+KERNEL_CONFIG=kernel/config/full
+if [ -e kernel/config/qemu ] ; then
+  KERNEL_CONFIG=kernel/config/qemu
+fi
+
 ssh build@${IPADDR} <<EOF
 cd zumastor
 echo $SVNREV >SVNREV
-./buildcurrent.sh test/config/qemu-config
+./buildcurrent.sh $KERNEL_CONFIG
 EOF
 
 BUILDSRC="build@${IPADDR}:zumastor/build"
