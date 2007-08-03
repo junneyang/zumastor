@@ -27,3 +27,6 @@ cat <<EOF >> /target/etc/network/interfaces
 allow-hotplug eth1
 iface eth1 inet dhcp
 EOF
+
+# set noapic on the grub kernel boot stanza
+in-target sed --in-place '/^kernel/s/$/ noapic/' /boot/grub/menu.lst
