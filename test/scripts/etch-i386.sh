@@ -19,7 +19,7 @@ fi
 
 # defaults, overridden by /etc/default/testenv if it exists
 # diskimgdir should be local for reasonable performance
-size=2G
+size=10G
 diskimgdir=${HOME}/.testenv
 tftpdir=/tftpboot
 qemu_i386=qemu  # could be kvm, kqemu version, etc.
