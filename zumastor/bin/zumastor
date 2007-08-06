@@ -232,6 +232,7 @@ function replicate_snapshot {
 		if verify_existing_snap $vol $remote_send; then
 			log "downstream has partial replication of '$remote_send', using it instead of '$snap'"
 			[[ -e "/dev/mapper/$vol($remote_send)" ]] || create_device $vol $remote_send
+			drop_snapshot $vol $snap
 			snap=$remote_send ret=13
 		else
 			log "downstream has partial replication of invalid '$remote_send', falling back to full volume"

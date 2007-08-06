@@ -85,7 +85,7 @@ function stop_zumastor {
 			umount_device $vol $id >> $log 2>&1
 		done
 
-		for id in $(get_managed_snapshots $vol); do
+		for id in $(ddsnap status ${SERVERS}/$vol --list); do
 			remove_device $vol $id >> $log 2>&1
 		done
 		umount_device $vol -1 >> $log 2>&1
