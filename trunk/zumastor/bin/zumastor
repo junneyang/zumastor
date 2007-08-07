@@ -222,6 +222,12 @@ function replicate_snapshot {
 		if verify_existing_snap $vol $remote_hold; then
 			log "downstream holding valid snapshot '$remote_hold', using it instead of '$old_snap'"
 			[[ -e "/dev/mapper/$vol($remote_hold)" ]] || create_device $vol $remote_hold
+			if [[ $remote_hold == $snap ]]; then # trying to resend finished replication cycle
+				log "trying to resume already completed snapshot '$snap', success"
+				echo $snap >$hold_file && rm $remote_file
+				[[ $old_snap ]] && drop_snapshot $vol $old_snap
+				return 0
+			fi
 			old_snap=$remote_hold
 		else
 			log "downstream holding invalid snapshot '$remote_hold', falling back to full volume"
