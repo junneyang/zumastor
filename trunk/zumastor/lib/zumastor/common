@@ -175,7 +175,7 @@ function stop_volume {
 	# see if the meta device symlink exists, otherwise set mdev variable to empty string	
 	[[ -h $mdev ]] && mdev="$mdev " || mdev=""
 
-	pkill -f "ddsnap server -l $serverlog $sdev $odev ${mdev}$agent $server$"
+	pkill -f "ddsnap server -p ${RUNPATH}/${vol}-server.pid -l $serverlog $sdev $odev ${mdev}$agent $server$"
 	pkill -f "ddsnap agent -l $agentlog $agent$"
 	rm $agent $server
 }
