@@ -12,6 +12,7 @@ Content
   * test_replication_unplug.sh tests replication in case of network failures
   * test_source_stop.sh tests occasionally stopping zumastor on source host in the middle of replicaiton
   * test_target_stop.sh tests occasionally stopping zumastor on target host in the middle of replicaiton
+  * run_all.sh runs all test scripts included in the current directory one by one. The generated results are "test_name PASS/FAIL/UNRESOLVED" and a log file of output for each test
 
 Usage
   * Copy all of the files included in this directory to where you want to run the test
@@ -33,3 +34,11 @@ Troubleshooting
 
   running)
     * The default memory that the test scripts assign to uml is 64M. You can change this by changing the value of mem option that linux takes in the corresponding test script
+    * The current ddsnap code sets buffer cache size as 128M. This causes problems when running any uml whose assigned memory is limited. Please change it to smaller value in ddsnapd.c:start_server, especially if you want to run full volume replication test.
+    * The built root file system image contains only basic packages required to run the test. You usually want to install the following packages and checkout the current zumastor code from svn if you want to debug zumastor or ddsnap on uml:
+         apt-get install subversion
+         apt-get install make
+         apt-get install gcc
+         apt-get install zlib1g-dev
+         apt-get install libpopt-dev
+         svn co http://zumastor.googlecode.com/svn/trunk/ zumastor
