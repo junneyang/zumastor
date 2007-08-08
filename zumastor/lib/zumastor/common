@@ -309,3 +309,13 @@ function set_priority {
 
 	ddsnap priority $server $id $priority || return 1
 }
+
+function touch_atomic {
+	[[ $# -eq 1 ]] || { echo "$0: wrong argument count ($#: $@) in call: ${FUNCNAME[@]}"; exit 1; }
+	local -r file=$1
+	local tmpfile=$file.$$
+
+	touch $tmpfile
+	ln $tmpfile $file 2>/dev/null || { rm $tmpfile; return 1; }
+	rm $tmpfile
+}
