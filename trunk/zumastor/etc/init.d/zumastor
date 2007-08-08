@@ -23,7 +23,7 @@ function start_zumastor {
 		mkdir -p $MOUNTS || return 1
 	fi
 
-	touch $RUNFILE
+	touch_atomic $RUNFILE || { echo "$RUNFILE exists, is zumastor already running?"; exit 1; }
 
 	for vol in $(ls $VOLUMES); do
 		log=$LOGS/$vol/start.log
@@ -100,17 +100,13 @@ function stop_zumastor {
 
 case $1 in
 start)
-	if [ -e $RUNFILE ]; then
-		echo "$RUNFILE exists, is zumastor already running?"
-		exit 1
-	fi
 	start_zumastor
 	;;
 
 stop)
-	touch $STOPFILE
+	touch_atomic $STOPFILE || { echo "$STOPFILE exists, shutdown in progress?"; exit 1; }
 	stop_zumastor
-	[ -e $RUNFILE ] && rm $RUNFILE
+	rm $RUNFILE 2>/dev/null
 	rm $STOPFILE
 	exit 0
 
