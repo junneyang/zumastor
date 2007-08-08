@@ -108,8 +108,10 @@ start)
 	;;
 
 stop)
+	touch $STOPFILE
 	stop_zumastor
 	[ -e $RUNFILE ] && rm $RUNFILE
+	rm $STOPFILE
 	exit 0
 
 	;;
