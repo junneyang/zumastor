@@ -418,6 +418,7 @@ function stop_nag {
 
 	pkill -f "ddsnap delta listen /dev/mapper/$vol 0.0.0.0"
 	pkill -f "zumastor start source $vol$"
+	pkill -f "zumastor receive done $vol "
 	sync
 }
 
@@ -716,8 +717,8 @@ function replication_cycle {
 	log "replication cycle beginning - snapshot ($hold, $next)..." $log
 
 	log "creating snapshots..." $log
-	create_snapshot $vol $next >> $log 2>&1 || { log "error creating new snapshot '$next'" $log; return 1; }
-	create_snapshot $vol $mount >> $log 2>&1
+	verify_existing_snap $vol $next || create_snapshot $vol $next >> $log 2>&1 || { log "error creating new snapshot '$next'" $log; return 1; }
+	verify_existing_snap $vol $mount || create_snapshot $vol $mount >> $log 2>&1
 
 	log "creating devices..." $log
 	create_device $vol $next >> $log 2>&1
@@ -726,9 +727,6 @@ function replication_cycle {
 	# disabled to work around the case where many origin write failures make the system go unresponsive
 	#log "setting snapshot unquashable..." $log
 	#set_priority $vol $next 127 >> $log 2>&1
-
-	log "setting holdfile to $next" $log
-	echo $next > $holdfile
 
 	# FIXME TODO - we have to umount -l first, because umount always removes the topmost
 	# filesystem :(, so we need to freeze access here
@@ -739,15 +737,18 @@ function replication_cycle {
 		umount_device $vol $oldmount -l >> $log 2>&1
 	fi
 
-	log "mounting $vol($mount)" $log
-	mount_device $vol $mount unqualified >> $log 2>&1
-
 	if [[ $hold != "initial" ]]; then
 		# NFS resume 
 		cat /proc/fs/nfsd/suspend > /dev/null 2>&1
 		drop_snapshot $vol $hold >> $log 2>&1
 		drop_snapshot $vol $oldmount >> $log 2>&1
 	fi
+
+	log "setting holdfile to $next" $log
+	echo $next > $holdfile
+
+	log "mounting $vol($mount)" $log
+	mount_device $vol $mount unqualified >> $log 2>&1
 
 	log "cycle complete" $log
 	return 0 # we only fail if create fails
@@ -788,7 +789,7 @@ function nag_daemon {
 }
 
 [[ -d $VOLUMES ]] || { echo "$0: cannot find zumastor database in '$VOLUMES'"; exit 1; }
-[[ $1 == "stop" ]] || [[ $1 == "status" ]] || [[ -e $RUNFILE ]] || { echo "$0: zumastor not running, start with '/etc/init.d/zumastor start' first"; exit 1; }
+[[ $1 == "stop" ]] || [[ $1 == "status" ]] || [[ -e $RUNFILE ]] || [[ -e $STOPFILE ]] || { echo "$0: zumastor not running, start with '/etc/init.d/zumastor start' first"; exit 1; }
 
 case $1 in
 define)
