@@ -9,7 +9,7 @@
 . setup_replication.sh || { echo UNRESOLVED; exit 1; }
 
 echo -n Start full-volume replication test...
-ssh $source_uml_host "zumastor define target $vol $target_uml_host:$target_port 1 -t fullvolume" || { echo FAIL; exit 1; }
+ssh $source_uml_host "zumastor define target $vol $target_uml_host:$target_port -p 1 -t fullvolume" || { echo FAIL; exit 1; }
 ssh $target_uml_host "zumastor define source $vol $source_uml_host -p $interval" || { echo FAIL; exit 1; }
 echo -e "done.\n"
 sleep 30
