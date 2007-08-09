@@ -248,6 +248,12 @@ function replicate_snapshot {
 
 	[[ $remote_addr ]] && [[ $remote_send != $remote_hold ]] && resume=" --resume $remote_addr"
 
+	if [[ -e $target_dir/test_fullvolume ]] && [[ -z $resume ]] ; then
+		log "full volume replication test"
+		[[ $old_snap ]] && drop_snapshot $vol $old_snap
+		old_snap=
+	fi
+
 	log "remote listen started on port $port, transmitting snapshot $snap$resume"
 	# send the changes since the last snapshot via ddsnap transmit
 	ddsnap transmit $server $host:$port -r -g 6 $old_snap $snap$resume -p $send_file
@@ -303,7 +309,8 @@ function run_master {
 		# this is now overloaded to support two types of requests to create snapshots:
 		# <kind> - which triggers a periodic snapshot (hourly, daily, etc)
 		# target <hostname> - which triggers a snapshot for replication
-		read kind <$fifo || exit 1
+		[[ -r $fifo ]] || { log "pipe $fifo does not exist" $log; exit 1; }
+		read kind <$fifo || { log "error when reading pipe $?" $log; sleep 1; continue; }
 		if [[ $kind =~ "^target/" ]]; then
 			new_target_snapshot $vol ${kind/target\//} >> $log 2>&1
 		else
@@ -549,6 +556,7 @@ function define_target {
 			
 	fi
 
+	[[ test_fullvolume -eq 1 ]] && echo 1 > $path/test_fullvolume
 	[[ $new -ne 1 ]] || zumastor start target $vol $host
 }
 
@@ -848,10 +856,33 @@ define)
 
 		exit $? ;;
 	target)
-		[[ $# -eq 4 ]] || [[ $# -eq 5 ]] || { echo "usage: $0 define target <vol> <host>[:port] [period]"; exit 2; }
-		declare vol=$3
-		declare host=$4
-		declare period=$5
+		declare name="$0 $1 $2"
+		declare usage="usage: $name vol> host>[:port] [-p|--period period] [-t|--test test_feature>][-h|--help]"
+		declare test_fullvolume=0
+		declare period
+
+		shift 2
+		args=`getopt -ot:p:h -l test:,help -n"$name" -- "$@"` || { echo $usage; exit 2; }
+		eval set -- "$args"  # remove getopt quotes and set new arguments
+		until [[ $1 = -- ]]; do
+			case "$1" in
+			-h|--help) echo $usage; exit;;
+			-p|--period) period=$2; shift 1;;
+			-t|--test)
+				case "$2" in
+					fullvolume) test_fullvolume=1;;
+					*) echo "invalid test options"; exit 9;;
+				esac
+				shift 1;;
+			*) echo whoops; exit 9;;
+			esac
+			shift 1
+		done
+		shift # remove --
+
+		[[ $# -eq 2 ]] || { echo $usage; exit 2; }
+		declare vol=$1
+		declare host=$2
 		declare port=${host/*:/}
 
 		# check to see if port was specified, if so, strip it off the host
