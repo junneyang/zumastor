@@ -3490,6 +3490,7 @@ int snap_server(struct superblock *sb, int listenfd, int getsigfd, int agentfd)
 		/* Agent message? */
 		if (pollvec[2].revents) {
 			if (pollvec[2].revents & (POLLHUP|POLLERR)) { /* agent went away */
+				cleanup(sb);
 				err = DDSNAPD_AGENT_ERROR;
 				goto done;
 			}

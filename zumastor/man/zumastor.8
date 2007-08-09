@@ -14,7 +14,7 @@ zumastor \- block level snapshot and replication
 .I volume_name \fP\fIhost\fP [-p|--period \fIinterval\fP] [-y|--yes]
 .br
 .B zumastor define target
-.I volume_name \fP\fIhost\fP[\fI:port\fP] [\fIinterval\fP]
+.I volume_name \fP\fIhost\fP[\fI:port\fP] [-p|--period \fIinterval\fP] [-t|--test \fIfeature\fP]
 .br
 .B zumastor forget volume
 .I volume_name
@@ -57,9 +57,9 @@ Used after \fBdefine\fP \fBvolume\fP to specify the snapshot rotation for the vo
 .br
 Used after \fBdefine\fP \fBvolume\fP to specify the upstream host that is expected to replicate snapshots to this volume. If the volume was previously a \fBmaster\fP volume, removes the \fBmaster\fP definition, since it is now a replication target.  If the optional \fIinterval\fP (in seconds) is specified, the upstream server will be asked for updates at this interval and when the volume is started.  It should be smaller than the automatic replication interval configured for this target on the upstream host.  The yes option answers yes to all prompts.
 .IP \fBdefine\ \fBtarget\fP
-.I volume_name \fP\fIhost\fP[\fI:port\fP] [\fIinterval\fP]
+.I volume_name \fP\fIhost\fP[\fI:port\fP] [-p|--period \fIinterval\fP] [-t|--test \fIfeature\fP]
 .br
-Used after \fBdefine\fP \fBvolume\fP to specify a downstream host to which the volume will be replicated to.  If the optional \fIinterval\fP (in seconds) is specified, the target (downstream) server will be replicated to at the given interval.
+Used after \fBdefine\fP \fBvolume\fP to specify a downstream host to which the volume will be replicated to.  If the optional \fIinterval\fP (in seconds) is specified, the target (downstream) server will be replicated to at the given interval. The test option is used for testing purpose.
 .IP \fBforget\ \fBvolume\fP
 .I volume_name
 .br
