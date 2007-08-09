@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/sh -x
 #
 # $Id$
 #
@@ -29,7 +29,7 @@ if [ "x$VERSION" = "x" ] ; then
   exit 1
 fi
 SVNREV=`svn info | grep ^Revision:  | cut -d\  -f2`
-ARCH=`dpkg --print-architecture`
+ARCH=i386
 
 
 if [ "x$MACFILE" = "x" -o "x$MACADDR" = "x" -o "x$IFACE" = "x" ] ; then
@@ -104,7 +104,7 @@ echo $SVNREV >SVNREV
 EOF
 
 BUILDSRC="build@${IPADDR}:zumastor/build"
-DEBVERS="${VERSION}-r${SVNREV}_${ARCH}"
+DEBVERS="${VERSION}-r${SVNREV}"
 KVERS="${KERNEL_VERSION}-zumastor-r${SVNREV}_1.0"
 
 for f in \
@@ -112,8 +112,8 @@ for f in \
     ${BUILDSRC}/ddsnap_${DEBVERS}_${ARCH}.deb \
     ${BUILDSRC}/ddsnap_${DEBVERS}.dsc \
     ${BUILDSRC}/ddsnap_${DEBVERS}.tar.gz \
-    ${BUILDSRC}/zumastor_${DEBVERS}_{$ARCH}.changes \
-    ${BUILDSRC}/zumastor_${DEBVERS}_{$ARCH}.deb \
+    ${BUILDSRC}/zumastor_${DEBVERS}_${ARCH}.changes \
+    ${BUILDSRC}/zumastor_${DEBVERS}_${ARCH}.deb \
     ${BUILDSRC}/zumastor_${DEBVERS}.dsc \
     ${BUILDSRC}/zumastor_${DEBVERS}.tar.gz \
     ${BUILDSRC}/kernel-headers-${KVERS}_${ARCH}.deb \
