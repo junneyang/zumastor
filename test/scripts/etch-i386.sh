@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/sh -x
 
 # Set up the initial Debian/etch template image, for use when duplicating
 # the install to multiple server/client tests.  Makes use of tunbr and
@@ -11,6 +11,9 @@
 
 set -e
 
+SSH='ssh -o StrictHostKeyChecking=no'
+SCP='scp -o StrictHostKeyChecking=no'
+
 if [ "x$MACFILE" = "x" -o "x$MACADDR" = "x" -o "x$IFACE" = "x" ] ; then
   echo "Run this script under tunbr"
   exit 1
@@ -20,18 +23,24 @@ fi
 # defaults, overridden by /etc/default/testenv if it exists
 # diskimgdir should be local for reasonable performance
 size=10G
-diskimgdir=${HOME}/.testenv
+diskimgdir=${HOME}/testenv
 tftpdir=/tftpboot
 qemu_i386=qemu  # could be kvm, kqemu version, etc.
 rqemu_i386=qemu  # could be kvm, kqemu version, etc.  Must be 0.9.0 to net boot.
 VIRTHOST=192.168.23.1
 [ -x /etc/default/testenv ] && . /etc/default/testenv
 
-if [ ! -e ${diskimgdir}/template ]; then
-  mkdir -p ${diskimgdir}/template
+IMAGE=etch-i386
+IMAGEDIR=${diskimgdir}/${IMAGE}
+SERIAL=${IMAGEDIR}/serial
+MONITOR=${IMAGEDIR}/monitor
+
+if [ ! -e ${IMAGEDIR} ]; then
+  mkdir -p ${IMAGEDIR}
+  chmod 700 ${IMAGEDIR}
 fi
 
-diskimg=${diskimgdir}/template/etch-i386.img
+diskimg=${IMAGEDIR}/hda.img
 
 if [ ! -f ${diskimg} ] ; then
 
@@ -43,6 +52,9 @@ if [ ! -f ${diskimg} ] ; then
   cp etch-early.sh ${tmpdir}/initrd/early.sh
   cp etch-late.sh ${tmpdir}/initrd/late.sh
   passwd=`pwgen 8 1`
+  touch ${IMAGEDIR}/root
+  chmod 600 ${IMAGEDIR}/root
+  echo $passwd > ${IMAGEDIR}/root
   pwhash=`echo ${passwd} | mkpasswd -s --hash=md5`
   cat >>${tmpdir}/initrd/preseed.cfg <<EOF
 d-i     mirror/http/hostname    string ${VIRTHOST}
@@ -74,19 +86,42 @@ EOF
   ${qemu_img} create -f qcow2 ${diskimg} ${size}
 
   cat >${MACFILE} <<EOF
+SERIAL 0 115200 0
 DEFAULT auto
 LABEL auto
 	kernel debian-installer/i386/linux
-	append auto=true priority=critical vga=normal initrd=${USER}/debian-installer/i386/initrd.gz preseed/file=/preseed.cfg -- 
+	append auto=true priority=critical vga=normal initrd=${USER}/debian-installer/i386/initrd.gz preseed/file=/preseed.cfg console=tty0 console=ttyS0,115200n8
 PROMPT 0
 TIMEOUT 1
 EOF
   chmod ugo+r ${MACFILE}
 
   ${rqemu_i386} \
+    -serial unix:${SERIAL},server,nowait \
+    -monitor unix:${MONITOR},server,nowait \
     -net nic,macaddr=${MACADDR} -net tap,ifname=${IFACE},script=no \
     -boot n -hda ${diskimg} -no-reboot
     
+  ${qemu_i386} \
+    -serial unix:${SERIAL},server,nowait \
+    -monitor unix:${MONITOR},server,nowait \
+    -net nic,macaddr=${MACADDR} -net tap,ifname=${IFACE},script=no \
+    -boot c -hda ${diskimg} -no-reboot &
+
+  while ! ${SSH} root@${IPADDR} hostname 2>/dev/null
+  do
+    echo -n .
+    sleep 10
+  done
+
+  # turn the swap partition into LVM2 sysvg
+  ${SCP} swap2sysvg.sh root@${IPADDR}:
+  ${SSH} root@${IPADDR} './swap2sysvg.sh && rm swap2sysvg.sh'
+
+  ${SSH} root@${IPADDR} halt
+
+  wait
+
   echo "${diskimg} installed.  root and ${USER} passwords are: ${passwd}"
 
 else

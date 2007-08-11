@@ -12,7 +12,7 @@
 set -e
 
 # necessary at the moment, looks like a zumastor bug
-SLEEP=1
+SLEEP=5
 
 echo "1..6"
 
@@ -29,14 +29,14 @@ sync ; zumastor snapshot testvol hourly
 date >> /var/run/zumastor/mount/testvol/testfile
 sleep $SLEEP
 
-if [ -d /var/run/zumastor/mount/testvol\(1\)/ ] ; then
+if [ -d /var/run/zumastor/mount/testvol\(0\)/ ] ; then
   echo "ok 2 - first snapshot mounted"
 else
   echo "not ok 2 - first snapshot mounted"
   exit 2
 fi
 
-if [ ! -f /var/run/zumastor/mount/testvol\(1\)/testfile ] ; then
+if [ ! -f /var/run/zumastor/mount/testvol\(0\)/testfile ] ; then
   echo "ok 3 - testfile not present in first snapshot"
 else
   echo "not ok 3 - testfile not present in first snapshot"
@@ -49,7 +49,7 @@ sleep $SLEEP
 if [ -d /var/run/zumastor/mount/testvol\(2\)/ ] ; then
   echo "ok 4 - second snapshot mounted"
 else
-  echo "not ok 4 - secodn snapshot mounted"
+  echo "not ok 4 - second snapshot mounted"
   exit 4
 fi
 
