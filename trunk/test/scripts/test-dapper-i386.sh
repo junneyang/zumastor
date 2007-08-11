@@ -21,16 +21,22 @@ fi
 
 # defaults, overridden by /etc/default/testenv if it exists
 # diskimgdir should be local for reasonable performance
-size=2G
-diskimgdir=${HOME}/.testenv
+diskimgdir=${HOME}/testenv
 tftpdir=/tftpboot
 qemu_i386=qemu  # could be kvm, kqemu version, etc.  Must be 0.9.0 to net boot.
 
 [ -x /etc/default/testenv ] && . /etc/default/testenv
 
+IMAGE=dapper-i386
+IMAGEDIR=${diskimgdir}/${IMAGE}
+diskimg=${IMAGEDIR}/hda.img
+
+tmpdir=`mktemp -d /tmp/${IMAGE}.XXXXXX`
+SERIAL=${tmpdir}/serial
+MONITOR=${tmpdir}/monitor
 
 
-diskimg=${diskimgdir}/template/dapper-i386.img
+
 
 if [ ! -f ${diskimg} ] ; then
 

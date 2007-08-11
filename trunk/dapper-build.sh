@@ -37,30 +37,42 @@ if [ "x$MACFILE" = "x" -o "x$MACADDR" = "x" -o "x$IFACE" = "x" ] ; then
   exit 1
 fi
 
+SSH='ssh -o StrictHostKeyChecking=no'
+SCP='scp -o StrictHostKeyChecking=no'
+
 # defaults, overridden by /etc/default/testenv if it exists
 # diskimgdir should be local for reasonable performance
 size=10G
-diskimgdir=${HOME}/.testenv
+diskimgdir=${HOME}/testenv
 tftpdir=/tftpboot
 qemu_i386=qemu  # could be kvm, kqemu version, etc.  Must be 0.9.0 to net boot.
 
 [ -x /etc/default/testenv ] && . /etc/default/testenv
 
+IMAGE=dapper-i386
+IMAGEDIR=${diskimgdir}/${IMAGE}
+diskimg=${IMAGEDIR}/hda.img
 
+tmpdir=`mktemp -d /tmp/${IMAGE}.XXXXXX`
+SERIAL=${tmpdir}/serial
+MONITOR=${tmpdir}/monitor
 
-diskimg=${diskimgdir}/template/dapper-i386.img
 
 if [ ! -f ${diskimg} ] ; then
   echo "No $diskimg available.  Run dapper-i386.sh first."
   exit 2
 fi
 
+echo IPADDR=${IPADDR}
+echo control/tmp dir=${tmpdir}
 
 ${qemu_i386} -snapshot -m 512 \
+  -serial unix:${SERIAL},server,nowait \
+  -monitor unix:${MONITOR},server,nowait \
   -net nic,macaddr=${MACADDR} -net tap,ifname=${IFACE},script=no \
   -boot c -hda ${diskimg} -no-reboot &
 
-while ! ssh -o StrictHostKeyChecking=no root@${IPADDR} hostname >/dev/null 2>&1
+while ! ${SSH} root@${IPADDR} hostname >/dev/null 2>&1
 do
   echo -n .
   sleep 10
@@ -73,7 +85,7 @@ if [ ! -d build ] ; then
   popd
 fi
 
-ssh root@${IPADDR} <<EOF
+${SSH} root@${IPADDR} <<EOF
 lvcreate --name home --size 5G sysvg
 mke2fs /dev/sysvg/home
 mount /dev/sysvg/home /home
@@ -84,9 +96,9 @@ chown -R build ~build
 EOF
 
 tar cf - --exclude build * | ssh build@${IPADDR} tar xf - -C zumastor
-scp build/linux-${KERNEL_VERSION}.tar.bz2 build@${IPADDR}:zumastor/build/
+${SCP} build/linux-${KERNEL_VERSION}.tar.bz2 build@${IPADDR}:zumastor/build/
 
-ssh root@${IPADDR} <<EOF 
+${SSH} root@${IPADDR} <<EOF 
 cd ~build/zumastor
 ./builddepends.sh
 EOF
@@ -97,7 +109,7 @@ if [ -e kernel/config/qemu ] ; then
   KERNEL_CONFIG=kernel/config/qemu
 fi
 
-ssh build@${IPADDR} <<EOF
+${SSH} build@${IPADDR} <<EOF
 cd zumastor
 echo $SVNREV >SVNREV
 ./buildcurrent.sh $KERNEL_CONFIG
@@ -119,10 +131,11 @@ for f in \
     ${BUILDSRC}/kernel-headers-${KVERS}_${ARCH}.deb \
     ${BUILDSRC}/kernel-image-${KVERS}_${ARCH}.deb
 do
-  scp $f build/
+  ${SCP} $f build/
 done
 
-ssh root@${IPADDR} halt
+${SSH} root@${IPADDR} halt
 
 wait
 
+rm -rf ${tmpdir}

@@ -11,6 +11,9 @@
 
 set -e
 
+SSH='ssh -o StrictHostKeyChecking=no'
+SCP='scp -o StrictHostKeyChecking=no'
+
 execfiles="$*"
 
 if [ "x$MACFILE" = "x" -o "x$MACADDR" = "x" -o "x$IFACE" = "x" \
@@ -21,45 +24,56 @@ fi
 
 # defaults, overridden by /etc/default/testenv if it exists
 # diskimgdir should be local for reasonable performance
-size=2G
-diskimgdir=${HOME}/.testenv
+diskimgdir=${HOME}/testenv
 tftpdir=/tftpboot
 qemu_i386=qemu  # could be kvm, kqemu version, etc.  Must be 0.9.0 to net boot.
 
+VIRTHOST=192.168.23.1
 [ -x /etc/default/testenv ] && . /etc/default/testenv
 
+IMAGE=zuma-dapper-i386
+IMAGEDIR=${diskimgdir}/${IMAGE}
+diskimg=${IMAGEDIR}/hda.img
 
+tmpdir=`mktemp -d /tmp/${IMAGE}.XXXXXX`
+SERIAL=${tmpdir}/serial
+MONITOR=${tmpdir}/monitor
 
-diskimg=${diskimgdir}/zuma/dapper-i386.img
 
 if [ ! -f ${diskimg} ] ; then
 
   echo "No template image ${diskimg} exists yet."
-  echo "Run tunbr dapper-i386.sh first."
+  echo "Run tunbr zuma-dapper-i386.sh first."
   exit 1
 fi
 
 echo IPADDR=${IPADDR}
+echo control/tmp dir=${tmpdir}
 
 ${qemu_i386} -snapshot \
+  -serial unix:${SERIAL},server,nowait \
+  -monitor unix:${MONITOR},server,nowait \
   -net nic,macaddr=${MACADDR},model=ne2k_pci \
   -net tap,ifname=${IFACE},script=no \
   -boot c -hda ${diskimg} -no-reboot &
   
-while ! ssh -o StrictHostKeyChecking=no root@${IPADDR} hostname 2>/dev/null
+
+while ! ${SSH} root@${IPADDR} hostname 2>/dev/null
 do
   echo -n .
   sleep 10
 done
 
+echo IPADDR=${IPADDR}
+echo control/tmp dir=${tmpdir}
 
 # execute any parameters here
 if [ "x${execfiles}" != "x" ]
 then
-  scp ${execfiles} root@${IPADDR}: </dev/null || true
+  ${SCP} ${execfiles} root@${IPADDR}: </dev/null || true
   for f in ${execfiles}
   do
-    if ssh root@${IPADDR} ./${f}
+    if ${SSH} root@${IPADDR} ./${f}
     then
       echo ${f} ok
     else
@@ -69,9 +83,11 @@ then
 fi
 
 
-ssh root@${IPADDR} halt
+${SSH} root@${IPADDR} halt
 
 wait
 
 echo "Instance shut down, removing ssh hostkey"
 sed -i /^${IPADDR}\ .*\$/d ~/.ssh/known_hosts
+
+rm -rf %{tmpdir}

@@ -11,6 +11,22 @@
 
 set -e
 
+KERNEL_VERSION=`awk '/^2\.6\.[0-9]+(\.[0-9]+)?$/ { print $1; }' ../../KernelVersion`
+if [ "x$KERNEL_VERSION" = "x" ] ; then
+  echo "Suspect KernelVersion file"
+  exit 1
+fi
+VERSION=`awk '/[0-9]+\.[0-9]+(\.[0-9]+)?$/ { print $1; }' ../../Version`
+if [ "x$VERSION" = "x" ] ; then
+  echo "Suspect Version file"
+  exit 1
+fi
+SVNREV=`svn info | grep ^Revision:  | cut -d\  -f2`
+ARCH=i386
+
+SSH='ssh -o StrictHostKeyChecking=no'
+SCP='scp -o StrictHostKeyChecking=no'
+
 if [ "x$MACFILE" = "x" -o "x$MACADDR" = "x" -o "x$IFACE" = "x" \
      -o "x$IPADDR" = "x" ] ; then
   echo "Run this script under tunbr"
@@ -19,16 +35,27 @@ fi
 
 # defaults, overridden by /etc/default/testenv if it exists
 # diskimgdir should be local for reasonable performance
-size=2G
-diskimgdir=${HOME}/.testenv
+diskimgdir=${HOME}/testenv
 tftpdir=/tftpboot
-qemu_i386=qemu  # could be kvm, kqemu version, etc.  Must be 0.9.0 to net boot.
-
+qemu_img=qemu-img  # could be kvm, kqemu version, etc.
+qemu_i386=qemu  # could be kvm, kqemu version, etc.
+rqemu_i386=qemu  # could be kvm, kqemu version, etc.  Must be 0.9.0 to net boot.
+VIRTHOST=192.168.23.1
 [ -x /etc/default/testenv ] && . /etc/default/testenv
 
+IMAGE=zuma-dapper-i386
+IMAGEDIR=${diskimgdir}/${IMAGE}
+SERIAL=${IMAGEDIR}/serial
+MONITOR=${IMAGEDIR}/monitor
+
+if [ ! -e ${IMAGEDIR} ]; then
+  mkdir -p ${IMAGEDIR}
+fi
+
+diskimg=${IMAGEDIR}/hda.img
 
 
-templateimg=${diskimgdir}/template/dapper-i386.img
+templateimg=${diskimgdir}/dapper-i386/hda.img
 
 if [ ! -f ${templateimg} ] ; then
 
@@ -37,27 +64,24 @@ if [ ! -f ${templateimg} ] ; then
   exit 1
 fi
 
-zumaimg=${diskimgdir}/zuma/dapper-i386.img
-
-if [ -f ${zumaimg} ] ; then
+if [ -f ${diskimg} ] ; then
   echo Zuma/dapper image already exists, remove if you wish to build a new one
-  echo rm ${zumaimg}
+  echo rm ${diskimg}
   exit 2
 fi
 
-if [ ! -d ${diskimgdir}/zuma ] ; then
-  mkdir -p ${diskimgdir}/zuma
-fi
 
-qemu-img create  -b ${templateimg} -f qcow2 ${zumaimg}
+${qemu_img} create  -b ${templateimg} -f qcow2 ${diskimg}
 
 ${qemu_i386} \
+  -serial unix:${SERIAL},server,nowait \
+  -monitor unix:${MONITOR},server,nowait \
   -net nic,macaddr=${MACADDR},model=ne2k_pci \
   -net tap,ifname=${IFACE},script=no \
-  -boot c -hda ${zumaimg} -no-reboot &
+  -boot c -hda ${diskimg} -no-reboot &
   
 # wait for ssh to work
-while ! ssh -o StrictHostKeyChecking=no root@${IPADDR} hostname 2>/dev/null
+while ! ${SSH} root@${IPADDR} hostname 2>/dev/null
 do
   echo -n .
   sleep 10
@@ -67,10 +91,10 @@ date
 
 # copy the debs that were built in the build directory
 # onto the new zuma template instance
-scp ../../build/*.deb root@${IPADDR}:
+${SCP} ../../build/*.deb root@${IPADDR}:
 
 # install the copied debs in the correct order
-ssh root@${IPADDR} <<EOF
+${SSH} root@${IPADDR} <<EOF
 aptitude install -y tree
 dpkg -i kernel-image*.deb
 dpkg -i ddsnap*.deb
@@ -80,27 +104,25 @@ apt-get clean
 EOF
 
 # halt the new image, and wait for qemu to exit
-ssh root@${IPADDR} halt
+${SSH} root@${IPADDR} halt
 wait
 
 if false
 then
 
-  tmpdir=`mktemp -d`
-
-  mkfifo ${tmpdir}/monitor
-
   ${qemu_i386} \
+    -serial unix:${SERIAL},server,nowait \
+    -monitor unix:${MONITOR},server,nowait \
     -net nic,macaddr=${MACADDR} -net tap,ifname=${IFACE},script=no \
-    -boot c -hda ${diskimg} -no-reboot -monitor pipe:${tmpdir}/monitor &
+    -boot c -hda ${diskimg} -no-reboot &
 
-  while ! ssh -o StrictHostKeyChecking=no root@${IPADDR} hostname 2>/dev/null
+  while ! ${SSH} root@${IPADDR} hostname 2>/dev/null
   do
     echo -n .
     sleep 10
   done
 
-  cat <<EOF > ${tmpdir}/monitor
+  socat STDIN unix-connect:UNIX-CONNECT:${MONITOR} <<EOF
 stop
 savevm booted
 quit
@@ -108,7 +130,6 @@ EOF
 
   wait
 
-  rm -rf ${tmpdir}
 fi
 
 echo "Instance shut down, removing ssh hostkey"
