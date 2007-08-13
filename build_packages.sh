@@ -30,46 +30,9 @@ echo -n Getting kernel sources from kernel.org ...
 wget -c http://www.kernel.org/pub/linux/kernel/v2.6/linux-${KERNEL_VERSION}.tar.bz2 >> $LOG || exit $?
 echo -e "done.\n"
 
-echo -n Building zumastor Debian package...
-pushd zumastor/zumastor >> $LOG || exit 1
-dch -b -v $VERSION-r$SVNREV "revision $SVNREV" || exit 1
-dpkg-buildpackage -uc -us -rfakeroot >> $LOG || exit 1
-popd >> $LOG
-echo -e "done.\n"
 
-echo -n Building ddsnap Debian package...
-pushd zumastor/ddsnap >> $LOG || exit 1
-dch -b -v $VERSION-r$SVNREV "revision $SVNREV" || exit 1
-dpkg-buildpackage -uc -us -rfakeroot >> $LOG || exit 1
-make genpatches
-popd >> $LOG
-cp zumastor/*.deb .
-echo -e "done.\n"
-
-# this mv can pollute for filesystem with lots of kernel trees, but is safer than rm -rf
-[[ -e linux-${KERNEL_VERSION} ]] && { \
-	echo Moving old kernel tree to linux-${KERNEL_VERSION}.$TIME; \
-	mv linux-${KERNEL_VERSION} linux-${KERNEL_VERSION}.$TIME; }
-
-echo -n Unpacking kernel...
-tar xjf linux-${KERNEL_VERSION}.tar.bz2 || exit 1
-echo -e "done.\n"
-
-echo -n "Setting .config ..."
-mv $KERNEL_VERSION.config linux-${KERNEL_VERSION}/.config
-echo -e "done.\n"
-
-echo Applying patches...
-pushd linux-${KERNEL_VERSION} >> $LOG || exit 1
-for patch in ../zumastor/zumastor/patches/${KERNEL_VERSION}/* ../zumastor/ddsnap/patches/${KERNEL_VERSION}/*; do
-	echo "   $patch"
-	< $patch patch -p1 >> $LOG || exit 1
-done
-echo -e "done.\n"
-
-echo -n Building kernel package...
-fakeroot make-kpkg --append_to_version=-zumastor-r$SVNREV --revision=1.0 --initrd  --mkimage="mkinitramfs -o /boot/initrd.img-%s %s" --bzimage kernel_image kernel_headers >> $LOG </dev/null || exit 1
-popd >> $LOG
-echo -e "done.\n"
-
-echo zumastor packages successfully built in $BUILD_DIR/*.deb
+echo Starting package builds ...
+pushd zumastor
+echo $KERNEL_VERSION >KernelVersion
+./buildcurrent.sh ../$KERNEL_VERSION.config
+popd
