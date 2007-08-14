@@ -18,6 +18,9 @@
 
 # set -e
 
+# Die if more than four hours pass
+( sleep 14400 ; kill $$ ; exit 0 ) & tmoutpid=$!
+
 KERNEL_VERSION=`awk '/^2\.6\.[0-9]+(\.[0-9]+)?$/ { print $1; }' KernelVersion`
 if [ "x$KERNEL_VERSION" = "x" ] ; then
   echo "Suspect KernelVersion file"
@@ -46,6 +49,7 @@ size=10G
 diskimgdir=${HOME}/testenv
 tftpdir=/tftpboot
 qemu_i386=qemu  # could be kvm, kqemu version, etc.  Must be 0.9.0 to net boot.
+qemu_threads=1
 
 [ -x /etc/default/testenv ] && . /etc/default/testenv
 
@@ -66,7 +70,7 @@ fi
 echo IPADDR=${IPADDR}
 echo control/tmp dir=${tmpdir}
 
-${qemu_i386} -snapshot -m 512 \
+${qemu_i386} -snapshot -m 512 -smp ${qemu_threads} \
   -serial unix:${SERIAL},server,nowait \
   -monitor unix:${MONITOR},server,nowait \
   -net nic,macaddr=${MACADDR} -net tap,ifname=${IFACE},script=no \
@@ -101,6 +105,7 @@ ${SCP} build/linux-${KERNEL_VERSION}.tar.bz2 build@${IPADDR}:zumastor/build/
 ${SSH} root@${IPADDR} <<EOF 
 cd ~build/zumastor
 ./builddepends.sh
+echo CONCURRENCY_LEVEL := ${threads} >> /etc/kernel-pkg.conf
 EOF
 
 # Use the full kernel config unless qemu symlink points to another config file
