@@ -33,6 +33,12 @@ function start_zumastor {
 		create_device $vol -1 || return 1
 		local list=$(get_managed_snapshots $vol) || return 1
 		for id in $list; do
+			if [[ -e /dev/mapper/$vol\($id\) ]]; then
+				log "remove left device $vol\($id\)" $log
+				umount_device $vol $id >> $log 2>&1
+				remove_device $vol $id >> $log 2>&1
+				ddsnap usecount $SERVERS/$vol $id -1 >> $log 2>&1
+			fi
 			create_device $vol $id >> $log 2>&1
 		done
 
