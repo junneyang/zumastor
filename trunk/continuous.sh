@@ -4,11 +4,12 @@
 #
 
 # Continuously svn update, run the encapsulated build, and the test
-# suite.  Copy this and the build-dapper.sh and runtests.sh scripts to
+# suite.  Copy this and the dapper-build.sh and runtests.sh scripts to
 # the parent directory to avoid running unsafe code on your host
 # machine.  Code direct from the repository is only run on virtual instances.
 
 sendmail=/usr/sbin/sendmail
+TUNBR=tunbr
 email_failure="zumastor-buildd@google.com"
 email_success="zumastor-buildd@google.com"
 
@@ -33,9 +34,9 @@ do
   else
     # TODO(dld): timeouts and report failure if these take "forever"
     buildlog=`mktemp`
-      testlog=`mktemp`
-    if ../dapper-build.sh >${buildlog} 2>&1 ; then
-      if ../runtests.sh >${testlog} 2>&1 ; then
+    testlog=`mktemp`
+    if ${TUNBR} ../dapper-build.sh >${buildlog} 2>&1 ; then
+      if ${TUNBR} ${TUNBR} ../runtests.sh >${testlog} 2>&1 ; then
         ( echo "Subject: zumastor r$revision build and test success" ;\
           echo ; cat ${buildlog} ${testlog} ) | \
         ${sendmail} ${email_success}
