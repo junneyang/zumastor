@@ -48,6 +48,7 @@ fi
 echo IPADDR=${IPADDR}
 
 ${qemu_i386} -snapshot \
+  -nographic \
   -net nic,macaddr=${MACADDR},model=ne2k_pci \
   -net tap,ifname=${IFACE},script=no \
   -boot c -hda ${diskimg} -no-reboot &

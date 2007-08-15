@@ -74,6 +74,7 @@ fi
 ${qemu_img} create  -b ${templateimg} -f qcow2 ${diskimg}
 
 ${qemu_i386} \
+  -nographic \
   -serial unix:${SERIAL},server,nowait \
   -monitor unix:${MONITOR},server,nowait \
   -net nic,macaddr=${MACADDR},model=ne2k_pci \
