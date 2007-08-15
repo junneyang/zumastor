@@ -75,7 +75,7 @@ ${qemu_i386} -snapshot -m 512 -smp ${qemu_threads} \
   -serial unix:${SERIAL},server,nowait \
   -monitor unix:${MONITOR},server,nowait \
   -net nic,macaddr=${MACADDR} -net tap,ifname=${IFACE},script=no \
-  -boot c -hda ${diskimg} -no-reboot &
+  -boot c -hda ${diskimg} -no-reboot & qemu=$!
 
 while ! ${SSH} root@${IPADDR} hostname >/dev/null 2>&1
 do
@@ -142,6 +142,6 @@ done
 
 ${SSH} root@${IPADDR} halt
 
-wait
+wait $qemu
 
 rm -rf ${tmpdir}
