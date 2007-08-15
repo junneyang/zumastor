@@ -42,15 +42,15 @@ do
         ${sendmail} ${email_success}
       else
         ( echo "Subject: zumastor r$revision test failure" ;\
-          echo ; cat ${buildlog} ${testlog} ) | \
-        ${sendmail} ${email_success}
+          echo ; cat ${testlog} ) | \
+        ${sendmail} ${email_failure}
       fi
     else
       ( echo "Subject: zumastor r$revision build failure" ;\
         echo ; cat ${buildlog} ) | \
       ${sendmail} ${email_failure}
-    fi
-      
+    fi      
   fi
+  rm -f ${buildlog} ${testlog}
   oldrevision=$revision
 done
