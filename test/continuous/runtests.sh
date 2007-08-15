@@ -28,9 +28,10 @@ REVISION=`svn info | awk '/Revision:/ { print $2; }'`
 export REVISION
 rm -f ${diskimgdir}/zuma/dapper-i386.img
 
+../zuma-dapper-i386.sh
+
 cd test/scripts
-./zuma-dapper-i386.sh
-if time ./test-zuma-dapper-i386.sh snapshot-test.sh
+if time ../../../test-zuma-dapper-i386.sh snapshot-test.sh
 then
   echo -n "Revision $REVISION is good " >> build.log
   retval=0

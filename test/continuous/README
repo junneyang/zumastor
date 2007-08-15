@@ -1,0 +1,9 @@
+These are the components of the continuous build server that are run on the
+host machine and set up each run of the build and test as new releases of
+the archive are made.  As they are running on the host machine and have
+access to host resources, networks, etc, they should not automatically
+update from the repository.  Copy them all to a dedicated user's home
+directory, and check out a read-only copy of zumastor/ there.  They will
+update the zumastor/ repository, build packages from it, and run the test
+suites.
+
