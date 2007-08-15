@@ -94,12 +94,14 @@ EOF
   chmod ugo+r ${MACFILE}
 
   ${rqemu_i386} \
+    -nographic \
     -serial unix:${SERIAL},server,nowait \
     -monitor unix:${MONITOR},server,nowait \
     -net nic,macaddr=${MACADDR} -net tap,ifname=${IFACE},script=no \
     -boot n -hda ${diskimg} -no-reboot
     
   ${qemu_i386} \
+    -nographic \
     -serial unix:${SERIAL},server,nowait \
     -monitor unix:${MONITOR},server,nowait \
     -net nic,macaddr=${MACADDR} -net tap,ifname=${IFACE},script=no \
