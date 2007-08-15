@@ -41,4 +41,4 @@ nodes, and has a tftpboot directory.  eg.
 
   e) Launch the continuous build
     cd ~
-    ./continous.sh >continuous.log 2>&1 </dev/null &
+    ./continuous.sh >continuous.log 2>&1 </dev/null &
