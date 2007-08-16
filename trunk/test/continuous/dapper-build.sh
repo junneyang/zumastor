@@ -85,10 +85,13 @@ done
 
 if [ ! -d build ] ; then
   mkdir build
-  pushd build
-  wget -c http://www.kernel.org/pub/linux/kernel/v2.6/linux-${KERNEL_VERSION}.tar.bz2
-  popd
 fi
+
+pushd build
+if [ ! -f linux-${KERNEL_VERSION}.tar.bz2 ] ; then
+  wget -c http://www.kernel.org/pub/linux/kernel/v2.6/linux-${KERNEL_VERSION}.tar.bz2
+fi
+popd
 
 ${SSH} root@${IPADDR} <<EOF
 lvcreate --name home --size 5G sysvg
