@@ -119,12 +119,10 @@ if [ -e kernel/config/qemu ] ; then
   KERNEL_CONFIG=kernel/config/qemu
 fi
 
-${SSH} build@${IPADDR} || retval=$? <<EOF
-cd zumastor
-echo $SVNREV >SVNREV
-./buildcurrent.sh $KERNEL_CONFIG
-EOF
+${SSH} build@${IPADDR} "echo $SVNREV >zumastor/SVNREV" || retval=$?
 
+${SSH} build@${IPADDR} "cd zumastor && ./buildcurrent.sh $KERNEL_CONFIG" || \
+ retval=$?
 
 BUILDSRC="build@${IPADDR}:zumastor/build"
 DEBVERS="${VERSION}-r${SVNREV}"
@@ -153,4 +151,4 @@ kill $tmoutpid
 
 rm -rf ${tmpdir}
 
-exit $retval
+exit ${retval}
