@@ -17,6 +17,7 @@
 # License: GPLv2
 
 # set -e
+retval=0
 
 # Die if more than four hours pass
 ( sleep 14400 ; kill $$ ; exit 0 ) & tmoutpid=$!
@@ -118,11 +119,12 @@ if [ -e kernel/config/qemu ] ; then
   KERNEL_CONFIG=kernel/config/qemu
 fi
 
-${SSH} build@${IPADDR} <<EOF
+${SSH} build@${IPADDR} || retval=$? <<EOF
 cd zumastor
 echo $SVNREV >SVNREV
 ./buildcurrent.sh $KERNEL_CONFIG
 EOF
+
 
 BUILDSRC="build@${IPADDR}:zumastor/build"
 DEBVERS="${VERSION}-r${SVNREV}"
@@ -140,11 +142,15 @@ for f in \
     ${BUILDSRC}/kernel-headers-${KVERS}_${ARCH}.deb \
     ${BUILDSRC}/kernel-image-${KVERS}_${ARCH}.deb
 do
-  ${SCP} $f build/
+  ${SCP} $f build/ || retval=$?
 done
 
 ${SSH} root@${IPADDR} halt
 
-wait $qemu
+wait $qemu || retval=$?
+
+kill $tmoutpid
 
 rm -rf ${tmpdir}
+
+exit $retval
