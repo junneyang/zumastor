@@ -29,6 +29,7 @@
 #include <stdlib.h>
 #include <time.h>
 #include <signal.h>
+#include <sys/wait.h>
 
 extern char **environ;
 
@@ -567,5 +568,5 @@ int main(int argc, char **argv) {
   }
 
 
-  return 0;
+  return (WIFEXITED(status) ? WEXITSTATUS(status) : -1);
 }
