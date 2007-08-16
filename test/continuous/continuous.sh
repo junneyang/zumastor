@@ -48,6 +48,7 @@ oldrevision=${revision}
 while true
 do
   svn update
+  revision=`svn info | awk '/Revision:/ { print $2; }'`
   if [ "x$revision" = "x$oldrevision" ]
   then
     sleep 300
