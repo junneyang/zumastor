@@ -22,35 +22,37 @@ fi
 
 cd zumastor
 
-oldrevision=""
+# build and test the current working directory packages
+revision=`svn info | awk '/Revision:/ { print $2; }'`
+buildlog=`mktemp`
+testlog=`mktemp`
+if ${TUNBR} ../dapper-build.sh >${buildlog} 2>&1 ; then
+  if ${TUNBR} ${TUNBR} ../runtests.sh >${testlog} 2>&1 ; then
+    ( echo "Subject: zumastor r$revision build and test success" ;\
+      echo ; cat ${buildlog} ${testlog} ) | \
+    ${sendmail} ${email_success}
+  else
+    ( echo "Subject: zumastor r$revision test failure" ;\
+      echo ; cat ${testlog} ) | \
+    ${sendmail} ${email_failure}
+  fi
+else
+  ( echo "Subject: zumastor r$revision build failure" ;\
+    echo ; cat ${buildlog} ) | \
+  ${sendmail} ${email_failure}
+fi      
+rm -f ${buildlog} ${testlog}
 
+# loop waiting for a new update
+oldrevision=${revision}
 while true
 do
   svn update
-  revision=`svn info | awk '/Revision:/ { print $2; }'`
   if [ "x$revision" = "x$oldrevision" ]
   then
     sleep 300
   else
-    # TODO(dld): timeouts and report failure if these take "forever"
-    buildlog=`mktemp`
-    testlog=`mktemp`
-    if ${TUNBR} ../dapper-build.sh >${buildlog} 2>&1 ; then
-      if ${TUNBR} ${TUNBR} ../runtests.sh >${testlog} 2>&1 ; then
-        ( echo "Subject: zumastor r$revision build and test success" ;\
-          echo ; cat ${buildlog} ${testlog} ) | \
-        ${sendmail} ${email_success}
-      else
-        ( echo "Subject: zumastor r$revision test failure" ;\
-          echo ; cat ${testlog} ) | \
-        ${sendmail} ${email_failure}
-      fi
-    else
-      ( echo "Subject: zumastor r$revision build failure" ;\
-        echo ; cat ${buildlog} ) | \
-      ${sendmail} ${email_failure}
-    fi      
+    # restart continuous.sh, begining a new build
+    exec $0
   fi
-  rm -f ${buildlog} ${testlog}
-  oldrevision=$revision
 done
