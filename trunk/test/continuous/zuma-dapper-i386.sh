@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/sh -x
 
 # Build an image with current or provided zumastor debs installed, booted,
 # and ready to immediately run single-node tests.
@@ -101,7 +101,7 @@ for f in \
     ${BUILDSRC}/kernel-headers-${KVERS}_${ARCH}.deb \
     ${BUILDSRC}/kernel-image-${KVERS}_${ARCH}.deb
 do
-  ${SCP} $f root@${IPADDR}
+  ${SCP} $f root@${IPADDR}:
 done
 
 # install the copied debs in the correct order
