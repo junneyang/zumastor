@@ -21,12 +21,14 @@ if [ ! -f zumastor/Changelog ] ; then
   exit 1
 fi
 
+pushd ${repo}
+
 # build and test the current working directory packages
-revision=`cd ${repo} && svn info | awk '/Revision:/ { print $2; }'`
+revision=`svn info | awk '/Revision:/ { print $2; }'`
 buildlog=`mktemp`
 testlog=`mktemp`
-if cd ${repo} && ${TUNBR} ../dapper-build.sh >${buildlog} 2>&1 ; then
-  if cd ${repo} && ${TUNBR} ${TUNBR} ../runtests.sh >${testlog} 2>&1 ; then
+if ${TUNBR} ../dapper-build.sh >${buildlog} 2>&1 ; then
+  if ${TUNBR} ${TUNBR} ../runtests.sh >${testlog} 2>&1 ; then
     ( echo "Subject: zumastor r$revision build and test success" ;\
       echo ; cat ${buildlog} ${testlog} ) | \
     ${sendmail} ${email_success}
@@ -47,12 +49,13 @@ oldrevision=${revision}
 while true
 do
   svn update
-  revision=`cd ${repo} && svn info | awk '/Revision:/ { print $2; }'`
+  revision=`svn info | awk '/Revision:/ { print $2; }'`
   if [ "x$revision" = "x$oldrevision" ]
   then
     sleep 300
   else
     # restart continuous.sh, beginning a new build
+    popd
     exec $0
   fi
 done
