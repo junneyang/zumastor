@@ -2,24 +2,37 @@
 
 . /lib/zumastor/common
 
-[[ $# -eq 2 ]] || { echo "usage: $0 <volume> <target>"; exit 1; }
-declare vol=$1
-declare host=$2
-declare sendfile=$VOLUMES/$vol/targets/$host/send
-declare sock=$SERVERS/$vol
-declare size=$(ddsnap status $sock --size) || exit 1
-
+clear
 while true; do
-	replicating=yes
-	read snap chunks_sent <$sendfile 2>/dev/null || replicating=
-	clear
-	if [[ -z $replicating ]]; then
-		echo "Not replicating"
-		sleep 5
-	else
-		[[ -z $chunks_sent ]] && chunks_sent=0
-		per=$(($chunks_sent*100/$size))
-		echo Sending snapshot $snap: $chunks_sent/$size "($per%)"
-		sleep 1
-	fi
+clear
+for vol in $(ls $VOLUMES 2>/dev/null); do
+	echo Volume $vol:
+	sock=$SERVERS/$vol
+	size=$(ddsnap status $sock --size) || exit 1
+	size=$(($size*512))
+	for host in $(ls $VOLUMES/$vol/targets 2>/dev/null); do
+		echo "  Target: $host"
+		sendfile=$VOLUMES/$vol/targets/$host/send
+		holdfile=$VOLUMES/$vol/targets/$host/hold
+		replicating=yes
+		[[ -e $sendfile ]] && read snap chunks_sent byte_address <$sendfile 2>/dev/null || replicating=
+		echo "    Last Cycle:" `stat -c %y $holdfile`
+		if [[ -z $replicating ]]; then
+			if [[ -e $holdfile ]]; then
+				read hold <$holdfile
+				echo "    Status: holding $hold, replication cycle not in progress"
+			else
+				echo "    Status: not replicating"
+			fi
+		else
+			[[ -z $chunks_sent ]] && chunks_sent=0
+			chunks_total=${chunks_sent/*\//}
+			chunks_sent=${chunks_sent/\/*/}
+			per=$(($chunks_sent*100/$chunks_total))
+			bper=$(($byte_address*100/$size))
+			echo "    Status: sending snapshot $snap: chunk $chunks_sent/$chunks_total ($per%), address $byte_address/$size ($bper%)"
+		fi
+	done
+done
+sleep 1
 done
