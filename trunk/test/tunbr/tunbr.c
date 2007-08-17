@@ -29,6 +29,7 @@
 #include <stdlib.h>
 #include <time.h>
 #include <signal.h>
+#include <string.h>
 #include <sys/wait.h>
 
 extern char **environ;
@@ -528,7 +529,11 @@ int main(int argc, char **argv) {
     waitpid(child, &status, 0);
   } else if (child==0) {
     setuid(uid);
-    execve(argv[1], argv+1, environ);
+    execvp(argv[1], argv+1);
+    fprintf(stderr,"execvp(%s,...) failed: %s\n",
+	    argv[1], strerror(errno));
+    fprintf(stderr,"%s probably needs to be fully qualified.\n", argv[1]);
+    exit(-1);
   } else {
     perror("fork");
   }
