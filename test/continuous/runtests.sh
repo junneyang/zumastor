@@ -12,7 +12,8 @@
 
 set -e
 
-diskimgdir=${HOME}/.testenv
+repo=${PWD}
+diskimgdir=${HOME}/testenv
 [ -x /etc/default/testenv ] && . /etc/default/testenv
 
 if [ "x$MACFILE" = "x" -o "x$MACADDR" = "x" -o "x$IFACE" = "x" ] ; then
@@ -26,19 +27,25 @@ fi
 
 REVISION=`svn info | awk '/Revision:/ { print $2; }'`
 export REVISION
-rm -f ${diskimgdir}/zuma/dapper-i386.img
+IMAGE=zuma-dapper-i386
+IMAGEDIR=${diskimgdir}/${IMAGE}
+diskimg=${IMAGEDIR}/hda.img
 
-../zuma-dapper-i386.sh
+rm -f ${diskimg}
 
-cd test/scripts
+pushd test/continuous
+${repo}/zuma-dapper-i386.sh
+popd
+
+pushd test/scripts
 if time ../../../test-zuma-dapper-i386.sh snapshot-test.sh
 then
-  echo -n "Revision $REVISION is good " >> build.log
+  echo -n "Revision $REVISION is good "
   retval=0
 else
-  echo -n "Revision $REVISION is bad " >> build.log
+  echo -n "Revision $REVISION is bad "
   retval=1
 fi
-date >> build.log
+popd
 
 exit ${retval}
