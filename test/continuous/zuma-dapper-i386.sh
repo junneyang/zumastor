@@ -23,6 +23,8 @@ if [ "x$VERSION" = "x" ] ; then
 fi
 SVNREV=`svn info | grep ^Revision:  | cut -d\  -f2`
 ARCH=i386
+DEBVERS="${VERSION}-r${SVNREV}"
+KVERS="${KERNEL_VERSION}-zumastor-r${SVNREV}_1.0"
 
 SSH='ssh -o StrictHostKeyChecking=no'
 SCP='scp -o StrictHostKeyChecking=no'
@@ -79,7 +81,7 @@ ${qemu_i386} \
   -monitor unix:${MONITOR},server,nowait \
   -net nic,macaddr=${MACADDR},model=ne2k_pci \
   -net tap,ifname=${IFACE},script=no \
-  -boot c -hda ${diskimg} -no-reboot &
+  -boot c -hda ${diskimg} -no-reboot & qemu=$!
   
 # wait for ssh to work
 while ! ${SSH} root@${IPADDR} hostname 2>/dev/null
@@ -92,21 +94,29 @@ date
 
 # copy the debs that were built in the build directory
 # onto the new zuma template instance
-${SCP} ../../build/*.deb root@${IPADDR}:
+BUILDSRC=../../build
+for f in \
+    ${BUILDSRC}/ddsnap_${DEBVERS}_${ARCH}.deb \
+    ${BUILDSRC}/zumastor_${DEBVERS}_${ARCH}.deb \
+    ${BUILDSRC}/kernel-headers-${KVERS}_${ARCH}.deb \
+    ${BUILDSRC}/kernel-image-${KVERS}_${ARCH}.deb
+do
+  ${SCP} $f root@${IPADDR}
+done
 
 # install the copied debs in the correct order
 ${SSH} root@${IPADDR} <<EOF
 aptitude install -y tree
-dpkg -i kernel-image*.deb
-dpkg -i ddsnap*.deb
-dpkg -i zumastor*.deb
+dpkg -i kernel-image-${KVERS}_${ARCH}.deb
+dpkg -i ddsnap_${DEBVERS}_${ARCH}.deb
+dpkg -i zumastor_${DEBVERS}_${ARCH}.deb
 rm *.deb
 apt-get clean
 EOF
 
 # halt the new image, and wait for qemu to exit
 ${SSH} root@${IPADDR} halt
-wait
+wait $qemu
 
 if false
 then
@@ -135,3 +145,4 @@ fi
 
 echo "Instance shut down, removing ssh hostkey"
 sed -i /^${IPADDR}\ .*\$/d ~/.ssh/known_hosts
+
