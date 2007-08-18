@@ -34,7 +34,7 @@ diskimg=${IMAGEDIR}/hda.img
 rm -f ${diskimg}
 
 pushd test/continuous
-${repo}/zuma-dapper-i386.sh
+${repo}/../zuma-dapper-i386.sh
 popd
 
 pushd test/scripts
