@@ -1190,6 +1190,8 @@ static int apply_delta_extents(int deltafile, u32 chunk_size, u64 chunk_count, c
 			goto apply_write_error;
 
 		if (progress_file && ((((current_time = now()) - last_update) > 0) || (chunk_num == chunk_count))) {
+			if (fsync(snapdev2))
+				goto out;
 			if (write_progress(progress_file, progress_tmpfile, chunk_num, chunk_count, extent_addr, tgt_snap) < 0)
 				goto out;
 			last_update = current_time;
@@ -1198,6 +1200,8 @@ static int apply_delta_extents(int deltafile, u32 chunk_size, u64 chunk_count, c
 		chunk_num = chunk_num + deh.num_of_chunks;
 	}
 	trace_on(warn("All extents applied to %s\n", dev2name););
+	if (fsync(snapdev2))
+		goto out;
 	err = progress_file ? write_progress(progress_file, progress_tmpfile, chunk_num, chunk_count, extent_addr, tgt_snap) : 0;
 	goto out;
 
