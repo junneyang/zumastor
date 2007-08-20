@@ -76,6 +76,7 @@ function stop_zumastor {
 	local host
 	local log
 
+	touch_atomic $STOPFILE || { echo "$STOPFILE exists, shutdown in progress?"; exit 1; }
 	for vol in $(ls $VOLUMES); do
 		log=$LOGS/$vol/stop.log
 		log "stopping volume $vol" $log
@@ -96,10 +97,12 @@ function stop_zumastor {
 		done
 		umount_device $vol -1 >> $log 2>&1
 		# FIXME error out if this fails so we don't kill the agent and need to reboot
-		remove_device $vol -1 >> $log 2>&1  || { echo remove origin device failed, aborting zumastor stop; exit 1; }
+		remove_device $vol -1 >> $log 2>&1  || { echo remove origin device failed, aborting zumastor stop; rm $STOPFILE; exit 1; }
 
 		stop_volume $vol
 	done
+	rm $RUNFILE 2>/dev/null
+	rm $STOPFILE
 }
 
 [ -d $VOLUMES ] || { echo "$0: cannot find zumastor database in '$VOLUMES'"; exit 1; }
@@ -110,16 +113,11 @@ start)
 	;;
 
 stop)
-	touch_atomic $STOPFILE || { echo "$STOPFILE exists, shutdown in progress?"; exit 1; }
 	stop_zumastor
-	rm $RUNFILE 2>/dev/null
-	rm $STOPFILE
-	exit 0
-
 	;;
 
 restart|force-reload)
-	stop_zumastor
+	[[ -e $RUNFILE ]] && stop_zumastor
 	start_zumastor
 	;;
 status)
