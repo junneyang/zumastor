@@ -47,14 +47,15 @@ VIRTHOST=192.168.23.1
 
 IMAGE=zuma-dapper-i386
 IMAGEDIR=${diskimgdir}/${IMAGE}
+diskimg=${IMAGEDIR}/hda.img
+
 SERIAL=${IMAGEDIR}/serial
 MONITOR=${IMAGEDIR}/monitor
+VNC=${IMAGEDIR}/vnc
 
 if [ ! -e ${IMAGEDIR} ]; then
   mkdir -p ${IMAGEDIR}
 fi
-
-diskimg=${IMAGEDIR}/hda.img
 
 
 templateimg=${diskimgdir}/dapper-i386/hda.img
@@ -76,9 +77,9 @@ fi
 ${qemu_img} create  -b ${templateimg} -f qcow2 ${diskimg}
 
 ${qemu_i386} \
-  -nographic \
   -serial unix:${SERIAL},server,nowait \
   -monitor unix:${MONITOR},server,nowait \
+  -vnc unix:${VNC} \
   -net nic,macaddr=${MACADDR},model=ne2k_pci \
   -net tap,ifname=${IFACE},script=no \
   -boot c -hda ${diskimg} -no-reboot & qemu=$!
@@ -124,6 +125,7 @@ then
   ${qemu_i386} \
     -serial unix:${SERIAL},server,nowait \
     -monitor unix:${MONITOR},server,nowait \
+    -vnc unix:${VNC} \
     -net nic,macaddr=${MACADDR} -net tap,ifname=${IFACE},script=no \
     -boot c -hda ${diskimg} -no-reboot &
 
