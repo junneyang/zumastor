@@ -360,7 +360,9 @@ static int snapshot_read_end_io(struct bio *bio, unsigned int done, int error)
 	bio->bi_end_io = hook->old_end_io;
 	bio->bi_private = hook->old_private;
 	hook->old_end_io = NULL;
-	if (info->dont_switch_lists == 0)
+	if (!worker_running(info))
+		kmem_cache_free(end_io_cache, hook);
+	else if (info->dont_switch_lists == 0)
 		list_move(&hook->list, &info->releases);
 	spin_unlock(&info->end_io_lock);
 	up(&info->more_work_sem);
@@ -736,12 +738,14 @@ void upload_locks(struct devinfo *info)
 	}
 	outbead(info->sock, FINISH_UPLOAD_LOCK, struct {});
 	spin_lock_irqsave(&info->end_io_lock, irqflags);
-	list_for_each_safe(entry, tmp, &info->locked){
-		hook = list_entry(entry, struct hook, list);
-		if (hook->old_end_io == NULL)
-			list_move(&hook->list, &info->releases);
+	if (worker_running(info)) {
+		list_for_each_safe(entry, tmp, &info->locked){
+			hook = list_entry(entry, struct hook, list);
+			if (hook->old_end_io == NULL)
+				list_move(&hook->list, &info->releases);
+		}
+		info->dont_switch_lists = 0;
 	}
-	info->dont_switch_lists = 0;
 	spin_unlock_irqrestore(&info->end_io_lock, irqflags);
 }
 
@@ -866,6 +870,64 @@ recover:
 }
 
 /*
+ * To handle agent failure, we just turn off our ddsnap "ready" flag and
+ * fail all queued IOs. The second part is quite a mess because IO can be 
+ * queued in different places in the driver.  Sigh.  We will just try to 
+ * do this tidiest job we can on this messy feature.  In general, wherever
+ * a bio can wait on a synchronizer before further processing, we need to
+ * unblock the synchronizer (e.g., up the semaphore or ->shutdow a socket)
+ * then check the device ready flag to see if the request should be failed
+ * immediately. In the case of waiting for a server reply, we could fail
+ * the IO after it is removed from the pending hash, or go diving into the
+ * hash lists and remove/fail everything,whichever is less code.  IO that
+ * has already been submitted to an underlying device should be allowed to
+ * succeed, even if the completion is hooked for further processing.
+ */
+static void flush_list(struct devinfo *info, struct list_head *flush_list)
+{
+	struct list_head *entry, *tmp;
+	list_for_each_safe(entry, tmp, flush_list) {
+		struct pending *pending = list_entry(entry, struct pending, list);
+		struct bio *bio=pending->bio;
+		list_del(entry);
+		kmem_cache_free(pending_cache, pending);
+		unthrottle(info, bio);
+		bio_io_error(bio, bio->bi_size);
+	}
+}
+
+static void flush_pending_bio(struct devinfo *info)
+{
+	struct list_head *entry, *tmp;
+	int i;
+	unsigned long irqflags;
+
+	warn("flush_pending_bio");
+	spin_lock(&info->pending_lock);
+	flush_list(info, &info->queries);
+	for (i = 0; i < NUM_BUCKETS; i++)
+		flush_list(info, info->pending+i);
+	spin_unlock(&info->pending_lock);
+
+	spin_lock_irqsave(&info->end_io_lock, irqflags);
+	list_for_each_safe(entry, tmp, &info->releases) {
+		struct hook *hook = list_entry(entry, struct hook, list);
+		list_del(entry);
+		kmem_cache_free(end_io_cache, hook);
+	}
+	spin_unlock_irqrestore(&info->end_io_lock, irqflags);
+	up(&info->more_work_sem);
+	warn("flush_pending_bio done");
+
+}
+
+static int shutdown_socket(struct file *socket)
+{
+	struct socket *sock = SOCKET_I(socket->f_dentry->d_inode);
+	return sock->ops->shutdown(sock, RCV_SHUTDOWN);
+}
+
+/*
  * Yikes, a third daemon, that makes four including the user space
  * monitor.  This daemon proliferation is due to not using poll, which
  * we should fix at some point.  Or maybe we should wait for aio to
@@ -971,6 +1033,13 @@ message_too_long:
 	goto out;
 socket_error:
 	warn("socket error %i", err);
+	if (!(info->flags & FINISH_FLAG)) {
+		info->flags &= ~READY_FLAG;
+		flush_pending_bio(info);
+		// FIXME: send server a disconnect request, notifying it this is a explicit shutdown
+		if (info->sock)
+			shutdown_socket(info->sock);
+	}
 	goto out;
 }
 
@@ -1040,6 +1109,12 @@ static int ddsnap_map(struct dm_target *target, struct bio *bio, union map_info 
 	pending = kmem_cache_alloc(pending_cache, GFP_NOIO|__GFP_NOFAIL);
 	*pending = (struct pending){ .id = id, .bio = bio, .chunk = chunk, .chunks = 1 };
 	spin_lock(&info->pending_lock);
+	if (!worker_running(info)) {
+		spin_unlock(&info->pending_lock);
+		kmem_cache_free(pending_cache, pending);
+		unthrottle(info, bio);
+		return -EIO;
+	}
 	list_add(&pending->list, &info->queries);
 	spin_unlock(&info->pending_lock);
 	up(&info->more_work_sem);
@@ -1061,11 +1136,6 @@ static int ddsnap_map(struct dm_target *target, struct bio *bio, union map_info 
  * a basic flaw in Linux that I hope to get around to fixing at some
  * point, one way or another.
  */
-static int shutdown_socket(struct file *socket)
-{
-	struct socket *sock = SOCKET_I(socket->f_dentry->d_inode);
-	return sock->ops->shutdown(sock, RCV_SHUTDOWN);
-}
 
 /* Jiaying: add proc entries to pass stat info to user space.
  * edit ddsnap_seq_show to add more passed infomation in the snapshot files *
