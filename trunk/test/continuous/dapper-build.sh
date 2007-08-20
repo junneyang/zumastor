@@ -61,6 +61,7 @@ diskimg=${IMAGEDIR}/hda.img
 tmpdir=`mktemp -d /tmp/${IMAGE}.XXXXXX`
 SERIAL=${tmpdir}/serial
 MONITOR=${tmpdir}/monitor
+VNC=${tmpdir}/vnc
 
 
 if [ ! -f ${diskimg} ] ; then
@@ -72,9 +73,9 @@ echo IPADDR=${IPADDR}
 echo control/tmp dir=${tmpdir}
 
 ${qemu_i386} -snapshot -m 512 -smp ${qemu_threads} \
-  -nographic \
   -serial unix:${SERIAL},server,nowait \
   -monitor unix:${MONITOR},server,nowait \
+  -vnc unix:${VNC} \
   -net nic,macaddr=${MACADDR} -net tap,ifname=${IFACE},script=no \
   -boot c -hda ${diskimg} -no-reboot & qemu=$!
 
