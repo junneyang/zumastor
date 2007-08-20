@@ -32,15 +32,16 @@ VIRTHOST=192.168.23.1
 
 IMAGE=etch-i386
 IMAGEDIR=${diskimgdir}/${IMAGE}
+diskimg=${IMAGEDIR}/hda.img
+
 SERIAL=${IMAGEDIR}/serial
 MONITOR=${IMAGEDIR}/monitor
+VNC=${IMAGEDIR}/vnc
 
 if [ ! -e ${IMAGEDIR} ]; then
   mkdir -p ${IMAGEDIR}
   chmod 700 ${IMAGEDIR}
 fi
-
-diskimg=${IMAGEDIR}/hda.img
 
 if [ ! -f ${diskimg} ] ; then
 
@@ -97,16 +98,16 @@ EOF
   chmod ugo+r ${MACFILE}
 
   ${rqemu_i386} \
-    -nographic \
     -serial unix:${SERIAL},server,nowait \
     -monitor unix:${MONITOR},server,nowait \
+    -vnc unix:${VNC} \
     -net nic,macaddr=${MACADDR} -net tap,ifname=${IFACE},script=no \
     -boot n -hda ${diskimg} -no-reboot
     
   ${qemu_i386} \
-    -nographic \
     -serial unix:${SERIAL},server,nowait \
     -monitor unix:${MONITOR},server,nowait \
+    -vnc unix:${VNC} \
     -net nic,macaddr=${MACADDR} -net tap,ifname=${IFACE},script=no \
     -boot c -hda ${diskimg} -no-reboot &
 
