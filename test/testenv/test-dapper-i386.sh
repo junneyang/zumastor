@@ -34,6 +34,7 @@ diskimg=${IMAGEDIR}/hda.img
 tmpdir=`mktemp -d /tmp/${IMAGE}.XXXXXX`
 SERIAL=${tmpdir}/serial
 MONITOR=${tmpdir}/monitor
+VNC=${tmpdir}/vnc
 
 
 
@@ -48,11 +49,19 @@ fi
 echo IPADDR=${IPADDR}
 
 ${qemu_i386} -snapshot \
-  -nographic \
+  -serial unix:${SERIAL},server,nowait \
+  -monitor unix:${MONITOR},server,nowait \
+  -vnc unix:${VNC} \
   -net nic,macaddr=${MACADDR},model=ne2k_pci \
   -net tap,ifname=${IFACE},script=no \
   -boot c -hda ${diskimg} -no-reboot &
-  
+
+while ! ping -c 1 -w 10 ${IPADDR} 2>/dev/null
+do
+  echo -n .
+done
+echo " ping succeeded"
+
 while ! ssh -o StrictHostKeyChecking=no root@${IPADDR} hostname 2>/dev/null
 do
   echo -n .

@@ -27,7 +27,14 @@ qemu_i386=qemu  # could be kvm, kqemu version, etc.  Must be 0.9.0 to net boot.
 
 
 
-diskimg=${diskimgdir}/template/etch-i386.img
+IMAGE=etch-i386
+IMAGEDIR=${diskimgdir}/${IMAGE}
+diskimg=${IMAGEDIR}/hda.img
+
+tmpdir=`mktemp -d /tmp/${IMAGE}.XXXXXX`
+SERIAL=${tmpdir}/serial
+MONITOR=${tmpdir}/monitor
+VNC=${tmpdir}/vnc
 
 if [ ! -f ${diskimg} ] ; then
 
@@ -36,8 +43,12 @@ if [ ! -f ${diskimg} ] ; then
   exit 1
 fi
 
+echo IPADDR=${IPADDR}  tmpdir=${tmpdir}
 
 ${qemu_i386} -snapshot \
+  -serial unix:${SERIAL},server,nowait \
+  -monitor unix:${MONITOR},server,nowait \
+  -vnc unix:${VNC} \
   -net nic,macaddr=${MACADDR} \
   -net tap,ifname=${IFACE},script=no \
   -boot c -hda ${diskimg} -no-reboot &
@@ -56,8 +67,16 @@ done
 
 date
 
-# do what you need to here now
-sleep 10
+# execute any parameters here
+if [ "x${execfiles}" != "x" ]
+then
+  scp ${execfiles} root@${IPADDR}: </dev/null || true
+  for f in ${execfiles}
+  do
+    ssh root@${IPADDR} ./${f} || true
+  done
+fi
+
 
 ssh root@${IPADDR} halt
 
