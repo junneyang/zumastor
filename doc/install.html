@@ -43,7 +43,7 @@
       </li>
       <li>
 	<code>
-	  dpkg -i kernel-image-2.6.19.1-zumastor-r411_1.0_i386.deb
+	  dpkg -i kernel-image-2.6.21.1-zumastor-r596_1.0_i386.deb
 	</code>
       <li>Reboot onto the zumastor kernel.</li>
     </ol>
@@ -61,7 +61,7 @@
     <h2>Install zumastor packages</h2>
     <code>
       aptitude install tree dmsetup <br>
-      dpkg -i ddsnap_0.4-pre7-r411_i386.deb zumastor_0.4-pre7-r411_i386.deb
+      dpkg -i ddsnap_0.4-r596_i386.deb zumastor_0.4-r596_i386.deb
     </code>
 
     <p>
@@ -175,17 +175,17 @@ RUN STATUS:
 <p>
       To verify snapshots are working correctly:<br>
       <code> date >> /var/run/zumastor/mount/testvol/testfile </code> <br>
-      <code> sync </code>
-      <code sleep 5 </code>
+      <code> sync </code><br>
+      <code sleep 5 </code><br>
       <code>zumastor snapshot testvol hourly </code><br>
-      <code sleep 5 </code>
+      <code sleep 5 </code><br>
       <code> date >> /var/run/zumastor/mount/testvol/testfile </code> <br>
-      <code sleep 5 </code>
+      <code sleep 5 </code><br>
       <code>zumastor snapshot testvol hourly </code><br>
-      <code sleep 5 </code>
+      <code sleep 5 </code><br>
       <code> cat /var/run/zumastor/mount/testvol\(2\)/testfile </code><br>
-      <code> cat /var/run/zumastor/mount/testvol\(3\)/testfile </code><br>
-      <code> cat /var/run/zumastor/mount/testvol/testfile </code>
+      <code> cat /var/run/zumastor/mount/testvol\(4\)/testfile </code><br>
+      <code> cat /var/run/zumastor/mount/testvol/testfile </code><br>
 
     <h2>Remote replication</h2>
 
