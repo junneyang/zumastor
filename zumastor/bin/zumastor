@@ -797,7 +797,8 @@ function nag_daemon {
 }
 
 [[ -d $VOLUMES ]] || { echo "$0: cannot find zumastor database in '$VOLUMES'"; exit 1; }
-[[ $1 == "stop" ]] || [[ $1 == "status" ]] || [[ -e $RUNFILE ]] || [[ -e $STOPFILE ]] || { echo "$0: zumastor not running, start with '/etc/init.d/zumastor start' first"; exit 1; }
+[[ $1 == "stop" ]] || [[ $1 == "status" ]] || [[ -e $RUNFILE ]] || { echo "$0: zumastor not running, start with '/etc/init.d/zumastor start' first"; exit 1; }
+[[ $1 == "start" ]] || [[ $1 == "stop" ]] || [[ $1 == "status" ]] || [[ ! -e $LOCKFILE ]] || { echo "$0: $LOCKFILE exists, please wait if zumastor is in the middle of start/stop or call zumastor force-reload to recover"; exit 1; }
 
 case $1 in
 define)
@@ -1059,8 +1060,41 @@ start)
 
 		nag_daemon $vol
 		exit $? ;;
+	volume)
+		[ $# -eq 3 ] || { echo "usage: $0 start volume <vol>"; exit 2; }
+		declare vol=$3
+		declare progressfile=$VOLUMES/$vol/source/apply
+		declare holdfile=$VOLUMES/$vol/source/hold
+		declare id list
+
+		start_volume $vol
+
+		create_device $vol -1 || exit 1 
+		list=$(get_managed_snapshots $vol) || exit 1
+		for id in $list; do
+			if [[ -e /dev/mapper/$vol\($id\) ]]; then
+				echo "remove left device $vol\($id\)"
+				umount_device $vol $id
+				remove_device $vol $id
+				# explicitly decrease usecount because removing the dead device 
+				# does not decrease usecount on the restarted ddsnap server
+				ddsnap usecount $SERVERS/$vol $id -1
+			fi
+			create_device $vol $id
+		done
+		if [[ -x $VOLUMES/$vol/source ]] && [[ -e $progressfile ]] ; then
+			declare sent hold send_chunk send_addr
+			read hold < $holdfile
+			read sent send_chunk send_addr <$progressfile 2>/dev/null
+			if [[ ${send_chunk/*\//} -eq ${send_chunk/\/*/} ]] && [[ $sent -ne $hold ]]; then
+				echo "recover from interrupted replication_cycle"
+				replication_cycle $vol $sent && rm $progressfile
+				echo "recover done"
+			fi
+		fi
+		exit $? ;;
 	*)
-		echo "usage: $0 start master|target|source"
+		echo "usage: $0 start master|target|source|volume"
 		exit 2 ;;
 	esac
 	;;

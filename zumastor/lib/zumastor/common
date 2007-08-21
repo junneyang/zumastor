@@ -8,7 +8,7 @@ declare -r VOLUMES=/var/lib/zumastor/volumes
 declare -r RUNPATH=/var/run/zumastor
 declare -r LOGS=/var/log/zumastor
 declare -r RUNFILE=$RUNPATH/running
-declare -r STOPFILE=$RUNPATH/stopping
+declare -r LOCKFILE=$RUNPATH/locking
 declare -r CONFIG=/etc/zumastor
 
 # these can be modified here
