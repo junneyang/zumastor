@@ -21,8 +21,8 @@ if [ "x$MACFILE" = "x" -o "x$MACADDR" = "x" -o "x$IFACE" = "x" ] ; then
   exit 1
 fi
 
-# Die if more than four hours pass
-( sleep 14400 ; kill $$ ; exit 0 ) & tmoutpid=$!
+# Die if more than four hours pass. Really.
+( sleep 14400 ; kill -6 $$ ; exit 0 ) & tmoutpid=$!
  
 
 REVISION=`svn info | awk '/Revision:/ { print $2; }'`
