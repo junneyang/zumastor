@@ -91,7 +91,7 @@ SERIAL 0 115200 0
 DEFAULT auto
 LABEL auto
 	kernel debian-installer/i386/linux
-	append auto=true priority=critical vga=normal initrd=${USER}/debian-installer/i386/initrd.gz preseed/file=/preseed.cfg console=tty0 console=ttyS0,115200n8
+	append auto=true priority=critical vga=normal noapic initrd=${USER}/debian-installer/i386/initrd.gz preseed/file=/preseed.cfg console=tty0 console=ttyS0,115200n8
 PROMPT 0
 TIMEOUT 1
 EOF

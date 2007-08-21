@@ -87,7 +87,7 @@ SERIAL 0 115200 0
 DEFAULT server
 LABEL server
 	kernel ubuntu-installer/i386/linux
-	append base-config/package-selection= base-config/install-language-support=false vga=normal initrd=${USER}/ubuntu-installer/i386/initrd.gz ramdisk_size=13531 root=/dev/rd/0 rw preseed/file=/preseed.cfg DEBCONF_DEBUG=5 console=tty0 console=ttyS0,115200n8
+	append base-config/package-selection= base-config/install-language-support=false vga=normal initrd=${USER}/ubuntu-installer/i386/initrd.gz ramdisk_size=13531 root=/dev/rd/0 rw preseed/file=/preseed.cfg noapic DEBCONF_DEBUG=5 console=tty0 console=ttyS0,115200n8
 PROMPT 0
 TIMEOUT 1
 EOF
