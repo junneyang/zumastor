@@ -1065,12 +1065,12 @@ start)
 		declare vol=$3
 		declare progressfile=$VOLUMES/$vol/source/apply
 		declare holdfile=$VOLUMES/$vol/source/hold
-		declare id list
+		declare id
 
 		start_volume $vol
 
 		create_device $vol -1 || exit 1 
-		list=$(get_managed_snapshots $vol) || exit 1
+		declare list=$(get_managed_snapshots $vol) || exit 1
 		for id in $list; do
 			if [[ -e /dev/mapper/$vol\($id\) ]]; then
 				echo "remove left device $vol\($id\)"
