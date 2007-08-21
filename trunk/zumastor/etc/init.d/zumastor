@@ -23,24 +23,14 @@ function start_zumastor {
 		mkdir -p $MOUNTS || return 1
 	fi
 
-	touch_atomic $RUNFILE || { echo "$RUNFILE exists, is zumastor already running?"; exit 1; }
+	touch_atomic $LOCKFILE || { echo "$LOCKFILE exists, please wait if zumastor is in the middle of start/stop or call zumastor force-reload to recover"; exit 1; }
+	touch_atomic $RUNFILE || { echo "$RUNFILE exists, is zumastor already running?"; rm $LOCKFILE; exit 1; }
 
 	for vol in $(ls $VOLUMES); do
 		log=$LOGS/$vol/start.log
 		log "starting volume '$vol'" $log
 		echo "Starting volume '$vol'"
-		start_volume $vol >> $log || return 1
-		create_device $vol -1 || return 1
-		local list=$(get_managed_snapshots $vol) || return 1
-		for id in $list; do
-			if [[ -e /dev/mapper/$vol\($id\) ]]; then
-				log "remove left device $vol\($id\)" $log
-				umount_device $vol $id >> $log 2>&1
-				remove_device $vol $id >> $log 2>&1
-				ddsnap usecount $SERVERS/$vol $id -1 >> $log 2>&1
-			fi
-			create_device $vol $id >> $log 2>&1
-		done
+		zumastor start volume $vol >> $log 2>&1 || { echo start volume error; rm $LOCKFILE; return 1; }
 
 		list=$(cat $VOLUMES/$vol/master/snapshots/* 2>/dev/null)
 		for id in $list; do
@@ -50,7 +40,7 @@ function start_zumastor {
 
 		if [ -x $VOLUMES/$vol/master ]; then
 			echo "Starting master"
-			zumastor start master $vol || return 1
+			zumastor start master $vol || { echo "starting master fail"; rm $LOCKFILE; exit 1; }
 		else
 			# start the nag daemon
 			if [ -x $VOLUMES/$vol/source ]; then
@@ -67,6 +57,8 @@ function start_zumastor {
 		done
 
 	done
+
+	rm $LOCKFILE
 }
 
 function stop_zumastor {
@@ -76,7 +68,8 @@ function stop_zumastor {
 	local host
 	local log
 
-	touch_atomic $STOPFILE || { echo "$STOPFILE exists, shutdown in progress?"; exit 1; }
+	touch_atomic $LOCKFILE || { echo "$LOCKFILE exists, please wait if zumastor is in the middle of start/stop or call zumastor force-reload to recover"; exit 1; }
+
 	for vol in $(ls $VOLUMES); do
 		log=$LOGS/$vol/stop.log
 		log "stopping volume $vol" $log
@@ -97,12 +90,12 @@ function stop_zumastor {
 		done
 		umount_device $vol -1 >> $log 2>&1
 		# FIXME error out if this fails so we don't kill the agent and need to reboot
-		remove_device $vol -1 >> $log 2>&1  || { echo remove origin device failed, aborting zumastor stop; rm $STOPFILE; exit 1; }
-
+		remove_device $vol -1 >> $log 2>&1 || { echo remove origin device failed, aborting zumastor stop; rm $LOCKFILE; exit 1; }
 		stop_volume $vol
 	done
+
 	rm $RUNFILE 2>/dev/null
-	rm $STOPFILE
+	rm $LOCKFILE
 }
 
 [ -d $VOLUMES ] || { echo "$0: cannot find zumastor database in '$VOLUMES'"; exit 1; }
@@ -116,8 +109,15 @@ stop)
 	stop_zumastor
 	;;
 
-restart|force-reload)
+restart)
 	[[ -e $RUNFILE ]] && stop_zumastor
+	start_zumastor
+	;;
+
+force-reload)
+	[[ -e $LOCKFILE ]] && { echo force-reload: remove $LOCKFILE left from zumastor start/stop; rm $LOCKFILE; }
+	[[ -e $RUNFILE ]] && stop_zumastor
+	rm $RUNFILE
 	start_zumastor
 	;;
 status)
