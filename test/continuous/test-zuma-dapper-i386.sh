@@ -14,6 +14,8 @@ set -e
 SSH='ssh -o StrictHostKeyChecking=no'
 SCP='scp -o StrictHostKeyChecking=no'
 
+retval=0
+
 # Die if more than four hours pass.  Hard upper limit on all test runs.
 ( sleep 14400 ; kill $$ ; exit 0 ) & tmoutpid=$!
 
@@ -60,7 +62,7 @@ ${qemu_i386} -snapshot \
   -vnc unix:${VNC} \
   -net nic,macaddr=${MACADDR},model=ne2k_pci \
   -net tap,ifname=${IFACE},script=no \
-  -boot c -hda ${diskimg} -no-reboot & qemupid=$!
+  -boot c -hda ${diskimg} -no-reboot & qemu_pid=$!
 
 # kill the emulator if any abort-like signal is received
 trap "kill ${qemu_pid} ; exit 1" 1 2 3 6 9  
@@ -84,6 +86,7 @@ then
     then
       echo ${f} ok
     else
+      retval=$?
       echo ${f} not ok
     fi
   done
@@ -92,9 +95,11 @@ fi
 
 ${SSH} root@${IPADDR} halt
 
-wait
 
-echo "Instance shut down, removing ssh hostkey"
 sed -i /^${IPADDR}\ .*\$/d ~/.ssh/known_hosts
 
+wait ${qemu_pid} || retval=$?
+
 rm -rf %{tmpdir}
+
+exit ${retval}
