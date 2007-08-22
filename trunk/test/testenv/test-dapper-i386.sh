@@ -1,4 +1,4 @@
-#!/bin/sh -x
+>#!/bin/sh -x
 
 # Run the dapper/i386 image using -snapshot to verify that it works.
 # The template should be left unmodified.
@@ -10,6 +10,14 @@
 # License: GPLv2
 
 set -e
+
+SSH='ssh -o StrictHostKeyChecking=no'
+SCP='scp -o StrictHostKeyChecking=no'
+
+retval=0
+
+# Die if more than four hours pass.  Hard upper limit on all test runs.
+( sleep 14400 ; kill $$ ; exit 0 ) & tmoutpid=$!
 
 execfiles="$*"
 
@@ -54,7 +62,10 @@ ${qemu_i386} -snapshot \
   -vnc unix:${VNC} \
   -net nic,macaddr=${MACADDR},model=ne2k_pci \
   -net tap,ifname=${IFACE},script=no \
-  -boot c -hda ${diskimg} -no-reboot &
+  -boot c -hda ${diskimg} -no-reboot & qemupid=$!
+
+# kill the emulator if any abort-like signal is received
+trap "kill ${qemu_pid} ; exit 1" 1 2 3 6 9  
 
 while ! ping -c 1 -w 10 ${IPADDR} 2>/dev/null
 do
@@ -62,28 +73,40 @@ do
 done
 echo " ping succeeded"
 
-while ! ssh -o StrictHostKeyChecking=no root@${IPADDR} hostname 2>/dev/null
+while ! ${SSH} root@${IPADDR} hostname 2>/dev/null
 do
   echo -n .
   sleep 10
 done
 
 date
+echo IPADDR=${IPADDR}
+echo control/tmp dir=${tmpdir}
+
 
 # execute any parameters here
 if [ "x${execfiles}" != "x" ]
 then
-  scp ${execfiles} root@${IPADDR}: </dev/null || true
+  ${SCP} ${execfiles} root@${IPADDR}: </dev/null || true
   for f in ${execfiles}
   do
-    ssh root@${IPADDR} ./${f} || true
+    if ${SSH} root@${IPADDR} ./${f}
+    then
+      echo ${f} ok
+    else
+      retval=$?
+      echo ${f} not ok
+    fi
   done
 fi
 
 
-ssh root@${IPADDR} halt
+${SSH} root@${IPADDR} halt
 
-wait
-
-echo "Instance shut down, removing ssh hostkey"
 sed -i /^${IPADDR}\ .*\$/d ~/.ssh/known_hosts
+
+wait ${qemu_pid} || retval=$?
+
+rm -rf %{tmpdir}
+
+exit ${retval}
