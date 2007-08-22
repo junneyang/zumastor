@@ -117,6 +117,10 @@ EOF
   ${SCP} swap2sysvg.sh root@${IPADDR}:
   ${SSH} root@${IPADDR} './swap2sysvg.sh && rm swap2sysvg.sh'
 
+  # generate and authorize an passwordless ssh key that can log in to
+  # any other image with this as its base template
+  ${SSH} root@${IPADDR} "ssh-keygen -q -P '' -t dsa -f .ssh/id_dsa ; cat .ssh/id_dsa.pub >> .ssh/authorized_keys"
+
   ${SSH} root@${IPADDR} halt
 
   wait
