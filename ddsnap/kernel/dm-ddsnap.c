@@ -211,6 +211,11 @@ static inline int worker_running(struct devinfo *info)
         return !(info->flags & (FINISH_FLAG|RECOVER_FLAG));
 }
 
+static inline int worker_ready(struct devinfo *info)
+{
+        return (worker_running(info) && (info->flags & READY_FLAG));
+}
+
 static void report_error(struct devinfo *info)
 {
 	if (test_and_set_bit(REPORT_BIT, &info->flags))
@@ -360,7 +365,7 @@ static int snapshot_read_end_io(struct bio *bio, unsigned int done, int error)
 	bio->bi_end_io = hook->old_end_io;
 	bio->bi_private = hook->old_private;
 	hook->old_end_io = NULL;
-	if (!worker_running(info))
+	if (!worker_ready(info))
 		kmem_cache_free(end_io_cache, hook);
 	else if (info->dont_switch_lists == 0)
 		list_move(&hook->list, &info->releases);
@@ -738,7 +743,7 @@ void upload_locks(struct devinfo *info)
 	}
 	outbead(info->sock, FINISH_UPLOAD_LOCK, struct {});
 	spin_lock_irqsave(&info->end_io_lock, irqflags);
-	if (worker_running(info)) {
+	if (worker_ready(info)) {
 		list_for_each_safe(entry, tmp, &info->locked){
 			hook = list_entry(entry, struct hook, list);
 			if (hook->old_end_io == NULL)
@@ -792,24 +797,30 @@ restart:
 
 		/* Send message for each pending request. */
 		spin_lock(&info->pending_lock);
-		while (!list_empty(&info->queries) && worker_running(info)) {
+		while (!list_empty(&info->queries) && worker_ready(info)) {
 			struct list_head *entry = info->queries.prev;
 			struct pending *pending = list_entry(entry, struct pending, list);
+			/* Only refer a pending request when we hold pending_lock to 
+			 * protect against the race in flush_pending_bio */
+			u64 chunk = pending->chunk;
+			unsigned chunks = pending->chunks;
+			struct bio *bio = pending->bio;
+			unsigned id = pending->id;
 
 			list_del(entry);
-			list_add(&pending->list, info->pending + hash_pending(pending->id));
+			list_add(&pending->list, info->pending + hash_pending(id));
 			spin_unlock(&info->pending_lock);
 			trace(show_pending(info);)
 
 			while (down_interruptible(&info->server_out_sem))
 				;
-			trace(warn("Server query [%Lx/%x]", pending->chunk, pending->chunks);)
+			trace_on(warn("Server query [%Lx/%x]", chunk, chunks);)
 			if ((err = outbead(info->sock,
-				bio_data_dir(pending->bio) == WRITE? QUERY_WRITE: QUERY_SNAPSHOT_READ,
+				bio_data_dir(bio) == WRITE? QUERY_WRITE: QUERY_SNAPSHOT_READ,
 				struct rw_request1,
-					.id = pending->id, .count = 1,
-					.ranges[0].chunk = pending->chunk,
-					.ranges[0].chunks = pending->chunks)))
+					.id = id, .count = 1,
+					.ranges[0].chunk = chunk,
+					.ranges[0].chunks = chunks)))
 				goto report;
 			up(&info->server_out_sem);
 			spin_lock(&info->pending_lock);
@@ -818,7 +829,7 @@ restart:
 
 		/* Send message for each pending read release. */
 		spin_lock_irqsave(&info->end_io_lock, irqflags);
-		while (!list_empty(&info->releases) && worker_running(info)) {
+		while (!list_empty(&info->releases) && worker_ready(info)) {
 			struct list_head *entry = info->releases.prev;
 			struct hook *hook = list_entry(entry, struct hook, list);
 			chunk_t chunk = hook->sector >> info->chunkshift;
@@ -1109,7 +1120,7 @@ static int ddsnap_map(struct dm_target *target, struct bio *bio, union map_info 
 	pending = kmem_cache_alloc(pending_cache, GFP_NOIO|__GFP_NOFAIL);
 	*pending = (struct pending){ .id = id, .bio = bio, .chunk = chunk, .chunks = 1 };
 	spin_lock(&info->pending_lock);
-	if (!worker_running(info)) {
+	if (!worker_ready(info)) {
 		spin_unlock(&info->pending_lock);
 		kmem_cache_free(pending_cache, pending);
 		unthrottle(info, bio);
