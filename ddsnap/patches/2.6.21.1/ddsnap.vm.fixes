@@ -2249,30 +2249,3 @@ diff -purN linux-2.6.21.1.old/security/selinux/avc.c linux-2.6.21.1.new/security
  	if (!node)
  		goto out;
  
-diff -puN kernel/sys.c~PF_MEMALLOC kernel/sys.c
---- linux-2.6.21.1/kernel/sys.c~PF_MEMALLOC	2007-07-19 11:58:12.000000000 -0700
-+++ linux-2.6.21.1-root/kernel/sys.c	2007-07-19 11:59:49.000000000 -0700
-@@ -2175,6 +2175,11 @@ asmlinkage long sys_prctl(int option, un
- 			current->flags |= PF_LESS_THROTTLE;
- 			return 0;
- 		}
-+		case PR_SET_MEMALLOC: {
-+			current->flags |= PF_MEMALLOC;
-+			printk("set PF_MEMALLOC for process %s[%i]\n", current->comm, current->pid);
-+			return 0;
-+		}
- 			
- 		default:
- 			error = -EINVAL;
-_
---- linux-2.6.21.1/include/linux/prctl.h	2007-07-16 11:33:05.000000000 -0700
-+++ linux-2.6.21.1~new/include/linux/prctl.h	2007-07-25 13:03:15.000000000 -0700
-@@ -60,6 +60,7 @@
- # define PR_ENDIAN_PPC_LITTLE	2	/* "PowerPC" pseudo little endian */
- 
- /* set process less throttleL: see PF_LESS_THROTTLE */
--#define PR_SET_LESS_THROTTLE           21
-+#define PR_SET_LESS_THROTTLE		21
-+#define PR_SET_MEMALLOC			22
- 
- #endif /* _LINUX_PRCTL_H */
