@@ -1715,18 +1715,19 @@ diff -puN drivers/md/Makefile~ddsnap-2.6.19.1 drivers/md/Makefile
 diff -puN include/linux/prctl.h~ddsnap-2.6.19.1 include/linux/prctl.h
 --- linux-2.6.21.1/include/linux/prctl.h~ddsnap-2.6.19.1	2007-07-19 16:47:34.000000000 -0700
 +++ linux-2.6.21.1-root/include/linux/prctl.h	2007-07-19 16:47:34.000000000 -0700
-@@ -59,4 +59,7 @@
+@@ -59,4 +59,8 @@
  # define PR_ENDIAN_LITTLE	1	/* True little endian mode */
  # define PR_ENDIAN_PPC_LITTLE	2	/* "PowerPC" pseudo little endian */
  
 +/* set process less throttleL: see PF_LESS_THROTTLE */
 +#define PR_SET_LESS_THROTTLE           21
++#define PR_SET_MEMALLOC			22
 +
  #endif /* _LINUX_PRCTL_H */
 diff -puN kernel/sys.c~ddsnap-2.6.19.1 kernel/sys.c
 --- linux-2.6.21.1/kernel/sys.c~ddsnap-2.6.19.1	2007-07-19 16:47:34.000000000 -0700
 +++ linux-2.6.21.1-root/kernel/sys.c	2007-07-19 16:47:34.000000000 -0700
-@@ -2171,7 +2171,11 @@ asmlinkage long sys_prctl(int option, un
+@@ -2171,7 +2171,16 @@ asmlinkage long sys_prctl(int option, un
  		case PR_SET_ENDIAN:
  			error = SET_ENDIAN(current, arg2);
  			break;
@@ -1736,6 +1737,11 @@ diff -puN kernel/sys.c~ddsnap-2.6.19.1 kernel/sys.c
 +			return 0;
 +		}
 +			
++		case PR_SET_MEMALLOC: {
++			current->flags |= PF_MEMALLOC;
++			printk("set PF_MEMALLOC for process %s[%i]\n", current->comm, current->pid);
++			return 0;
++		}
  		default:
  			error = -EINVAL;
  			break;
