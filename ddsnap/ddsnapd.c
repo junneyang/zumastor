@@ -3218,7 +3218,7 @@ static int incoming(struct superblock *sb, struct client *client)
 				continue;
 			}
 			for (int col = 0; col < snapshots; col++)
-				details->sharing[col] = share_array[snaplist[row].bit * col];
+				details->sharing[col] = share_array[MAX_SNAPSHOTS * snaplist[row].bit + col];
 		}
 
 		if (outhead(sock, STATUS_OK, reply_len) < 0 || writepipe(sock, reply, reply_len) < 0)
