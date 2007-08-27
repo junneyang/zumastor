@@ -29,6 +29,8 @@ KVERS="${KERNEL_VERSION}-zumastor-r${SVNREV}_1.0"
 SSH='ssh -o StrictHostKeyChecking=no'
 SCP='scp -o StrictHostKeyChecking=no'
 
+retval=0
+
 if [ "x$MACFILE" = "x" -o "x$MACADDR" = "x" -o "x$IFACE" = "x" \
      -o "x$IPADDR" = "x" ] ; then
   echo "Run this script under tunbr"
@@ -102,22 +104,21 @@ for f in \
     ${BUILDSRC}/kernel-headers-${KVERS}_${ARCH}.deb \
     ${BUILDSRC}/kernel-image-${KVERS}_${ARCH}.deb
 do
-  ${SCP} $f root@${IPADDR}:
+  ${SCP} $f root@${IPADDR}: || retval=$?
 done
 
 # install the copied debs in the correct order
-${SSH} root@${IPADDR} <<EOF
-aptitude install -y tree
-dpkg -i kernel-image-${KVERS}_${ARCH}.deb
-dpkg -i ddsnap_${DEBVERS}_${ARCH}.deb
-dpkg -i zumastor_${DEBVERS}_${ARCH}.deb
-rm *.deb
-apt-get clean
-EOF
+${SSH} root@${IPADDR} aptitude install -y tree || retval=$?
+${SSH} root@${IPADDR} dpkg -i kernel-image-${KVERS}_${ARCH}.deb || retval=$?
+${SSH} root@${IPADDR} dpkg -i ddsnap_${DEBVERS}_${ARCH}.deb || retval=$?
+${SSH} root@${IPADDR} dpkg -i zumastor_${DEBVERS}_${ARCH}.deb || retval=$?
+${SSH} root@${IPADDR} 'rm *.deb' || retval=$?
+${SSH} root@${IPADDR} apt-get clean || retval=$?
 
 # halt the new image, and wait for qemu to exit
 ${SSH} root@${IPADDR} halt
-wait $qemu
+
+wait $qemu || retval=$?
 
 if false
 then
@@ -146,5 +147,8 @@ EOF
 fi
 
 echo "Instance shut down, removing ssh hostkey"
-sed -i /^${IPADDR}\ .*\$/d ~/.ssh/known_hosts
+sed -i /^${IPADDR}\ .*\$/d ~/.ssh/known_hosts || true
+
+exit $retval
+
 
