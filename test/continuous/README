@@ -24,8 +24,9 @@ nodes, and has a tftpboot directory.  eg.
 3) Become the test builder
    su - zbuild
 
-  a) create an ssh key without a passphrase
+  a) create an ssh key without a passphrase and ignore known_hosts
     ssh-keygen -P '' -t dsa
+    ln -s /dev/null ~/.ssh/known_hosts
 
   b) check out a read-only copy of the zumastor repository 
     svn checkout http://zumastor.googlecode.com/svn/trunk/ zumastor
