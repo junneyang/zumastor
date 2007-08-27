@@ -54,6 +54,9 @@ qemu_threads=1
 
 [ -x /etc/default/testenv ] && . /etc/default/testenv
 
+threads=$(($qemu_threads + 1))
+mem=$(($threads * 128 + 768))
+
 IMAGE=dapper-i386
 IMAGEDIR=${diskimgdir}/${IMAGE}
 diskimg=${IMAGEDIR}/hda.img
@@ -72,7 +75,7 @@ fi
 echo IPADDR=${IPADDR}
 echo control/tmp dir=${tmpdir}
 
-${qemu_i386} -snapshot -m 512 -smp ${qemu_threads} \
+${qemu_i386} -snapshot -m ${mem} -smp ${qemu_threads} \
   -serial unix:${SERIAL},server,nowait \
   -monitor unix:${MONITOR},server,nowait \
   -vnc unix:${VNC} \
