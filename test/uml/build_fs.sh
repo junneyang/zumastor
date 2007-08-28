@@ -9,14 +9,18 @@
 [[ $# -eq 1 ]] || { echo "Usage: build_fs.sh uml_fs"; exit 1; }
 uml_fs=$1
 
-echo -n Getting Debian uml root file system image...
-wget -c http://uml.nagafix.co.uk/Debian-3.1/Debian-3.1-x86-root_fs.bz2 || exit $?
-echo -e "done.\n"
+fs_image=Debian-3.1-x86-root_fs
+if [ -f $fs_image ]; then
+  echo Using existing Debian uml root file system image.
+else
+  echo -n Getting Debian uml root file system image...
+  wget -c http://uml.nagafix.co.uk/Debian-3.1/${fs_image}.bz2 || exit $?
+  echo -n Unpacking root file system image...
+  bunzip2 ${fs_image}.bz2 >> $LOG
+  echo -e "done.\n"
+fi
 
-echo -n Unpacking root file system image...
-bunzip2 Debian-3.1-x86-root_fs.bz2 >> $LOG
-mv Debian-3.1-x86-root_fs $uml_fs
-echo -e "done.\n"
+mv $fs_image $uml_fs
 
 mount -o loop $uml_fs /mnt || exit 1
 
@@ -42,6 +46,9 @@ chroot /mnt dpkg -i zlib1g_*.deb
 rm /mnt/zlib1g_*.deb
 echo -e "done.\n"
 
+# Turn off unnecessary services
+rm -f /mnt/etc/rc2.d/{S20exim4,S20openbsd-inetd}
+
 # dmsetup, tree
 echo -n Installing required utilities...
 chroot /mnt apt-get -y install dmsetup >> $LOG || exit 1
@@ -50,10 +57,10 @@ echo -e "done.\n"
 
 echo -n Upgrading ddsnap and zumastor...
 pushd $ZUMA_REPOSITORY/ddsnap
-make install prefix=/mnt
+make && make install prefix=/mnt || exit $?
 popd
-pushd $ZUMA_REPOSITORY/zumastor
-make install DESTDIR=/mnt
+pushd $ZUMA_REPOSITORY/zumastor 
+make && make install DESTDIR=/mnt || exit $?
 popd
 echo -e "done.\n"
 

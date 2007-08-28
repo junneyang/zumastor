@@ -25,9 +25,12 @@ Content
     output for each test
 
 Usage
+  * The host machine must be running a 32 bit kernel, and a libc compatible with Debian 
+    Etch (such as Ubuntu Dapper)
+  * Have a look at config_replication and modify it as necessary for replication tests
+    - Create 4 logical volumes on the host, and point config_replication at these volumes
   * Copy all of the files included in this directory to where you want to run the test
   * Have a look at config_uml and modify it as necessary
-  * Have a look at config_replication and modify it as necessary for replicaition tests
   * To run a test, simply start the corresponding test_XXX.sh script. It will automatically 
     build everything required at the first time. After that, it re-uses the existing kernel 
     and file system images. If you have a file system image built from a previous test, 
