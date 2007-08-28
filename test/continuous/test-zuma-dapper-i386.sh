@@ -96,7 +96,7 @@ fi
 ${SSH} root@${IPADDR} halt
 
 
-sed -i /^${IPADDR}\ .*\$/d ~/.ssh/known_hosts
+sed -i /^${IPADDR}\ .*\$/d ~/.ssh/known_hosts || true
 
 wait ${qemu_pid} || retval=$?
 
