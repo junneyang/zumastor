@@ -118,10 +118,16 @@ echo CONCURRENCY_LEVEL := ${threads} >> /etc/kernel-pkg.conf
 EOF
 
 # Use the full kernel config unless qemu symlink points to another config file
-KERNEL_CONFIG=kernel/config/full
-if [ -e kernel/config/qemu ] ; then
-  KERNEL_CONFIG=kernel/config/qemu
-fi
+# Specific configurations take priority over general configurations
+for kconf in kernel/config/full 
+  kernel/config/full kernel/config/qemu \
+  kernel/config/${KERNEL_VERSION}-${ARCH}-full \
+  kernel/config/${KERNEL_VERSION}-${ARCH}-qemu
+do
+  if [ -e ${kconf} ] ; then
+    KERNEL_CONFIG=${kconf}
+  fi
+done
 
 ${SSH} build@${IPADDR} "echo $SVNREV >zumastor/SVNREV" || retval=$?
 
