@@ -119,7 +119,7 @@ EOF
 
 # Use the full kernel config unless qemu symlink points to another config file
 # Specific configurations take priority over general configurations
-for kconf in kernel/config/full 
+for kconf in kernel/config/full \
   kernel/config/full kernel/config/qemu \
   kernel/config/${KERNEL_VERSION}-${ARCH}-full \
   kernel/config/${KERNEL_VERSION}-${ARCH}-qemu
