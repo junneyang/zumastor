@@ -72,7 +72,11 @@ d-i	passwd/username                 string ${USER}
 EOF
 
   cat ~/.ssh/*.pub > ${tmpdir}/initrd/authorized_keys
-  
+
+  if [ ! -d  ${tftpdir}/${USER}/ubuntu-installer/i386 ] ; then
+    mkdir -p ${tftpdir}/${USER}/ubuntu-installer/i386
+  fi
+
   fakeroot <<EOF
 cd ${tmpdir}/initrd
 zcat ${tftpdir}/ubuntu-installer/i386/initrd.gz | cpio -i
