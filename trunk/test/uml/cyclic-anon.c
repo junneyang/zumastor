@@ -22,15 +22,13 @@ int main(int argc, char **argv)
 
 	for(loop=0;;loop++) {
 		printf("loop %d\n", loop);
-		ptr = (char*)mmap(0, size, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, 0, 0);
+		ptr = (char*)mmap(0, size, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS|MAP_LOCKED, 0, 0);
 		if (!ptr) {
 			perror("mmap error");
 			continue;
 		}
-		if (mlock(ptr, size))
-			perror("mlloc error");
-		munmap(ptr, size);
 		sleep(10);
+		munmap(ptr, size);
 	}
 	return 0;
 }

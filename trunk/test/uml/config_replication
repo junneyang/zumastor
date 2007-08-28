@@ -18,3 +18,4 @@ hourly_snapnum=3600
 target_port=11235
 interval=1
 VOLUMES=/var/lib/zumastor/volumes
+SSH_OPTS="-o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no"

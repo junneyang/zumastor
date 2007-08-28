@@ -34,39 +34,54 @@ cd ..
 echo -e "done.\n"
 sleep 30
 
+# It could take a while for the machine to get ready
+ssh_ready=false
+for i in `seq 10`; do
+  if ssh $SSH_OPTS $source_uml_host /bin/true; then
+    ssh_ready=true
+    break
+  fi
+  sleep 20
+done
+
+if ! $ssh_ready; then
+  echo "Couldn't connect to the source uml"
+  exit 1
+fi
+
 # set up ssh keys for source and target umls to access each other
 if [[ $initial -eq 1 ]]; then
 	echo -n Setting up ssh-keygen...
-	ssh $source_uml_host "rm /root/.ssh/id_dsa; rm /root/.ssh/id_dsa.pub"
-	ssh $source_uml_host "ssh-keygen -t dsa -f /root/.ssh/id_dsa -P ''"
-	scp $source_uml_host:/root/.ssh/id_dsa.pub /tmp/$source_uml_host.pub
-	scp /tmp/$source_uml_host.pub $target_uml_host:/root/.ssh/$source_uml_host.pub
+	ssh $SSH_OPTS $source_uml_host "rm /root/.ssh/id_dsa; rm /root/.ssh/id_dsa.pub"
+	ssh $SSH_OPTS $source_uml_host "ssh-keygen -t dsa -f /root/.ssh/id_dsa -P ''"
+	scp $SSH_OPTS $source_uml_host:/root/.ssh/id_dsa.pub /tmp/$source_uml_host.pub
+	scp $SSH_OPTS /tmp/$source_uml_host.pub $target_uml_host:/root/.ssh/$source_uml_host.pub
 	rm -f /tmp/$source_uml_host.pub
-	ssh $target_uml_host "cat /root/.ssh/$source_uml_host.pub >> /root/.ssh/authorized_keys"
-	ssh $source_uml_host "echo $target_uml_ip $target_uml_host > /etc/hosts"
+	ssh $SSH_OPTS $target_uml_host "cat /root/.ssh/$source_uml_host.pub >> /root/.ssh/authorized_keys"
+	ssh $SSH_OPTS $source_uml_host "echo $target_uml_ip $target_uml_host > /etc/hosts"
 
-	ssh $target_uml_host "rm /root/.ssh/id_dsa; rm /root/.ssh/id_dsa.pub"
-	ssh $target_uml_host "ssh-keygen -t dsa -f /root/.ssh/id_dsa -P ''"
-	scp $target_uml_host:/root/.ssh/id_dsa.pub /tmp/$target_uml_host.pub
-	scp /tmp/$target_uml_host.pub $source_uml_host:/root/.ssh/$target_uml_host.pub
+	ssh $SSH_OPTS $target_uml_host "rm /root/.ssh/id_dsa; rm /root/.ssh/id_dsa.pub"
+	ssh $SSH_OPTS $target_uml_host "ssh-keygen -t dsa -f /root/.ssh/id_dsa -P ''"
+	scp $SSH_OPTS $target_uml_host:/root/.ssh/id_dsa.pub /tmp/$target_uml_host.pub
+	scp $SSH_OPTS /tmp/$target_uml_host.pub $source_uml_host:/root/.ssh/$target_uml_host.pub
 	rm -f /tmp/$target_uml_host.pub
-	ssh $source_uml_host "cat /root/.ssh/$target_uml_host.pub >> /root/.ssh/authorized_keys"
-	ssh $target_uml_host "echo $source_uml_ip $source_uml_host > /etc/hosts"
+	ssh $SSH_OPTS $source_uml_host "cat /root/.ssh/$target_uml_host.pub >> /root/.ssh/authorized_keys"
+	ssh $SSH_OPTS $target_uml_host "echo $source_uml_ip $source_uml_host > /etc/hosts"
 	echo -e "done.\n"
 fi
 
 # set up source and target volumes according to the configuratiosn in config_replication
 echo -n Setting up source volume...
-ssh $source_uml_host "/etc/init.d/zumastor start"
-ssh $source_uml_host "zumastor forget volume $vol"
-ssh $source_uml_host "echo y | zumastor define volume -i $vol /dev/ubdb /dev/ubdc"
-ssh $source_uml_host "mkfs.ext3 /dev/mapper/$vol"
-ssh $source_uml_host "zumastor define master $vol -h $hourly_snapnum -d 7"
+ssh $SSH_OPTS $source_uml_host "/etc/init.d/zumastor start"
+ssh $SSH_OPTS $source_uml_host "zumastor forget volume $vol"
+ssh $SSH_OPTS $source_uml_host "echo y | zumastor define volume -i $vol /dev/ubdb /dev/ubdc"
+ssh $SSH_OPTS $source_uml_host "mkfs.ext3 /dev/mapper/$vol"
+ssh $SSH_OPTS $source_uml_host "zumastor define master $vol -h $hourly_snapnum -d 7"
 echo -e "done.\n"
 
 echo -n Setting up target volume...
-ssh $target_uml_host "/etc/init.d/zumastor start"
-ssh $target_uml_host "zumastor forget volume $vol"
-ssh $target_uml_host "echo y | zumastor define volume -i $vol /dev/ubdb /dev/ubdc"
+ssh $SSH_OPTS $target_uml_host "/etc/init.d/zumastor start"
+ssh $SSH_OPTS $target_uml_host "zumastor forget volume $vol"
+ssh $SSH_OPTS $target_uml_host "echo y | zumastor define volume -i $vol /dev/ubdb /dev/ubdc"
 echo -e "done.\n"
 
