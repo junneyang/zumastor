@@ -226,7 +226,7 @@ struct disksuper
 	{
 		u32 ctime; // upper 32 bits are in super create_time
 		u32 tag;   // external name (id) of snapshot
-		u16 usecnt; // use count on snapshot device
+		u16 usecount; // persistent use count on snapshot device
 		u8 bit;    // internal snapshot number, not derived from tag
 		s8 prio;   // 0=normal, 127=highest, -128=lowest
 		char reserved[4]; /* adds up to 16 */
@@ -272,6 +272,7 @@ struct superblock
 	chunk_t dest_exception;
 	unsigned copy_chunks;
 	unsigned max_commit_blocks;
+	u16 usecount[MAX_SNAPSHOTS]; // transient usecount for connected devices
 };
 
 static int valid_sb(struct superblock *sb)
@@ -1566,20 +1567,31 @@ static int is_squashed(const struct snapshot *snapshot)
 	return snapshot->bit == SNAPSHOT_SQUASHED;
 }
 
+/* usecount() calculates and returns the usecount for a given snapshot.
+ * The persistent (on disk) usecount is added to the transient usecount
+ * (for devices using the snapshot). */
+static inline u16 usecount(struct superblock *sb, struct snapshot *snap)
+{
+	return (is_squashed(snap) ? 0 : sb->usecount[snap->bit]) + snap->usecount;
+}
+
 /* find the oldest snapshot with 0 usecnt and lowest priority.
  * if no such snapshot exists, find the snapshot with lowest priority
  */
-static struct snapshot *find_victim(struct snapshot *snaplist, u32 snapshots)
+static struct snapshot *find_victim(struct superblock *sb)
 {
+	struct snapshot *snaplist = sb->image.snaplist;
+	u32 snapshots = sb->image.snapshots;
+
 	assert(snapshots);
 	struct snapshot *snap, *best = snaplist;
 
 	for (snap = snaplist + 1; snap < snaplist + snapshots; snap++) {
 		if (is_squashed(snap))
 			continue;
-		if (!is_squashed(best) && (snap->usecnt && !best->usecnt))
+		if (!is_squashed(best) && (usecount(sb, snap) && !usecount(sb, best)))
 			continue;
-		if (!is_squashed(best) && (!snap->usecnt == !best->usecnt) && (snap->prio >= best->prio))
+		if (!is_squashed(best) && (!usecount(sb, snap) == !usecount(sb, best)) && (snap->prio >= best->prio))
 			continue;
 		best = snap;
 	}
@@ -1589,7 +1601,13 @@ static struct snapshot *find_victim(struct snapshot *snaplist, u32 snapshots)
 static int delete_snap(struct superblock *sb, struct snapshot *snap)
 {
 	trace_on(warn("Delete snaptag %u (snapnum %i)", snap->tag, snap->bit););
-	u64 mask = is_squashed(snap) ? 0 : (1ULL << snap->bit);
+	u64 mask;
+	if (is_squashed(snap))
+		mask = 0;
+	else {
+		mask = 1ULL << snap->bit;
+		sb->usecount[snap->bit] = 0; // reset transient usecount for this bit during auto-deletion
+	}
 	memmove(snap, snap + 1, (char *)(sb->image.snaplist + --sb->image.snapshots) - (char *)snap);
 	set_sb_dirty(sb);
 	if (!mask) {
@@ -1865,11 +1883,11 @@ static int ensure_free_chunks(struct superblock *sb, struct allocspace *as, int 
 		if (as->asi->freechunks >= chunks)
 			return 0;
 
-		struct snapshot *victim = find_victim(sb->image.snaplist, sb->image.snapshots);
+		struct snapshot *victim = find_victim(sb);
 		if (is_squashed(victim) || victim->prio == 127)
 			break;
 		warn("snapshot store full, releasing snapshot %u", victim->tag);
-		if (victim->usecnt) {
+		if (usecount(sb, victim)) {
 			if (delete_tree_range(sb, 1ULL << victim->bit, 0)) {
 				victim->bit = SNAPSHOT_SQUASHED;
 				goto fail_delete;
@@ -2914,16 +2932,14 @@ static int incoming(struct superblock *sb, struct client *client)
 				err = ERROR_INVALID_SNAPSHOT;
 				goto identify_error;
 			}
-			u32 new_usecnt = snapshot->usecnt + 1;
-			if (new_usecnt < snapshot->usecnt) {
+			if ((((usecount(sb, snapshot) + 1) >> 16) != 0)) {
 				snprintf(err_msg, MAX_ERRMSG_SIZE, "Usecount overflow.");
 				err_msg[MAX_ERRMSG_SIZE-1] = '\0'; // make sure it's null terminated
 				err = ERROR_USECOUNT;
 				goto identify_error;
 			}
-
 			client->flags |= SNAPCLIENT_BIT;
-			snapshot->usecnt = new_usecnt;
+			sb->usecount[snapshot->bit]++; // update the transient usecount only
 		}
 
 		if (len != sb->image.orgsectors) {
@@ -2981,7 +2997,7 @@ static int incoming(struct superblock *sb, struct client *client)
 		goto delete_error;
 #endif
 		struct snapshot *snapshot = find_snap(sb, ((struct create_snapshot *)message.body)->snap);
-		if (!snapshot || snapshot->usecnt || delete_snap(sb, snapshot))
+		if (!snapshot || usecount(sb, snapshot) || delete_snap(sb, snapshot))
 			goto delete_error;
 		save_state(sb);
 		if (outbead(sock, DELETE_SNAPSHOT_OK, struct { }) < 0)
@@ -3034,7 +3050,7 @@ static int incoming(struct superblock *sb, struct client *client)
 					.snap   = snapshot->tag,
 					.prio   = snapshot->prio,
 					.ctime  = snapshot->ctime,
-					.usecnt = snapshot->usecnt},
+					.usecnt = usecount(sb, snapshot)},
 				sizeof(struct snapinfo));
 		}
 		break;
@@ -3082,7 +3098,6 @@ static int incoming(struct superblock *sb, struct client *client)
 	{
 		u32 tag = ((struct usecount_info *)message.body)->snap;
 		int usecnt_dev = ((struct usecount_info *)message.body)->usecnt_dev;
-		unsigned new_usecnt = 0;
 		int err = 0;
 		char err_msg[MAX_ERRMSG_SIZE];
 
@@ -3099,7 +3114,6 @@ static int incoming(struct superblock *sb, struct client *client)
 			err = ERROR_INVALID_SNAPSHOT;
 			goto usecnt_error; /* not really an error though */
 		}
-
 		if (!(snapshot = find_snap(sb, tag))) {
 			warn("Snapshot tag %u is not valid", tag);
 			snprintf(err_msg, MAX_ERRMSG_SIZE, "Snapshot tag %u is not valid", tag);
@@ -3107,23 +3121,23 @@ static int incoming(struct superblock *sb, struct client *client)
 			err = ERROR_INVALID_SNAPSHOT;
 			goto usecnt_error;
 		}
-		new_usecnt = usecnt_dev + snapshot->usecnt;
-
-		if (((new_usecnt >> 16) != 0) && (usecnt_dev >= 0)) {
+		/* check for overflow against persistent + transient usecount */
+		if ((usecnt_dev >= 0) && (((usecount(sb, snapshot) + usecnt_dev) >> 16) != 0)) {
 			snprintf(err_msg, MAX_ERRMSG_SIZE, "Usecount overflow.");
 			err_msg[MAX_ERRMSG_SIZE-1] = '\0';
 			err = ERROR_USECOUNT;
 			goto usecnt_error;
 		}
-		if (((new_usecnt >> 16) != 0) && (usecnt_dev < 0)) {
+		/* check for usecount underflow against persistent usecount only */
+		if ((usecnt_dev < 0) && (((snapshot->usecount + usecnt_dev) >> 16) != 0)) {
 			snprintf(err_msg, MAX_ERRMSG_SIZE, "Usecount underflow.");
 			err_msg[MAX_ERRMSG_SIZE-1] = '\0';
 			err = ERROR_USECOUNT;
 			goto usecnt_error;
 		}
-		
-		snapshot->usecnt = new_usecnt;
-		if (outbead(sock, USECOUNT_OK, struct usecount_ok, .usecount = snapshot->usecnt) < 0)
+
+		snapshot->usecount += usecnt_dev;
+		if (outbead(sock, USECOUNT_OK, struct usecount_ok, .usecount = usecount(sb, snapshot)) < 0)
 			warn("unable to reply to USECOUNT message");
 		break;
 
@@ -3510,12 +3524,11 @@ int snap_server(struct superblock *sb, int listenfd, int getsigfd, int agentfd)
 
 					if ((client->flags & SNAPCLIENT_BIT)) {
 						struct snapshot *snapshot = client_snap(sb, client);
-						if (snapshot->usecnt <= 0)
-							warn("Snapshot %u usecount underflow!", client->snaptag);
-						else
-							snapshot->usecnt--;
+						if (!is_squashed(snapshot)) {
+							assert(sb->usecount[snapshot->bit] > 0);
+							sb->usecount[snapshot->bit]--;
+						}
 					}
-					save_state(sb); // !!! just for now
 					close(client->sock);
 					free(client);
 					--clients;
