@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/sh -x
 
 # Run the zuma/dapper/i386 image using -snapshot to verify that it works.
 # The template should be left unmodified.
