@@ -785,6 +785,7 @@ static int worker(struct dm_target *target)
 
 	daemonize("%s %d", "ddsnap-wrkr", info->snap);
 	current->flags |= PF_LESS_THROTTLE;
+	current->flags |= PF_MEMALLOC;
 	trace_on(warn("Worker thread started, pid=%i for snapshot %d", current->pid, info->snap);)
 	while (down_interruptible(&info->exit1_sem))
 		;
@@ -814,7 +815,7 @@ restart:
 
 			while (down_interruptible(&info->server_out_sem))
 				;
-			trace_on(warn("Server query [%Lx/%x]", chunk, chunks);)
+			trace(warn("Server query [%Lx/%x]", chunk, chunks);)
 			if ((err = outbead(info->sock,
 				bio_data_dir(bio) == WRITE? QUERY_WRITE: QUERY_SNAPSHOT_READ,
 				struct rw_request1,
