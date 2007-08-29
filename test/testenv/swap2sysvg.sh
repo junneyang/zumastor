@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/sh -x
 
 # Turn the swap partition into a physical volume in the sysvg volume group
 

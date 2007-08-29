@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/sh -x
 
 # run early in the dapper install, from the preseed
 
