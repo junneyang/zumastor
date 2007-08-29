@@ -1,0 +1,13 @@
+cbtb (continuous build and test build) tests are grouped by the number of
+virtual instances required to run the test script.  The test script will be
+launched on the first instance, and may ssh to the other instances in the
+test.  The IP addresses of the first node is provided in $IPADDR, and
+subsequent slave nodes in $IPADDR2, etc.  Each test instance will be a
+freshly booted zuma-dapper-i386 image.
+
+Scripts should return 0 on success, and any non-zero value on failure.
+Tests should only take a few minutes to boot and run, and will be killed at
+4 hours if something causes them to stall.
+
+1/ - single instance tests (eg. snapshot-test.sh)
+2/ - dual-instance tests (eg. replication-test.sh)
