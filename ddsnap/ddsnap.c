@@ -1,5 +1,4 @@
-#define _XOPEN_SOURCE 500 /* pread */
-#define _GNU_SOURCE /* strnlen  */
+#define _GNU_SOURCE // for O_DIRECT
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,7 +19,7 @@
 #include <sys/socket.h>
 #include <sys/ioctl.h>
 #include <sys/un.h>
-#include <linux/fs.h> // BLKGETSIZE
+#include <linux/fs.h> // for BLKGETSIZE
 #include "buffer.h"
 #include "daemonize.h"
 #include "ddsnap.h"
@@ -1812,7 +1811,7 @@ static int ddsnap_get_status(int serv_fd, u32 snaptag, int verbose)
 	unsigned int row, col;
 	u64 total_chunks;
 
-	printf("%6s %24s %8s %8s", "Snap", "Creation time", "Chunks", "Unshared");
+	printf("%6s %24s %6s %4s %8s %8s", "Snap", "Creation time", "Usecnt", "Prio", "Chunks", "Unshared");
 
 	if (verbose) {
 		for (col = 1; col < snapshots; col++)
@@ -1826,13 +1825,13 @@ static int ddsnap_get_status(int serv_fd, u32 snaptag, int verbose)
 	for (row = 0; row < snapshots; row++) {
 		struct snapshot_details *details = snapshot_details(reply, row, snapshots);
 
-		printf("%6u", details->snap);
+		printf("%6u", details->snapinfo.snap);
 
-		snaptime = (time_t)details->ctime;
+		snaptime = (time_t)details->snapinfo.ctime;
 		ctime_str = ctime(&snaptime);
 		if (ctime_str[strlen(ctime_str)-1] == '\n')
 			ctime_str[strlen(ctime_str)-1] = '\0';
-		printf(" %24s", ctime_str);
+		printf(" %24s %6u %4i", ctime_str, details->snapinfo.usecnt, details->snapinfo.prio);
 
 		if (details->sharing[0] == -1) {
 			printf(" %8s %8s %8s\n", "!", "!", "!");
@@ -1884,9 +1883,7 @@ static int ddsnap_get_status(int serv_fd, u32 snaptag, int verbose)
 			total_chunks += column_totals[col];
 		}
 
-		printf("%6s", "totals");
-		printf(" %24s", "");
-		printf(" %8llu", total_chunks);
+		printf("%6s %45llu", "totals", total_chunks);
 		if (snapshots > 0)
 			printf(" %8llu", column_totals[0]);
 		else

@@ -1,5 +1,4 @@
-#define _XOPEN_SOURCE 600
-#define _GNU_SOURCE /* need this for O_DIRECT */
+#define _XOPEN_SOURCE 600 // for posix_memalign()
 
 #include <string.h>
 #include <stdio.h>
@@ -81,7 +80,7 @@ pid_t daemonize(char const *logfile, char const *pidfile)
 
 		if (set_flags(fileno(stdout), O_SYNC)
 				|| set_flags(fileno(stderr), O_SYNC))
-			error("unable to set stdout and stderr flags to O_DIRECT: %s"
+			error("unable to set stdout and stderr flags to O_SYNC: %s"
 					, strerror(errno));
 
 		/* FIXME: technically we should chdir to the fs root
