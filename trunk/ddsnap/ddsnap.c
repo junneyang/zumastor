@@ -1825,6 +1825,9 @@ static int ddsnap_get_status(int serv_fd, u32 snaptag, int verbose)
 	for (row = 0; row < snapshots; row++) {
 		struct snapshot_details *details = snapshot_details(reply, row, snapshots);
 
+		if (snaptag != (u32)~0UL && details->snapinfo.snap != snaptag)
+			continue;
+
 		printf("%6u", details->snapinfo.snap);
 
 		snaptime = (time_t)details->snapinfo.ctime;
