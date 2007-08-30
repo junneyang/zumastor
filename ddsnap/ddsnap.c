@@ -2452,7 +2452,12 @@ int main(int argc, char *argv[])
 
 		int sock = create_socket(argv[2]);
 
-		int ret = set_priority(sock, snaptag, atoi(argv[4]));
+		int prio = atoi(argv[4]);
+		if (prio < -128 || prio > 127) {
+			fprintf(stderr, "%s: priority %d out of range\n", argv[0], prio);
+			return 1;
+		}
+		int ret = set_priority(sock, snaptag, prio);
 		close(sock);
 		return ret;
 	}
