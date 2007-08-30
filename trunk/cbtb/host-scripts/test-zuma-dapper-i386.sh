@@ -23,7 +23,7 @@ execfiles="$*"
 
 if [ "x$MACFILE" = "x" -o "x$MACADDR" = "x" -o "x$IFACE" = "x" \
      -o "x$IPADDR" = "x" ] ; then
-  echo "Run this script under tunbr"
+  echo "Run this script under at least one tunbr"
   exit 1
 fi
 
@@ -64,8 +64,22 @@ ${qemu_i386} -snapshot \
   -net tap,ifname=${IFACE},script=no \
   -boot c -hda ${diskimg} -no-reboot & qemu_pid=$!
 
+if [ "x$MACADDR2" != "x" ] ; then
+  SERIAL2=${tmpdir}/serial2
+  MONITOR2=${tmpdir}/monitor2
+  VNC2=${tmpdir}/vnc2
+  ${qemu_i386} -snapshot \
+    -serial unix:${SERIAL2},server,nowait \
+    -monitor unix:${MONITOR2},server,nowait \
+    -vnc unix:${VNC2} \
+    -net nic,macaddr=${MACADDR2},model=ne2k_pci \
+    -net tap,ifname=${IFACE2},script=no \
+    -boot c -hda ${diskimg} -no-reboot & qemu2_pid=$!
+fi
+
+
 # kill the emulator if any abort-like signal is received
-trap "kill ${qemu_pid} ; exit 1" 1 2 3 6 9  
+trap "kill ${qemu_pid} ${qemu2_pid} ; exit 1" 1 2 3 6 9  
 
 while ! ${SSH} root@${IPADDR} hostname 2>/dev/null
 do
@@ -73,8 +87,22 @@ do
   sleep 10
 done
 
-echo IPADDR=${IPADDR}
+
+if [ "x$MACADDR2" != "x" ] ; then
+  while ! ${SSH} root@${IPADDR2} hostname 2>/dev/null
+  do
+    echo -n .
+    sleep 10
+  done
+fi
+
+echo IPADDR=${IPADDR} IPADDR2=${IPADDR2}
 echo control/tmp dir=${tmpdir}
+
+params="IPADDR=${IPADDR}"
+if [ "x$IPADDR2" != "x" ] ; then
+  params="${params} IPADDR2=${IPADDR2}"
+fi
 
 # execute any parameters here
 if [ "x${execfiles}" != "x" ]
@@ -82,7 +110,7 @@ then
   ${SCP} ${execfiles} root@${IPADDR}: </dev/null || true
   for f in ${execfiles}
   do
-    if ${SSH} root@${IPADDR} ./${f}
+    if ${SSH} root@${IPADDR} ${params} ./${f}
     then
       echo ${f} ok
     else
@@ -95,10 +123,21 @@ fi
 
 ${SSH} root@${IPADDR} halt
 
+if [ "x$IPADDR2" != "x" ] ; then
+  ${SSH} root@${IPADDR2} halt
+fi
+
 
 sed -i /^${IPADDR}\ .*\$/d ~/.ssh/known_hosts || true
+if [ "x$IPADDR2" != "x" ] ; then
+  sed -i /^${IPADDR2}\ .*\$/d ~/.ssh/known_hosts || true
+fi
 
 wait ${qemu_pid} || retval=$?
+
+if [ "x$qemu2_pid" != "x" ] ; then
+  wait ${qemu2_pid} || retval=$?
+fi
 
 rm -rf %{tmpdir}
 
