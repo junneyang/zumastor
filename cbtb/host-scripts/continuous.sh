@@ -14,7 +14,7 @@ TUNBR=tunbr
 email_failure="zumastor-buildd@google.com"
 email_success="zumastor-buildd@google.com"
 repo="${PWD}/zumastor"
-top="$PWD}"
+top="${PWD}"
 
 diskimgdir=${HOME}/testenv
 [ -x /etc/default/testenv ] && . /etc/default/testenv
