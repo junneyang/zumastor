@@ -12,7 +12,15 @@ sendmail=/usr/sbin/sendmail
 TUNBR=tunbr
 email_failure="zumastor-buildd@google.com"
 email_success="zumastor-buildd@google.com"
-repo="zumastor"
+repo="${PWD}/zumastor"
+
+diskimgdir=${HOME}/testenv
+[ -x /etc/default/testenv ] && . /etc/default/testenv
+
+IMAGE=zuma-dapper-i386
+IMAGEDIR=${diskimgdir}/${IMAGE}
+diskimg=${IMAGEDIR}/hda.img
+
 
 if [ ! -f zumastor/Changelog ] ; then
   echo "cp $0 to the parent directory of the zumastor repository and "
@@ -28,7 +36,13 @@ revision=`svn info | awk '/Revision:/ { print $2; }'`
 buildlog=`mktemp`
 testlog=`mktemp`
 if ${TUNBR} ../dapper-build.sh >${buildlog} 2>&1 ; then
-  if ${TUNBR} ${TUNBR} ../runtests.sh >${testlog} 2>&1 ; then
+
+  rm -f ${diskimg}
+  pushd cbtb/host-scripts
+  ${repo}/../zuma-dapper-i386.sh
+  popd
+
+  if ../runtests.sh >${testlog} 2>&1 ; then
     ( echo "Subject: zumastor r$revision build and test success" ;\
       echo ; cat ${buildlog} ${testlog} ) | \
     ${sendmail} ${email_success}

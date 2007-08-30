@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/sh -x
 
 # $Id$
 
@@ -7,6 +7,7 @@
 
 set -e
 
+env
 hostname
 ifconfig eth0 || true
 ifconfig eth1 || true

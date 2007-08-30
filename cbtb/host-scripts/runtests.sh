@@ -16,6 +16,8 @@ repo=${PWD}
 diskimgdir=${HOME}/testenv
 [ -x /etc/default/testenv ] && . /etc/default/testenv
 
+TUNBR=tunbr
+
 if [ "x$MACFILE" = "x" -o "x$MACADDR" = "x" -o "x$IFACE" = "x" ] ; then
   echo "Run this script under tunbr"
   exit 1
@@ -25,22 +27,24 @@ fi
 ( sleep 14400 ; kill -6 $$ ; exit 0 ) & tmoutpid=$!
  
 
-REVISION=`svn info | awk '/Revision:/ { print $2; }'`
-export REVISION
-IMAGE=zuma-dapper-i386
-IMAGEDIR=${diskimgdir}/${IMAGE}
-diskimg=${IMAGEDIR}/hda.img
-
-rm -f ${diskimg}
-
-pushd cbtb/host-scripts
-${repo}/../zuma-dapper-i386.sh
-popd
 
 pushd cbtb/tests/1
 for f in *-test.sh
 do
-  if time ../../../../test-zuma-dapper-i386.sh $f
+  if time ${TUNBR} ../../../../test-zuma-dapper-i386.sh $f
+  then
+    echo PASS $f
+  else
+    echo FAIL $f
+    retval=$?
+  fi
+done
+popd
+
+pushd cbtb/tests/2
+for f in *-test.sh
+do
+  if time ${TUNBR} ${TUNBR} ../../../../test-zuma-dapper-i386.sh $f
   then
     echo PASS $f
   else
