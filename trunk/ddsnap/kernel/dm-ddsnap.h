@@ -98,7 +98,7 @@ struct identify_error { uint32_t err; char msg[]; } PACKED; // !!! why not use r
 struct connect_server_error { uint32_t err; char msg[]; } PACKED; // !!! why not use reply_error and include msg
 struct create_snapshot { uint32_t snap; } PACKED;
 struct generate_changelist { uint32_t snap1; uint32_t snap2; } PACKED;
-struct snapinfo { uint32_t snap; int8_t prio; uint16_t usecnt; char zero[3]; uint64_t ctime; } PACKED;
+struct snapinfo { uint32_t snap; int8_t prio; uint16_t usecnt; uint64_t ctime; } PACKED;
 struct snaplist { uint32_t count; struct snapinfo snapshots[]; } PACKED;
 struct stream_changelist { uint32_t snap1; uint32_t snap2; } PACKED;
 struct changelist_stream { uint64_t chunk_count; uint32_t chunksize_bits; } PACKED;
@@ -107,7 +107,7 @@ struct changelist_stream { uint64_t chunk_count; uint32_t chunksize_bits; } PACK
 
 struct status_request { uint32_t snap; } PACKED;
 
-struct snapshot_details { uint64_t ctime; uint32_t snap; uint64_t sharing[]; } PACKED;
+struct snapshot_details { struct snapinfo snapinfo; uint64_t sharing[]; } PACKED;
 
 struct status_reply {
 	uint64_t ctime; 

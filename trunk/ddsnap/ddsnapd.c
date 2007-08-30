@@ -1562,7 +1562,7 @@ static struct snapshot *find_snap(struct superblock *sb, u32 tag)
 	return NULL;
 }
 
-static int is_squashed(const struct snapshot *snapshot)
+static inline int is_squashed(const struct snapshot *snapshot)
 {
 	return snapshot->bit == SNAPSHOT_SQUASHED;
 }
@@ -3225,8 +3225,10 @@ static int incoming(struct superblock *sb, struct client *client)
 		for (int row  = 0; row < sb->image.snapshots; row++) {
 			struct snapshot_details *details = snapshot_details(reply, row, snapshots);
 
-			details->ctime = snaplist[row].ctime;
-			details->snap = snaplist[row].tag;
+			details->snapinfo.ctime = snaplist[row].ctime;
+			details->snapinfo.snap = snaplist[row].tag;
+			details->snapinfo.prio = snaplist[row].prio;
+			details->snapinfo.usecnt = usecount(sb, (struct snapshot*)&snaplist[row]);
 			if (is_squashed(&snaplist[row])) {
 				details->sharing[0] = -1;
 				continue;
