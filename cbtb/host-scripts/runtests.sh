@@ -31,8 +31,8 @@ do
   then
     echo PASS $f
   else
-    echo FAIL $f
     retval=$?
+    echo FAIL $f
   fi
 done
 popd
@@ -44,8 +44,8 @@ do
   then
     echo PASS $f
   else
-    echo FAIL $f
     retval=$?
+    echo FAIL $f
   fi
 done
 popd
