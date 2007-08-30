@@ -18,10 +18,6 @@ diskimgdir=${HOME}/testenv
 
 TUNBR=tunbr
 
-if [ "x$MACFILE" = "x" -o "x$MACADDR" = "x" -o "x$IFACE" = "x" ] ; then
-  echo "Run this script under tunbr"
-  exit 1
-fi
 
 # Die if more than four hours pass. Really.
 ( sleep 14400 ; kill -6 $$ ; exit 0 ) & tmoutpid=$!
