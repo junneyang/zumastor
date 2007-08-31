@@ -19,9 +19,24 @@ cd ..
 echo -e "done.\n"
 sleep 30
 
+# It could take a while for the machine to get ready
+ssh $SSH_OPTS_ready=false
+for i in `seq 10`; do
+  if ssh $SSH_OPTS $SSH_OPTS $source_uml_host /bin/true; then
+    ssh $SSH_OPTS_ready=true
+    break
+  fi
+  sleep 20
+done
+
+if ! $ssh $SSH_OPTS_ready; then
+  echo "Couldn't connect to the source uml"
+  exit 1
+fi
+
 echo -n Setting up volume...
-ssh $uml_host "/etc/init.d/zumastor start"
-ssh $uml_host "zumastor forget volume $vol"
-ssh $uml_host "echo y | zumastor define volume -i $vol /dev/ubdb /dev/ubdc"
-ssh $uml_host "mkfs.ext3 /dev/mapper/$vol"
+ssh $SSH_OPTS $uml_host "/etc/init.d/zumastor start"
+ssh $SSH_OPTS $uml_host "zumastor forget volume $vol"
+ssh $SSH_OPTS $uml_host "echo y | zumastor define volume -i $vol /dev/ubdb /dev/ubdc"
+ssh $SSH_OPTS $uml_host "mkfs.ext3 /dev/mapper/$vol"
 echo -e "done.\n"
