@@ -79,18 +79,6 @@ function stop_zumastor {
 		[ -x $VOLUMES/$vol/master ] && zumastor stop master $vol
 		[ -x $VOLUMES/$vol/source ] && zumastor stop source $vol
 
-		list=$(cat $VOLUMES/$vol/master/snapshots/* 2>/dev/null)
-		for id in $list; do
-			log "unmounting snapshot '$vol($id)'" $log
-			umount_device $vol $id >> $log 2>&1
-		done
-
-		for id in $(ddsnap status ${SERVERS}/$vol --list); do
-			remove_device $vol $id >> $log 2>&1
-		done
-		umount_device $vol -1 >> $log 2>&1
-		# FIXME error out if this fails so we don't kill the agent and need to reboot
-		remove_device $vol -1 >> $log 2>&1 || { echo remove origin device failed, aborting zumastor stop; rm $LOCKFILE; exit 1; }
 		stop_volume $vol
 	done
 

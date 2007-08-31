@@ -510,16 +510,6 @@ function forget_volume {
 
 	forget_master $vol
 
-	# remove any snapshots devices first, then the origin
-	# FIXME racy because forget_target and forget_master just send a signal
-	# to kill off the other processes taking shapshots
-	for id in $(ddsnap status $sock --list); do
-		umount_device $vol $id 2> /dev/null
-		remove_device $vol $id
-	done
-	umount_device $vol -1 2> /dev/null
-	remove_device $vol -1
-
 	stop_volume $vol
 
 	rmdir $path/targets
@@ -1068,18 +1058,9 @@ start)
 		declare id
 
 		start_volume $vol
-
-		create_device $vol -1 || exit 1 
+		create_device $vol -1 || exit 1
 		declare list=$(get_managed_snapshots $vol) || exit 1
 		for id in $list; do
-			if [[ -e /dev/mapper/$vol\($id\) ]]; then
-				echo "remove left device $vol\($id\)"
-				umount_device $vol $id
-				remove_device $vol $id
-				# explicitly decrease usecount because removing the dead device 
-				# does not decrease usecount on the restarted ddsnap server
-				ddsnap usecount $SERVERS/$vol $id -1
-			fi
 			create_device $vol $id
 		done
 		if [[ -x $VOLUMES/$vol/source ]] && [[ -e $progressfile ]] ; then
