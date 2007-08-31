@@ -1,1 +1,1 @@
-ssh -T
+ssh -T -o BatchMode=yes
