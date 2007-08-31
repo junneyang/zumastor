@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/sh -x
 #
 # $Id$
 #
@@ -10,6 +10,9 @@
 
 
 set -e
+
+# self terminate test in 10 minutes
+( sleep 600 ; kill -9 $$ ; exit 9 ) & tmoutpid=$!
 
 # necessary at the moment, looks like a zumastor bug
 SLEEP=5
@@ -70,3 +73,6 @@ else
   echo "not ok 6 - testfile changed between origin and second snapshot"
   exit 6
 fi
+
+kill $tmoutpid
+exit 0
