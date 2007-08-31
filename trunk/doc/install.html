@@ -65,7 +65,7 @@
     </code>
 
     <p>
-    zumastor status
+    zumastor status --usage
     <pre>
       RUN STATUS:
 /var/run/zumastor
@@ -120,7 +120,7 @@ You can now create a filesystem on /dev/mapper/testvol
     </code>
 
     <p>
-      zumastor status
+      zumastor status --usage
       <pre>
 VOLUME testvol:
 Data chunk size: 16384
@@ -209,7 +209,7 @@ RUN STATUS:
       This tells lab1 to replicate to port 11235 on lab2 every 30 seconds.
 If the period is omitted, replication will not occur.
 
-    <p> zumastor status
+    <p> zumastor status --usage
     <pre>
 ...
 `-- targets/
@@ -232,7 +232,7 @@ root@lab2:~#
 	zumastor define source testvol lab1.example.com --period 600
       </code>
 
-     <p>zumastor status
+     <p>zumastor status --usage
     <pre>
 VOLUME testvol:
 Data chunk size: 16384
