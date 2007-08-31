@@ -40,7 +40,7 @@ lvcreate --size 8m -n test_snap sysvg
 zumastor define volume testvol /dev/sysvg/test /dev/sysvg/test_snap --initialize
 mkfs.ext3 /dev/mapper/testvol
 zumastor define master testvol -h 24 -d 7
-zumastor status
+zumastor status --usage
 echo ok 1 - master testvol set up
 
 echo ${IPADDR} master | ${SSH} root@${slave} "cat >>/etc/hosts"
@@ -49,23 +49,23 @@ ${SSH} root@${slave} hostname slave
 ${SSH} root@${slave} lvcreate --size 4m -n test sysvg
 ${SSH} root@${slave} lvcreate --size 8m -n test_snap sysvg
 ${SSH} root@${slave} zumastor define volume testvol /dev/sysvg/test /dev/sysvg/test_snap --initialize
-${SSH} root@${slave} zumastor status
+${SSH} root@${slave} zumastor status --usage
 echo ok 2 - slave testvol set up
  
 zumastor define target testvol slave:11235 -p 30
-zumastor status
+zumastor status --usage
 echo ok 3 - defined target on master
 
 ${SSH} root@${slave} zumastor define source testvol master --period 600
-${SSH} root@${slave} zumastor status
+${SSH} root@${slave} zumastor status --usage
 echo ok 4 - configured source on target
 
 ${SSH} root@${slave} zumastor start source testvol
-${SSH} root@${slave} zumastor status
+${SSH} root@${slave} zumastor status --usage
 echo ok 5 - replication started on slave
 
 zumastor replicate testvol slave
-zumastor status
+zumastor status --usage
 echo ok 6 - replication manually kicked off from master
 
 # reasonable wait for these small volumes to finish the initial replication
@@ -74,7 +74,7 @@ date >>/var/run/zumastor/mount/testvol/testfile
 sync
 zumastor snapshot testvol hourly 
 sleep 2
-zumastor status
+zumastor status --usage
 echo ok 7 - testfile written, synced, and snapshotted
 
 hash=`md5sum /var/run/zumastor/mount/testvol/testfile`
