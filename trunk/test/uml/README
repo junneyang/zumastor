@@ -65,8 +65,10 @@ Troubleshooting
       in the corresponding test script
     * The current ddsnap code sets buffer cache size as 128M. This causes problems 
       when running any uml whose assigned memory is limited. Please change it to 
-      smaller value in ddsnapd.c:start_server, especially if you want to run full 
-      volume replication test.
+      smaller value in ddsnapd.c:start_server.
+    * If syslogd or ssh are extremely slow, check if your DNS server responds to 
+      queries from the assigned uml names. Append your domain name to those uml
+      names to see if that solves the problem.
     * The built root file system image contains only basic packages required to run 
       the test. You usually want to install the following packages and checkout the 
       current zumastor code from svn if you want to debug zumastor or ddsnap on uml:
