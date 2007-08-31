@@ -18,7 +18,7 @@
 set -e
 
 # self terminate test in 20 minutes
-( sleep 1200 ; kill -9 $$ ; exit 9 ) & tmoutpid=$!
+( sleep 1200 ; kill -6 $$ ; exit 9 ) & tmoutpid=$!
 
 slave=${IPADDR2}
 
@@ -35,30 +35,48 @@ echo "1..4"
 echo ${IPADDR} master >>/etc/hosts
 echo ${IPADDR2} slave >>/etc/hosts
 hostname master
-lvcreate --size 1m -n test sysvg
-lvcreate --size 2m -n test_snap sysvg
+lvcreate --size 4m -n test sysvg
+lvcreate --size 8m -n test_snap sysvg
 zumastor define volume testvol /dev/sysvg/test /dev/sysvg/test_snap --initialize
 mkfs.ext3 /dev/mapper/testvol
 zumastor define master testvol -h 24 -d 7
-zumastor define target testvol slave:11235 -p 30
+zumastor status
 echo ok 1 - master testvol set up
 
 echo ${IPADDR} master | ${SSH} root@${slave} "cat >>/etc/hosts"
 echo ${IPADDR2} slave | ${SSH} root@${slave} "cat >>/etc/hosts"
 ${SSH} root@${slave} hostname slave
-${SSH} root@${slave} lvcreate --size 1m -n test sysvg
-${SSH} root@${slave} lvcreate --size 2m -n test_snap sysvg
+${SSH} root@${slave} lvcreate --size 4m -n test sysvg
+${SSH} root@${slave} lvcreate --size 8m -n test_snap sysvg
 ${SSH} root@${slave} zumastor define volume testvol /dev/sysvg/test /dev/sysvg/test_snap --initialize
-${SSH} root@${slave} zumastor define source testvol master --period 600
+${SSH} root@${slave} zumastor status
 echo ok 2 - slave testvol set up
  
+zumastor define target testvol slave:11235 -p 30
+zumastor status
+echo ok 3 - defined target on master
+
+${SSH} root@${slave} zumastor define source testvol master --period 600
+${SSH} root@${slave} zumastor status
+echo ok 4 - configured source on target
+
+${SSH} root@${slave} zumastor start source testvol
+${SSH} root@${slave} zumastor status
+echo ok 5 - replication started on slave
+
 zumastor replicate testvol slave
-echo ok 3 - replication kicked off
+zumastor status
+echo ok 6 - replication manually kicked off from master
 
 # reasonable wait for these small volumes to finish the initial replication
 sleep 120
 date >>/var/run/zumastor/mount/testvol/testfile
-sync ; zumastor snapshot testvol hourly 
+sync
+zumastor snapshot testvol hourly 
+sleep 2
+zumastor status
+echo ok 7 - testfile written, synced, and snapshotted
+
 hash=`md5sum /var/run/zumastor/mount/testvol/testfile`
 
 # give it a minute to replicate (on a 30 second cycle), and verify
@@ -67,10 +85,10 @@ sleep 60
 rhash=`${SSH} root@${slave} md5sum /var/run/zumastor/mount/testvol/testfile`
 
 if [ "$rhash" = "$hash" ] ; then
-  echo ok 4 - origin and slave testfiles are in sync
+  echo ok 8 - origin and slave testfiles are in sync
 else
-  echo not ok 4 - origin and slave testfiles are in sync
-  exit 4
+  echo not ok 8 - origin and slave testfiles are in sync
+  exit 8
 fi
 
 kill $tmoutpid
