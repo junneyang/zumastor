@@ -16,9 +16,6 @@ SCP='scp -o StrictHostKeyChecking=no'
 
 retval=0
 
-# Die if more than four hours pass.  Hard upper limit on all test runs.
-( sleep 14400 ; kill $$ ; exit 0 ) & tmoutpid=$!
-
 execfiles="$*"
 
 if [ "x$MACFILE" = "x" -o "x$MACADDR" = "x" -o "x$IFACE" = "x" \
@@ -65,7 +62,7 @@ ${qemu_i386} -snapshot \
   -boot c -hda ${diskimg} -no-reboot & qemupid=$!
 
 # kill the emulator if any abort-like signal is received
-trap "kill ${qemu_pid} ; exit 1" 1 2 3 6 9  
+trap "kill -9 ${qemu_pid} ; exit 1" 1 2 3 6 14 15
 
 while ! ping -c 1 -w 10 ${IPADDR} 2>/dev/null
 do

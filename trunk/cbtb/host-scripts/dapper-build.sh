@@ -19,9 +19,6 @@
 # set -e
 retval=0
 
-# Die if more than four hours pass
-( sleep 14400 ; kill $$ ; exit 0 ) & tmoutpid=$!
-
 KERNEL_VERSION=`awk '/^2\.6\.[0-9]+(\.[0-9]+)?$/ { print $1; }' KernelVersion`
 if [ "x$KERNEL_VERSION" = "x" ] ; then
   echo "Suspect KernelVersion file"
@@ -81,6 +78,9 @@ ${qemu_i386} -snapshot -m ${mem} -smp ${qemu_threads} \
   -vnc unix:${VNC} \
   -net nic,macaddr=${MACADDR} -net tap,ifname=${IFACE},script=no \
   -boot c -hda ${diskimg} -no-reboot & qemu=$!
+
+# kill the emulator if any abort-like signal is received
+trap "kill -9 ${qemu} ; exit 1" 1 2 3 6 14 15
 
 while ! ${SSH} root@${IPADDR} hostname >/dev/null 2>&1
 do
@@ -161,8 +161,6 @@ done
 ${SSH} root@${IPADDR} halt
 
 wait $qemu || retval=$?
-
-kill $tmoutpid
 
 rm -rf ${tmpdir}
 

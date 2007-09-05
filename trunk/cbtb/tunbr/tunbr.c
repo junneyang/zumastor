@@ -396,8 +396,11 @@ int main(int argc, char **argv) {
   ignoresig.sa_handler = SIG_IGN;
   ignoresig.sa_flags = 0;
   sigemptyset(&ignoresig.sa_mask);
-  sigaction(SIGINT, &ignoresig, NULL);
   sigaction(SIGHUP, &ignoresig, NULL);
+  sigaction(SIGINT, &ignoresig, NULL);
+  sigaction(SIGQUIT, &ignoresig, NULL);
+  sigaction(SIGABRT, &ignoresig, NULL);
+  sigaction(SIGALRM, &ignoresig, NULL);
   sigaction(SIGTERM, &ignoresig, NULL);
   sigaction(SIGUSR1, &ignoresig, NULL);
   sigaction(SIGUSR2, &ignoresig, NULL);
