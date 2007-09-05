@@ -15,6 +15,11 @@
 initial=1
 [[ -e $source_uml_fs ]] && [[ -e $target_uml_fs ]] && initial=0
 [[ -e $source_uml_fs ]] || . build_fs.sh $source_uml_fs
+
+echo -n Setting up IP MASQUERADE...
+iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE >> $LOG || { echo "please check and set the following kernel config options"; echo "Networking -> Network Options -> Network packet filtering framework -> Core Netfilter Configuration -> Netfilter connection tracking support"; echo "Networking -> Network Options -> Network packet filtering framework -> IP: Netfilter Configuration -> IPv4 connection tracking support && Full NAT && MASQUERADE target support"; exit $?; }
+echo -e "done.\n"
+
 [[ $initial -eq 1 ]] && . setup_network.sh $source_uml_ip $source_uml_host $source_uml_fs
 [[ -e $target_uml_fs ]] || cp $source_uml_fs $target_uml_fs
 [[ $initial -eq 1 ]] && . setup_network.sh $target_uml_ip $target_uml_host $target_uml_fs
