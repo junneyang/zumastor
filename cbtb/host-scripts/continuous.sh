@@ -42,18 +42,18 @@ buildret=-1
 installret=-1
 testret=-1
 
-${TUNBR} ${top}/dapper-build.sh >${buildlog} 2>&1
+${TUNBR} timeout -14 14400 ${top}/dapper-build.sh >${buildlog} 2>&1
 buildret=$?
 
 if [ $buildret -eq 0 ] ; then
   rm -f ${diskimg}
   pushd cbtb/host-scripts
-  ${TUNBR} ${top}/zuma-dapper-i386.sh >${installlog} 2>&1
+  ${TUNBR} timeout -14 3600 ${top}/zuma-dapper-i386.sh >${installlog} 2>&1
   installret=$?
   popd
 
   if [ $installret -eq 0 ] ; then
-    ${top}/runtests.sh >>${testlog} 2>&1
+    timeout -14 7200 ${top}/runtests.sh >>${testlog} 2>&1
     testret=$?
   fi
 fi

@@ -51,7 +51,10 @@ ${qemu_i386} -snapshot \
   -vnc unix:${VNC} \
   -net nic,macaddr=${MACADDR} \
   -net tap,ifname=${IFACE},script=no \
-  -boot c -hda ${diskimg} -no-reboot &
+  -boot c -hda ${diskimg} -no-reboot & qemu=$!
+
+# kill the emulator if any abort-like signal is received
+trap "kill -9 ${qemu} ; exit 1" 1 2 3 6 14 15
 
 while ! ping -c 1 -w 10 ${IPADDR} 2>/dev/null
 do

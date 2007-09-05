@@ -19,15 +19,12 @@ diskimgdir=${HOME}/testenv
 TUNBR=tunbr
 
 
-# Die if more than four hours pass. Really.
-( sleep 14400 ; kill -6 $$ ; exit 0 ) & tmoutpid=$!
- 
-
 
 pushd cbtb/tests/1
 for f in *-test.sh
 do
-  if time ${TUNBR} ../../../../test-zuma-dapper-i386.sh $f
+  # timeout any test that runs for more than an hour
+  if time ${TUNBR} timeout -14 3600 ../../../../test-zuma-dapper-i386.sh $f
   then
     echo PASS $f
   else
@@ -40,7 +37,7 @@ popd
 pushd cbtb/tests/2
 for f in *-test.sh
 do
-  if time ${TUNBR} ${TUNBR} ../../../../test-zuma-dapper-i386.sh $f
+  if time ${TUNBR} ${TUNBR} timeout -14 3600 ../../../../test-zuma-dapper-i386.sh $f
   then
     echo PASS $f
   else
