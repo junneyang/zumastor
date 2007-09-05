@@ -117,12 +117,17 @@ cd ~build/zumastor
 echo CONCURRENCY_LEVEL := ${threads} >> /etc/kernel-pkg.conf
 EOF
 
-# Use the full kernel config unless qemu symlink points to another config file
-# Specific configurations take priority over general configurations
-#  kernel/config/${KERNEL_VERSION}-${ARCH}-qemu not yet ready
-for kconf in kernel/config/full \
-  kernel/config/full kernel/config/qemu \
-  kernel/config/${KERNEL_VERSION}-${ARCH}-full
+# Specific kernel configurations take priority over general configurations
+# kernel/config/${KERNEL_VERSION}-${ARCH} is not in the archive and may
+# be a symlink to specify a specific kernel config in the local repository
+# (eg. qemu-only build)
+for kconf in \
+  kernel/config/full \
+  kernel/config/qemu \
+  kernel/config/default \
+  kernel/config/${KERNEL_VERSION}-${ARCH}-full \
+  kernel/config/${KERNEL_VERSION}-${ARCH}-qemu \
+  kernel/config/${KERNEL_VERSION}-${ARCH}
 do
   if [ -e ${kconf} ] ; then
     KERNEL_CONFIG=${kconf}
