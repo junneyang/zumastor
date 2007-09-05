@@ -11,10 +11,6 @@ uml_ip=$1
 uml_host=$2
 uml_fs=$3
 
-echo -n Setting up IP MASQUERADE...
-iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE >> $LOG || { echo "please check and set the following kernel config options"; echo "Networking -> Network Options -> Network packet filtering framework -> Core Netfilter Configuration -> Netfilter connection tracking support"; echo "Networking -> Network Options -> Network packet filtering framework -> IP: Netfilter Configuration -> IPv4 connection tracking support && Full NAT && MASQUERADE target support"; exit $?; }
-echo -e "done.\n"
-
 echo -n Setting up host networks...
 grep $uml_host /etc/hosts >> $LOG || echo "$uml_ip $uml_host" >> /etc/hosts
 echo -e "done.\n"
