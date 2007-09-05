@@ -1,7 +1,7 @@
 #
 # Automatically generated make config: don't edit
-# Linux kernel version: 2.6.21.1-zumastor-r637
-# Fri Aug 31 09:03:00 2007
+# Linux kernel version: 2.6.21.1-zumastor-r648
+# Tue Sep  4 16:45:31 2007
 #
 CONFIG_X86_32=y
 CONFIG_GENERIC_TIME=y
@@ -47,7 +47,7 @@ CONFIG_AUDIT=y
 # CONFIG_AUDITSYSCALL is not set
 CONFIG_IKCONFIG=y
 CONFIG_IKCONFIG_PROC=y
-# CONFIG_SYSFS_DEPRECATED is not set
+CONFIG_SYSFS_DEPRECATED=y
 CONFIG_RELAY=y
 # CONFIG_BLK_DEV_INITRD is not set
 # CONFIG_CC_OPTIMIZE_FOR_SIZE is not set
