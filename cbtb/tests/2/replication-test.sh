@@ -17,8 +17,8 @@
 
 set -e
 
-# self terminate test in 20 minutes
-( sleep 1200 ; kill -6 $$ ; exit 9 ) & tmoutpid=$!
+# Terminate test in 20 minutes.  Read by test harness.
+TIMEOUT=1200
 
 slave=${IPADDR2}
 

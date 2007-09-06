@@ -11,8 +11,8 @@
 
 set -e
 
-# self terminate test in 10 minutes
-( sleep 600 ; kill -6 $$ ; exit 9 ) & tmoutpid=$!
+# Terminate test in 10 minutes.  Read by test harness.
+TIMEOUT=600
 
 # necessary at the moment, looks like a zumastor bug
 SLEEP=5
@@ -79,5 +79,4 @@ else
   exit 6
 fi
 
-kill $tmoutpid
 exit 0
