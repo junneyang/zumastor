@@ -1,9 +1,9 @@
 #!/bin/sh -x
-
+#
 # Build an image with current or provided zumastor debs installed, booted,
 # and ready to immediately run single-node tests.
 # Inherits from the generic dapper template.
-
+#
 # $Id$
 # Copyright 2007 Google Inc.
 # Author: Drake Diedrich <dld@google.com>
@@ -121,7 +121,9 @@ ${CMDTIMEOUT} ${SSH} root@${IPADDR} apt-get clean || retval=$?
 # halt the new image, and wait for qemu to exit
 ${CMDTIMEOUT} ${SSH} root@${IPADDR} halt
 
-${SHUTDOWNTIMEOUT} wait $qemu || retval=$?
+time wait $qemu || retval=$?
+kill -0 $qemu && kill -9 $qemu
+
 
 if false
 then
@@ -131,7 +133,7 @@ then
     -monitor unix:${MONITOR},server,nowait \
     -vnc unix:${VNC} \
     -net nic,macaddr=${MACADDR} -net tap,ifname=${IFACE},script=no \
-    -boot c -hda ${diskimg} -no-reboot &
+    -boot c -hda ${diskimg} -no-reboot & qemu=$!
 
   while ! ${SSH} root@${IPADDR} hostname 2>/dev/null
   do
@@ -139,13 +141,13 @@ then
     sleep 10
   done
 
-  socat STDIN unix-connect:UNIX-CONNECT:${MONITOR} <<EOF
+  socat STDIN UNIX-CONNECT:${MONITOR} <<EOF
 stop
 savevm booted
 quit
 EOF
 
-  wait
+  time wait $qemu
 
 fi
 
