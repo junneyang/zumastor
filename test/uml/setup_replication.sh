@@ -34,6 +34,12 @@ echo -e "done.\n"
 [[ -e $target_ubdb_dev ]] || create_device $target_ubdb_dev
 [[ -e $target_ubdc_dev ]] || create_device $target_ubdc_dev
 
+# we need to do something special for relative paths
+[[ $source_ubdb_dev == /* ]] || source_ubdb_dev=../$source_ubdb_dev
+[[ $source_ubdc_dev == /* ]] || source_ubdc_dev=../$source_ubdc_dev
+[[ $target_ubdb_dev == /* ]] || target_ubdb_dev=../$target_ubdb_dev
+[[ $target_ubdc_dev == /* ]] || target_ubdc_dev=../$target_ubdc_dev
+
 # load source and target
 echo -n Bring up source uml...
 cd linux-${KERNEL_VERSION}
