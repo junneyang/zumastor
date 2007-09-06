@@ -29,7 +29,7 @@ if [ "x$VERSION" = "x" ] ; then
   echo "Suspect Version file"
   exit 65
 fi
-SVNREV=`svn info | grep ^Revision:  | cut -d\  -f2`
+SVNREV=`svnversion || svn info | awk '/Revision:/ { print $2; }'`
 ARCH=i386
 
 
@@ -39,10 +39,12 @@ if [ "x$MACFILE" = "x" -o "x$MACADDR" = "x" -o "x$IFACE" = "x" ] ; then
 fi
 
 SSH='ssh -o StrictHostKeyChecking=no'
-SCP='timeout -14 600 scp -o StrictHostKeyChecking=no'
-CMDTIMEOUT='timeout -14 120'
-SHUTDOWNTIMEOUT='timeout -14 300'
-BUILDTIMEOUT='timeout -14 10800'
+SCP='time timeout -14 1800 scp -o StrictHostKeyChecking=no'
+CMDTIMEOUT='time timeout -14 120'
+SHUTDOWNTIMEOUT='time timeout -14 300'
+BUILDTIMEOUT='time timeout -14 10800'
+SETUPTIMEOUT='time timeout -14 1800'
+WGETTIMEOUT='time timeout -14 3600'
 
 
 # defaults, overridden by /etc/default/testenv if it exists
@@ -98,11 +100,11 @@ fi
 
 pushd build
 if [ ! -f linux-${KERNEL_VERSION}.tar.bz2 ] ; then
-  wget -c http://www.kernel.org/pub/linux/kernel/v2.6/linux-${KERNEL_VERSION}.tar.bz2
+  ${WGETTIMEOUT} wget -c http://www.kernel.org/pub/linux/kernel/v2.6/linux-${KERNEL_VERSION}.tar.bz2
 fi
 popd
 
-${SSH} root@${IPADDR} <<EOF
+${SETUPTIMEOUT} ${SSH} root@${IPADDR} <<EOF
 lvcreate --name home --size 5G sysvg
 mke2fs /dev/sysvg/home
 mount /dev/sysvg/home /home
@@ -112,10 +114,12 @@ cp ~/.ssh/authorized_keys ~build/.ssh/
 chown -R build ~build
 EOF
 
-tar cf - --exclude build * | ${SSH} build@${IPADDR} tar xf - -C zumastor
-${SCP} build/linux-${KERNEL_VERSION}.tar.bz2 build@${IPADDR}:zumastor/build/
+tar cf - --exclude build * | \
+  ${SETUPTIMEOUT} ${SSH} build@${IPADDR} tar xf - -C zumastor
+${SETUPTIMEOUT} \
+  ${SCP} build/linux-${KERNEL_VERSION}.tar.bz2 build@${IPADDR}:zumastor/build/
 
-${SSH} root@${IPADDR} <<EOF 
+${SETUPTIMEOUT} ${SSH} root@${IPADDR} <<EOF 
 cd ~build/zumastor
 ./builddepends.sh
 echo CONCURRENCY_LEVEL := ${threads} >> /etc/kernel-pkg.conf
@@ -138,10 +142,11 @@ do
   fi
 done
 
-${CMDTIMEOUT} ${SSH} build@${IPADDR} "echo $SVNREV >zumastor/SVNREV" || rc=$?
+time ${CMDTIMEOUT} \
+  ${SSH} build@${IPADDR} "echo $SVNREV >zumastor/SVNREV" || rc=$?
 
 # give the build 3 hours, then kill it.
-${BUILDTIMEOUT} \
+time ${BUILDTIMEOUT} \
   ${SSH} build@${IPADDR} "cd zumastor && ./buildcurrent.sh $KERNEL_CONFIG" || \
   rc=$?
 
@@ -161,7 +166,7 @@ for f in \
     ${BUILDSRC}/kernel-headers-${KVERS}_${ARCH}.deb \
     ${BUILDSRC}/kernel-image-${KVERS}_${ARCH}.deb
 do
-  ${SCP} $f build/ || rc=$?
+  time ${SETUPTIMEOUT} ${SCP} $f build/ || rc=$?
 done
 
 ${CMDTIMEOUT} ${SSH} root@${IPADDR} halt

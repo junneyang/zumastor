@@ -42,18 +42,18 @@ buildret=-1
 installret=-1
 testret=-1
 
-${TUNBR} timeout -14 14400 ${top}/dapper-build.sh >${buildlog} 2>&1
+time ${TUNBR} timeout -14 14400 ${top}/dapper-build.sh >${buildlog} 2>&1
 buildret=$?
 
 if [ $buildret -eq 0 ] ; then
   rm -f ${diskimg}
   pushd cbtb/host-scripts
-  ${TUNBR} timeout -14 3600 ${top}/zuma-dapper-i386.sh >${installlog} 2>&1
+  time ${TUNBR} timeout -14 7200 ${top}/zuma-dapper-i386.sh >${installlog} 2>&1
   installret=$?
   popd
 
   if [ $installret -eq 0 ] ; then
-    timeout -14 7200 ${top}/runtests.sh >>${testlog} 2>&1
+    time timeout -14 7200 ${top}/runtests.sh >>${testlog} 2>&1
     testret=$?
   fi
 fi
@@ -95,7 +95,7 @@ oldrevision=${revision}
 while true
 do
   svn update
-  revision=`svn info | awk '/Revision:/ { print $2; }'`
+  revision=`svnversion || svn info | awk '/Revision:/ { print $2; }'`
   if [ "x$revision" = "x$oldrevision" ]
   then
     sleep 300
