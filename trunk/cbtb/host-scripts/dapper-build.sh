@@ -16,18 +16,18 @@
 # Author: Drake Diedrich <dld@google.com>
 # License: GPLv2
 
-# set -e
-retval=0
+set -e
+rc=0
 
 KERNEL_VERSION=`awk '/^2\.6\.[0-9]+(\.[0-9]+)?$/ { print $1; }' KernelVersion`
 if [ "x$KERNEL_VERSION" = "x" ] ; then
   echo "Suspect KernelVersion file"
-  exit 1
+  exit 64
 fi
 VERSION=`awk '/[0-9]+\.[0-9]+(\.[0-9]+)?$/ { print $1; }' Version`
 if [ "x$VERSION" = "x" ] ; then
   echo "Suspect Version file"
-  exit 1
+  exit 65
 fi
 SVNREV=`svn info | grep ^Revision:  | cut -d\  -f2`
 ARCH=i386
@@ -35,11 +35,15 @@ ARCH=i386
 
 if [ "x$MACFILE" = "x" -o "x$MACADDR" = "x" -o "x$IFACE" = "x" ] ; then
   echo "Run this script under tunbr"
-  exit 1
+  exit 66
 fi
 
 SSH='ssh -o StrictHostKeyChecking=no'
-SCP='scp -o StrictHostKeyChecking=no'
+SCP='timeout -14 600 scp -o StrictHostKeyChecking=no'
+CMDTIMEOUT='timeout -14 120'
+SHUTDOWNTIMEOUT='timeout -14 300'
+BUILDTIMEOUT='timeout -14 10800'
+
 
 # defaults, overridden by /etc/default/testenv if it exists
 # diskimgdir should be local for reasonable performance
@@ -66,7 +70,7 @@ VNC=${tmpdir}/vnc
 
 if [ ! -f ${diskimg} ] ; then
   echo "No $diskimg available.  Run dapper-i386.sh first."
-  exit 2
+  exit 67
 fi
 
 echo IPADDR=${IPADDR}
@@ -80,7 +84,7 @@ ${qemu_i386} -snapshot -m ${mem} -smp ${qemu_threads} \
   -boot c -hda ${diskimg} -no-reboot & qemu=$!
 
 # kill the emulator if any abort-like signal is received
-trap "kill -9 ${qemu} ; exit 1" 1 2 3 6 14 15
+trap "kill -9 ${qemu} ; exit 68" 1 2 3 6 14 15
 
 while ! ${SSH} root@${IPADDR} hostname >/dev/null 2>&1
 do
@@ -134,10 +138,12 @@ do
   fi
 done
 
-${SSH} build@${IPADDR} "echo $SVNREV >zumastor/SVNREV" || retval=$?
+${CMDTIMEOUT} ${SSH} build@${IPADDR} "echo $SVNREV >zumastor/SVNREV" || rc=$?
 
-${SSH} build@${IPADDR} "cd zumastor && ./buildcurrent.sh $KERNEL_CONFIG" || \
- retval=$?
+# give the build 3 hours, then kill it.
+${BUILDTIMEOUT} \
+  ${SSH} build@${IPADDR} "cd zumastor && ./buildcurrent.sh $KERNEL_CONFIG" || \
+  rc=$?
 
 BUILDSRC="build@${IPADDR}:zumastor/build"
 DEBVERS="${VERSION}-r${SVNREV}"
@@ -155,13 +161,13 @@ for f in \
     ${BUILDSRC}/kernel-headers-${KVERS}_${ARCH}.deb \
     ${BUILDSRC}/kernel-image-${KVERS}_${ARCH}.deb
 do
-  ${SCP} $f build/ || retval=$?
+  ${SCP} $f build/ || rc=$?
 done
 
-${SSH} root@${IPADDR} halt
+${CMDTIMEOUT} ${SSH} root@${IPADDR} halt
 
-wait $qemu || retval=$?
+${SHUTDOWNTIMEOUT} wait $qemu || rc=$?
 
 rm -rf ${tmpdir}
 
-exit ${retval}
+exit ${rc}
