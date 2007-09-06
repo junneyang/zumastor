@@ -21,13 +21,16 @@ if [ "x$VERSION" = "x" ] ; then
   echo "Suspect Version file"
   exit 1
 fi
-SVNREV=`svn info | grep ^Revision:  | cut -d\  -f2`
+SVNREV=`svnversion || svn info | awk '/Revision:/ { print $2; }'`
 ARCH=i386
 DEBVERS="${VERSION}-r${SVNREV}"
 KVERS="${KERNEL_VERSION}-zumastor-r${SVNREV}_1.0"
 
-SSH='ssh -o StrictHostKeyChecking=no'
-SCP='scp -o StrictHostKeyChecking=no'
+SSH='time ssh -o StrictHostKeyChecking=no'
+SCP='time timeout -14 1200 scp -o StrictHostKeyChecking=no'
+CMDTIMEOUT='time timeout -14 120'
+KINSTTIMEOUT='time timeout -14 1200'
+SHUTDOWNTIMEOUT='time timeout -14 300'
 
 retval=0
 
@@ -78,7 +81,7 @@ fi
 
 ${qemu_img} create  -b ${templateimg} -f qcow2 ${diskimg}
 
-${qemu_i386} \
+${qemu_i386} -m 256 \
   -serial unix:${SERIAL},server,nowait \
   -monitor unix:${MONITOR},server,nowait \
   -vnc unix:${VNC} \
@@ -108,17 +111,17 @@ do
 done
 
 # install the copied debs in the correct order
-${SSH} root@${IPADDR} aptitude install -y tree || retval=$?
-${SSH} root@${IPADDR} dpkg -i kernel-image-${KVERS}_${ARCH}.deb || retval=$?
-${SSH} root@${IPADDR} dpkg -i ddsnap_${DEBVERS}_${ARCH}.deb || retval=$?
-${SSH} root@${IPADDR} dpkg -i zumastor_${DEBVERS}_${ARCH}.deb || retval=$?
-${SSH} root@${IPADDR} 'rm *.deb' || retval=$?
-${SSH} root@${IPADDR} apt-get clean || retval=$?
+${CMDTIMEOUT} ${SSH} root@${IPADDR} aptitude install -y tree || retval=$?
+${KINSTTIMEOUT} ${SSH} root@${IPADDR} dpkg -i kernel-image-${KVERS}_${ARCH}.deb || retval=$?
+${CMDTIMEOUT} ${SSH} root@${IPADDR} dpkg -i ddsnap_${DEBVERS}_${ARCH}.deb || retval=$?
+${CMDTIMEOUT} ${SSH} root@${IPADDR} dpkg -i zumastor_${DEBVERS}_${ARCH}.deb || retval=$?
+${CMDTIMEOUT} ${SSH} root@${IPADDR} 'rm *.deb' || retval=$?
+${CMDTIMEOUT} ${SSH} root@${IPADDR} apt-get clean || retval=$?
 
 # halt the new image, and wait for qemu to exit
-${SSH} root@${IPADDR} halt
+${CMDTIMEOUT} ${SSH} root@${IPADDR} halt
 
-wait $qemu || retval=$?
+${SHUTDOWNTIMEOUT} wait $qemu || retval=$?
 
 if false
 then
