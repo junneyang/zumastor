@@ -3,6 +3,11 @@
 . config_uml
 . config_single
 
+function create_device {
+        dd if=/dev/zero of=$1 count=102400 bs=1024 >& /dev/null
+        [[ $? -eq 0 ]] || { echo "can not create device $1, error $?"; exit -1; }
+}
+
 # build linux uml kernel
 [[ -e linux-${KERNEL_VERSION} ]] || . build_uml.sh
 
@@ -16,10 +21,13 @@ echo -e "done.\n"
 
 [[ $initial -eq 1 ]] && . setup_network.sh $uml_ip $uml_host $uml_fs
 
-# load source and target
+[[ -e $ubdb_dev ]] || create_device $ubdb_dev
+[[ -e $ubdc_dev ]] || create_device $ubdc_dev
+
+# load uml
 echo -n Bring up uml...
 cd linux-${KERNEL_VERSION}
-screen -d -m ./linux ubda=../$uml_fs ubdb=$ubdb_dev ubdc=$ubdc_dev eth0=tuntap,,,$host_tap_ip mem=64M
+screen -d -m ./linux ubda=../$uml_fs ubdb=$ubdb_dev ubdc=$ubdc_dev eth0=tuntap,,,$host_tap_ip mem=64M umid=$uml_host
 cd ..
 echo -e "done.\n"
 sleep 30
