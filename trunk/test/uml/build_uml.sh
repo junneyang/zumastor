@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -x
 # Copyright 2007 Google Inc.
 # Author: Jiaying Zhang <jiayingz@google.com>
 
@@ -8,12 +8,16 @@
 
 dpkg -s uml-utilities >& $LOG || apt-get -y install uml-utilities || exit $?
 
+[[ ! -e $ZUMA_REPOSITORY/build ]] || mkdir $ZUMA_REPOSITORY/build
+
 echo -n Getting kernel sources from kernel.org ...
+pushd $ZUMA_REPOSITORY/build
 wget -c http://www.kernel.org/pub/linux/kernel/v2.6/linux-${KERNEL_VERSION}.tar.bz2 >> $LOG || exit $?
+popd
 echo -e "done.\n"
 
 echo -n Unpacking kernel...
-tar xjf linux-${KERNEL_VERSION}.tar.bz2 || exit 1
+tar xjf $ZUMA_REPOSITORY/build/linux-${KERNEL_VERSION}.tar.bz2 || exit 1
 echo -e "done.\n"
 
 echo Applying patches...
@@ -26,7 +30,7 @@ done
 echo -e "done.\n"
 
 echo -n Building kernel...
-cp ../uml.config-${KERNEL_VERSION} .config
+cp $ZUMA_REPOSITORY/kernel/config/${KERNEL_VERSION}-um-uml .config
 make oldconfig ARCH=um >> $LOG || exit 1
 make linux ARCH=um >> $LOG || exit 1
 cd ..
