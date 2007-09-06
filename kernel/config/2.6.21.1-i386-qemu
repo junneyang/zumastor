@@ -1,7 +1,7 @@
 #
 # Automatically generated make config: don't edit
-# Linux kernel version: 2.6.21.1-zumastor-r648
-# Tue Sep  4 16:45:31 2007
+# Linux kernel version: 2.6.21.1-zumastor-r654
+# Wed Sep  5 17:44:11 2007
 #
 CONFIG_X86_32=y
 CONFIG_GENERIC_TIME=y
@@ -216,7 +216,28 @@ CONFIG_PHYSICAL_ALIGN=0x100000
 #
 # Power management options (ACPI, APM)
 #
-# CONFIG_PM is not set
+CONFIG_PM=y
+# CONFIG_PM_LEGACY is not set
+# CONFIG_PM_DEBUG is not set
+# CONFIG_PM_SYSFS_DEPRECATED is not set
+# CONFIG_SOFTWARE_SUSPEND is not set
+
+#
+# ACPI (Advanced Configuration and Power Interface) Support
+#
+# CONFIG_ACPI is not set
+
+#
+# APM (Advanced Power Management) BIOS Support
+#
+CONFIG_APM=y
+# CONFIG_APM_IGNORE_USER_SUSPEND is not set
+# CONFIG_APM_DO_ENABLE is not set
+# CONFIG_APM_CPU_IDLE is not set
+# CONFIG_APM_DISPLAY_BLANK is not set
+# CONFIG_APM_RTC_IS_GMT is not set
+# CONFIG_APM_ALLOW_INTS is not set
+# CONFIG_APM_REAL_MODE_POWER_OFF is not set
 
 #
 # CPU Frequency scaling
