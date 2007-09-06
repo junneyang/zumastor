@@ -4,6 +4,23 @@
 # Author: Daniel Phillips <phillips@google.com>
 # Licensed under the GNU GPL version 2
 
+### BEGIN INIT INFO
+# Provides:          zumastor
+# Required-Start:    $network
+# Required-Stop:     $network 
+# Should-Start:      lvm $named
+# should-Stop:       lvm $named
+# X-Start-Before:    nfs-kernel-server samba
+# X-Stop-After:      nfs-kernel-server samba
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 6
+# Short-Description: Zumastor Linux Storage Server
+# Description:       Zumastor is a block device used to provide
+#                    enterprise storage features such as atomic snapshots,
+#                    filesystem access to the origin device and snapshots,
+#                    and network replication to backup fileservers.
+### END INIT INFO
+
 . /lib/lsb/init-functions || { echo "$0: unable to load LSB init functions"; exit 1; }
 . /lib/zumastor/common || { echo "$0: unable to load common zumastor functions"; exit 1; }
 . /lib/zumastor/ddfake
