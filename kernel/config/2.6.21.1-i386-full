@@ -265,7 +265,7 @@ CONFIG_ACPI_CONTAINER=m
 #
 # APM (Advanced Power Management) BIOS Support
 #
-# CONFIG_APM is not set
+CONFIG_APM=m
 
 #
 # CPU Frequency scaling
