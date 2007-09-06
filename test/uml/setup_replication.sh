@@ -5,6 +5,11 @@
 . config_uml
 . config_replication
 
+function create_device {
+        dd if=/dev/zero of=$1 count=102400 bs=1024 >& /dev/null
+        [[ $? -eq 0 ]] || { echo "can not create device $1, error $?"; exit -1; }
+}
+
 # build linux uml kernel
 [[ -e linux-${KERNEL_VERSION} ]] || . build_uml.sh
 
@@ -24,17 +29,22 @@ echo -e "done.\n"
 [[ -e $target_uml_fs ]] || cp $source_uml_fs $target_uml_fs
 [[ $initial -eq 1 ]] && . setup_network.sh $target_uml_ip $target_uml_host $target_uml_fs
 
+[[ -e $source_ubdb_dev ]] || create_device $source_ubdb_dev
+[[ -e $source_ubdc_dev ]] || create_device $source_ubdc_dev
+[[ -e $target_ubdb_dev ]] || create_device $target_ubdb_dev
+[[ -e $target_ubdc_dev ]] || create_device $target_ubdc_dev
+
 # load source and target
 echo -n Bring up source uml...
 cd linux-${KERNEL_VERSION}
-screen -d -m ./linux ubda=../$source_uml_fs ubdb=$source_ubdb_dev ubdc=$source_ubdc_dev eth0=tuntap,,,$host_tap_ip mem=64M
+screen -d -m ./linux ubda=../$source_uml_fs ubdb=$source_ubdb_dev ubdc=$source_ubdc_dev eth0=tuntap,,,$host_tap_ip mem=64M umid=$source_uml_host
 cd ..
 echo -e "done.\n"
 sleep 30
 
 echo -n Bring up target uml...
 cd linux-${KERNEL_VERSION}
-screen -d -m ./linux ubda=../$target_uml_fs ubdb=$target_ubdb_dev ubdc=$target_ubdc_dev eth0=tuntap,,,$host_tap_ip mem=64M
+screen -d -m ./linux ubda=../$target_uml_fs ubdb=$target_ubdb_dev ubdc=$target_ubdc_dev eth0=tuntap,,,$host_tap_ip mem=64M umid=$target_uml_host
 cd ..
 echo -e "done.\n"
 sleep 30

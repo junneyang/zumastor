@@ -8,10 +8,10 @@ target_uml_ip=192.168.100.6
 target_uml_host=uml_6
 target_uml_fs=uml_fs6
 
-source_ubdb_dev=/dev/Ubuntu/test-500M
-source_ubdc_dev=/dev/Ubuntu/test-1G
-target_ubdb_dev=/dev/Ubuntu/test2-500M
-target_ubdc_dev=/dev/Ubuntu/test2-1G
+source_ubdb_dev=$PWD/source_ubdb
+source_ubdc_dev=$PWD/source_ubdc
+target_ubdb_dev=$PWD/target_ubdb
+target_ubdc_dev=$PWD/target_ubdc
 
 vol="test"
 hourly_snapnum=3600
