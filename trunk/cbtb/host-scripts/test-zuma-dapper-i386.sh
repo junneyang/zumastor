@@ -14,7 +14,6 @@ set -e
 SSH='ssh -o StrictHostKeyChecking=no'
 SCP='scp -o StrictHostKeyChecking=no'
 CMDTIMEOUT='timeout -14 120'
-SHUTDOWNTIMEOUT='timeout -14 300'
 
 retval=0
 
@@ -138,10 +137,12 @@ if [ "x$IPADDR2" != "x" ] ; then
   sed -i /^${IPADDR2}\ .*\$/d ~/.ssh/known_hosts || true
 fi
 
-${SHUTDOWNTIMEOUT} wait ${qemu_pid} || retval=$?
+time wait ${qemu_pid} || retval=$?
+kill -0 ${qemu_pid} && kill -9 ${qemu_pid}
 
 if [ "x$qemu2_pid" != "x" ] ; then
-  ${SHUTDOWNTIMEOUT} wait ${qemu2_pid} || retval=$?
+  time wait ${qemu2_pid} || retval=$?
+  kill -0 ${qemu2_pid} && kill -9 ${qemu2_pid}
 fi
 
 rm -rf %{tmpdir}

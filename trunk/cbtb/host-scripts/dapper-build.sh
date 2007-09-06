@@ -41,7 +41,6 @@ fi
 SSH='ssh -o StrictHostKeyChecking=no'
 SCP='time timeout -14 1800 scp -o StrictHostKeyChecking=no'
 CMDTIMEOUT='time timeout -14 120'
-SHUTDOWNTIMEOUT='time timeout -14 300'
 BUILDTIMEOUT='time timeout -14 10800'
 SETUPTIMEOUT='time timeout -14 1800'
 WGETTIMEOUT='time timeout -14 3600'
@@ -169,9 +168,14 @@ do
   time ${SETUPTIMEOUT} ${SCP} $f build/ || rc=$?
 done
 
-${CMDTIMEOUT} ${SSH} root@${IPADDR} halt
+# ${CMDTIMEOUT} ${SSH} root@${IPADDR} halt
 
-${SHUTDOWNTIMEOUT} wait $qemu || rc=$?
+socat STDIN UNIX-CONNECT:${MONITOR} <<EOF
+quit
+EOF
+
+time wait $qemu || rc=$?
+kill -0 $qemu && kill -9 $qemu
 
 rm -rf ${tmpdir}
 
