@@ -2,6 +2,6 @@
 
 KERNEL_VERSION=2.6.21.1
 # ZUMA_REPOSITORY is the path of the zumastor code
-ZUMA_REPOSITORY=/root/zumastor
-LOG=/dev/null
+ZUMA_REPOSITORY="${PWD}/../.."
+LOG=/tmp/uml.log
 host_tap_ip=192.168.100.111
