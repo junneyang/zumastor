@@ -13,6 +13,8 @@ set -e
 
 SSH='ssh -o StrictHostKeyChecking=no'
 SCP='scp -o StrictHostKeyChecking=no'
+CMDTIMEOUT='timeout -14 120'
+SHUTDOWNTIMEOUT='timeout -14 300'
 
 retval=0
 
@@ -104,10 +106,16 @@ fi
 # execute any parameters here
 if [ "x${execfiles}" != "x" ]
 then
-  ${SCP} ${execfiles} root@${IPADDR}: </dev/null || true
+  ${CMDTIMEOUT} ${SCP} ${execfiles} root@${IPADDR}: </dev/null || true
   for f in ${execfiles}
   do
-    if ${SSH} root@${IPADDR} ${params} ./${f}
+    timelimit=`awk -F = '/^TIMEOUT=[0-9]+$/' ./${f} | tail -1`
+    if [ "x$timelimit" = "x" ] ; then
+      timeout=""
+    else
+      timeout="timeout -14 $timelimit"
+    fi
+    if ${timeout} ${SSH} root@${IPADDR} ${params} ./${f}
     then
       echo ${f} ok
     else
@@ -118,10 +126,10 @@ then
 fi
 
 
-${SSH} root@${IPADDR} halt
+${CMDTIMEOUT} ${SSH} root@${IPADDR} halt
 
 if [ "x$IPADDR2" != "x" ] ; then
-  ${SSH} root@${IPADDR2} halt
+  ${CMDTIMEOUT} ${SSH} root@${IPADDR2} halt
 fi
 
 
@@ -130,10 +138,10 @@ if [ "x$IPADDR2" != "x" ] ; then
   sed -i /^${IPADDR2}\ .*\$/d ~/.ssh/known_hosts || true
 fi
 
-wait ${qemu_pid} || retval=$?
+${SHUTDOWNTIMEOUT} wait ${qemu_pid} || retval=$?
 
 if [ "x$qemu2_pid" != "x" ] ; then
-  wait ${qemu2_pid} || retval=$?
+  ${SHUTDOWNTIMEOUT} wait ${qemu2_pid} || retval=$?
 fi
 
 rm -rf %{tmpdir}
