@@ -24,6 +24,10 @@ echo -e "done.\n"
 [[ -e $ubdb_dev ]] || create_device $ubdb_dev
 [[ -e $ubdc_dev ]] || create_device $ubdc_dev
 
+# we need to do something special for relative paths
+[[ $ubdb_dev == /* ]] || ubdb_dev=../$ubdb_dev
+[[ $ubdc_dev == /* ]] || ubdc_dev=../$ubdc_dev
+
 # load uml
 echo -n Bring up uml...
 cd linux-${KERNEL_VERSION}
